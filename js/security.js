@@ -120,20 +120,17 @@
             } catch (e) {}
         }
 
-        // فحص دوري خفيف لاستهلاك صفر موارد
+        // تم تعطيل الفحص عبر أبعاد الشاشة لتفادي إعادة التحميل في الشاشات العريضة أو المقاسات المختلفة
+        /*
         setInterval(function () {
-            // فحص عبر أبعاد الشاشة
             const threshold = 160;
             const widthThreshold = window.outerWidth - window.innerWidth > threshold;
             const heightThreshold = window.outerHeight - window.innerHeight > threshold;
             if (widthThreshold || heightThreshold) {
                 handleDevToolsDetected();
             }
-            // فحص عبر التمرير على الكونسول
-            try {
-                console.log(element);
-            } catch (e) {}
-        }, 1500);
+        }, 3000);
+        */
     })();
 
     // 6. منع سحب وإسقاط الصور والنصوص

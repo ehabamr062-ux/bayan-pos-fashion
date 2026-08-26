@@ -99,20 +99,8 @@ if ('serviceWorker' in navigator && window.location.protocol !== 'file:' && !nav
         navigator.serviceWorker.register('service-worker.js')
             .then(reg => {
                 console.log('Service Worker: Registered ✅');
-                // فحص وجود تحديثات جديدة بشكل دوري تلقائي
-                setInterval(() => {
-                    reg.update();
-                }, 1000 * 60 * 30); // كل 30 دقيقة
             })
             .catch(err => console.log('Service Worker: Failed ❌', err));
-    });
-
-    // إعادة تحميل الصفحة فوراً عند تحديث ملفات النظام في الخلفية وتنشيط SW الجديد
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (refreshing) return;
-        refreshing = true;
-        window.location.reload();
     });
 }
 
