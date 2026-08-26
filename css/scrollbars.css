@@ -1,0 +1,372 @@
+/*
+ * ============================================================
+ *  BAYAN POS — Professional Global Scrollbar System
+ *  Version: 2.0 | Target: Electron (Chromium Engine)
+ *  Applies to: ALL DataGrids, Tables, Panels, Modals, Lists
+ *  Width/Height: 16px | Thumb min: 48px | Auto-inherit
+ * ============================================================
+ */
+
+/* -------------------------------------------------------
+   SECTION 0 — Layout Stability & Anti-Jitter Rules (Modern)
+------------------------------------------------------- */
+html, body, .section-view, .table-container, .table-responsive, .table-wrapper, .modal-body, .panel-body, .stmt-table-wrapper, .stmt-main-content, .stmt-split-layout, .stmt-sidebar {
+    scrollbar-gutter: stable;
+    box-sizing: border-box;
+}
+
+/* منع الـ Layout Shift الناتج عن hover أو تحرك العناصر داخل الجداول وحاويات التمرير لقسم كشف الحساب وكافة الجداول */
+.table-container, .table-responsive, .table-wrapper, .data-grid, .stmt-table-wrapper, .stmt-main-content {
+    contain: paint layout;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.table-container table tr, 
+.table-responsive table tr, 
+.table-wrapper table tr,
+.stmt-table-wrapper table tr,
+.stmt-table tr {
+    box-sizing: border-box;
+}
+
+.stmt-table-wrapper {
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    max-width: 100%;
+    scrollbar-gutter: stable;
+}
+
+/* -------------------------------------------------------
+   SECTION 1 — Firefox / Standard CSS Scrollbar (Modern)
+------------------------------------------------------- */
+* {
+    scrollbar-width: auto;
+    scrollbar-color: #64748b #e2e8f0;
+}
+
+body.dark-mode * {
+    scrollbar-color: #475569 #1e293b;
+}
+
+/* -------------------------------------------------------
+   SECTION 2 — Electron / WebKit / Chromium Global Rules
+   These rules apply to EVERY scrollable element
+------------------------------------------------------- */
+
+/* --- Scrollbar Track Size (16×16 px Fixed) --- */
+::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+}
+
+/* --- Track Background (the rail) --- */
+::-webkit-scrollbar-track {
+    background: #e2e8f0;
+    border-radius: 4px;
+}
+
+body.dark-mode ::-webkit-scrollbar-track {
+    background: #1e293b;
+}
+
+/* --- Thumb (the draggable handle) --- */
+::-webkit-scrollbar-thumb {
+    background-color: #64748b;
+    border-radius: 5px;
+    border: 2px solid #e2e8f0;
+    min-height: 48px;
+    min-width: 48px;
+    transition: background-color 0.15s ease;
+}
+
+body.dark-mode ::-webkit-scrollbar-thumb {
+    background-color: #475569;
+    border: 2px solid #1e293b;
+}
+
+/* --- Hover State --- */
+::-webkit-scrollbar-thumb:hover {
+    background-color: #334155;
+}
+
+body.dark-mode ::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* --- Active / Drag State --- */
+::-webkit-scrollbar-thumb:active {
+    background-color: #0f172a;
+}
+
+body.dark-mode ::-webkit-scrollbar-thumb:active {
+    background-color: #cbd5e1;
+}
+
+/* -------------------------------------------------------
+   SECTION 6 — POS Product Search Results Panel (Premium Design)
+------------------------------------------------------- */
+.pos-search-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 680px;
+    max-width: 92vw;
+    max-height: 480px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
+    border: 1px solid #cbd5e1;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin-top: 6px;
+    animation: modalFadeIn 0.2s ease-out;
+}
+
+.pos-search-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.pos-search-body {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+    scrollbar-gutter: stable;
+    padding: 6px;
+}
+
+.pos-search-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 90px 90px 90px 80px;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.pos-search-row:hover {
+    background: #ecfdf5 !important;
+    border-color: #10b981 !important;
+    transform: translateX(-3px);
+}
+
+.pos-search-close-btn {
+    background: #fee2e2;
+    color: #ef4444;
+    border: none;
+    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: 0.2s;
+}
+
+.pos-search-close-btn:hover {
+    background: #fca5a5;
+    color: #991b1b;
+}
+
+/* --- Corner Intersection (where H and V scrollbars meet) --- */
+::-webkit-scrollbar-corner {
+    background: #cbd5e1;
+}
+
+body.dark-mode ::-webkit-scrollbar-corner {
+    background: #0f172a;
+}
+
+/* -------------------------------------------------------
+   SECTION 3 — Tables & DataGrid Specific Overrides
+   Targets every table/grid/container in the app
+------------------------------------------------------- */
+
+/* Common wrapper selectors used in the app */
+.table-container,
+.table-responsive,
+.table-wrapper,
+.bayan-table-wrapper,
+.data-grid,
+.grid-wrapper,
+.section-view,
+.content-area,
+.modal-body,
+.modal-content,
+.panel-body,
+.list-wrapper,
+.accounts-container,
+.inventory-table-wrapper,
+.sales-cart-body,
+.purchase-cart-wrapper,
+.history-wrapper,
+.report-wrapper,
+.trash-wrapper,
+.items-grid,
+.products-grid,
+.price-tracking-wrapper,
+[id$="-section"],
+[id$="TableBody"],
+[id$="Table"],
+[id$="List"],
+[id$="Body"],
+[id$="Cart"],
+[id$="Grid"] {
+    scrollbar-width: auto;
+    scrollbar-color: #64748b #e2e8f0;
+}
+
+body.dark-mode .table-container,
+body.dark-mode .table-responsive,
+body.dark-mode .table-wrapper,
+body.dark-mode .bayan-table-wrapper,
+body.dark-mode .data-grid,
+body.dark-mode .grid-wrapper,
+body.dark-mode .section-view,
+body.dark-mode .modal-body,
+body.dark-mode .modal-content,
+body.dark-mode .panel-body,
+body.dark-mode [id$="-section"],
+body.dark-mode [id$="TableBody"],
+body.dark-mode [id$="Table"] {
+    scrollbar-color: #475569 #1e293b;
+}
+
+/* WebKit specifics for all table/grid containers */
+.table-container::-webkit-scrollbar,
+.table-responsive::-webkit-scrollbar,
+.table-wrapper::-webkit-scrollbar,
+.bayan-table-wrapper::-webkit-scrollbar,
+.data-grid::-webkit-scrollbar,
+.grid-wrapper::-webkit-scrollbar,
+.section-view::-webkit-scrollbar,
+.content-area::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.panel-body::-webkit-scrollbar,
+.list-wrapper::-webkit-scrollbar,
+.items-grid::-webkit-scrollbar,
+.products-grid::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+}
+
+/* Track for table containers */
+.table-container::-webkit-scrollbar-track,
+.table-responsive::-webkit-scrollbar-track,
+.bayan-table-wrapper::-webkit-scrollbar-track,
+.data-grid::-webkit-scrollbar-track,
+.section-view::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track {
+    background: #e8ecf0;
+    border-radius: 4px;
+}
+
+body.dark-mode .table-container::-webkit-scrollbar-track,
+body.dark-mode .table-responsive::-webkit-scrollbar-track,
+body.dark-mode .bayan-table-wrapper::-webkit-scrollbar-track,
+body.dark-mode .data-grid::-webkit-scrollbar-track,
+body.dark-mode .section-view::-webkit-scrollbar-track,
+body.dark-mode .modal-body::-webkit-scrollbar-track {
+    background: #1e293b;
+}
+
+/* Thumb for table containers — high contrast, easy grab */
+.table-container::-webkit-scrollbar-thumb,
+.table-responsive::-webkit-scrollbar-thumb,
+.bayan-table-wrapper::-webkit-scrollbar-thumb,
+.data-grid::-webkit-scrollbar-thumb,
+.section-view::-webkit-scrollbar-thumb,
+.content-area::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.panel-body::-webkit-scrollbar-thumb,
+.list-wrapper::-webkit-scrollbar-thumb,
+.items-grid::-webkit-scrollbar-thumb,
+.products-grid::-webkit-scrollbar-thumb {
+    background-color: #4b5563;
+    border-radius: 5px;
+    border: 2px solid #e8ecf0;
+    min-height: 48px;
+    min-width: 48px;
+}
+
+body.dark-mode .table-container::-webkit-scrollbar-thumb,
+body.dark-mode .table-responsive::-webkit-scrollbar-thumb,
+body.dark-mode .bayan-table-wrapper::-webkit-scrollbar-thumb,
+body.dark-mode .data-grid::-webkit-scrollbar-thumb,
+body.dark-mode .section-view::-webkit-scrollbar-thumb,
+body.dark-mode .modal-body::-webkit-scrollbar-thumb {
+    background-color: #475569;
+    border: 2px solid #1e293b;
+}
+
+/* Hover for table container thumbs */
+.table-container::-webkit-scrollbar-thumb:hover,
+.table-responsive::-webkit-scrollbar-thumb:hover,
+.bayan-table-wrapper::-webkit-scrollbar-thumb:hover,
+.data-grid::-webkit-scrollbar-thumb:hover,
+.section-view::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover,
+.list-wrapper::-webkit-scrollbar-thumb:hover {
+    background-color: #1e293b;
+}
+
+body.dark-mode .table-container::-webkit-scrollbar-thumb:hover,
+body.dark-mode .section-view::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* Active/Drag for table thumbs */
+.table-container::-webkit-scrollbar-thumb:active,
+.table-responsive::-webkit-scrollbar-thumb:active,
+.section-view::-webkit-scrollbar-thumb:active,
+.modal-body::-webkit-scrollbar-thumb:active {
+    background-color: #0f172a;
+}
+
+/* Corner for table containers */
+.table-container::-webkit-scrollbar-corner,
+.table-responsive::-webkit-scrollbar-corner,
+.bayan-table-wrapper::-webkit-scrollbar-corner,
+.section-view::-webkit-scrollbar-corner {
+    background: #dde1e7;
+}
+
+body.dark-mode .table-container::-webkit-scrollbar-corner,
+body.dark-mode .section-view::-webkit-scrollbar-corner {
+    background: #0f172a;
+}
+
+/* -------------------------------------------------------
+   SECTION 4 — Universal Modals & Container Scroll Fixes
+------------------------------------------------------- */
+.modal-overlay {
+    box-sizing: border-box;
+}
+
+.modal-overlay .login-box,
+.modal-overlay .modal-dialog,
+.modal-overlay .modal-content {
+    max-height: calc(92vh);
+    box-sizing: border-box;
+}
+
+.modal-body {
+    overflow-y: auto;
+    overflow-x: auto;
+    scrollbar-gutter: stable;
+    max-height: calc(80vh);
+    box-sizing: border-box;
+}

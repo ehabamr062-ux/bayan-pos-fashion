@@ -1,0 +1,48 @@
+{
+    "name": "Bayan POS - نظام بيان لإدارة نقاط البيع",
+    "short_name": "Bayan POS",
+    "version": "1.0.1",
+    "description": "نظام بيان الذكي لإدارة المبيعات، الحسابات، والمخازن - يعمل أوفلاين 100%",
+    "start_url": "./index.html",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#0f172a",
+    "theme_color": "#d4af37",
+    "lang": "ar",
+    "dir": "rtl",
+    "icons": [
+        {
+            "src": "media/logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "media/bayan_logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": [
+        "finance",
+        "business",
+        "productivity"
+    ],
+    "shortcuts": [
+        {
+            "name": "نقطة البيع",
+            "short_name": "كاشير",
+            "description": "فتح شاشة المبيعات مباشرة",
+            "url": "./index.html#sales",
+            "icons": [
+                {
+                    "src": "media/logo.png",
+                    "sizes": "512x512"
+                }
+            ]
+        }
+    ],
+    "prefer_related_applications": false
+}

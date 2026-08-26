@@ -1,0 +1,138 @@
+/* premium.css - Bayan POS Ultimate Glassmorphism & Animations Upgrade */
+
+:root {
+    --glass-bg: rgba(255, 255, 255, 0.94);
+    --glass-border: rgba(255, 255, 255, 0.5);
+    --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+    --neon-green: #00ff88;
+    --neon-blue: #00e1ff;
+}
+
+/* Enable smooth dark/light mode toggle fade */
+body {
+    transition: background 0.4s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+body.dark-mode {
+    --glass-bg: rgba(15, 23, 42, 0.95);
+    --glass-border: rgba(255, 255, 255, 0.06);
+    --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+    background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #020617 100%) !important;
+    background-attachment: fixed !important;
+    color: #e2e8f0 !important;
+}
+
+body:not(.dark-mode) {
+    background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
+    background-attachment: fixed;
+}
+
+/* Base Glassmorphism for Panels */
+.dashboard-card, .stat-card, .invoice-panel, .panel, .sidebar, .top-nav {
+    background: var(--glass-bg) !important;
+    /* backdrop-filter: blur(10px); — disabled */
+    border: 1px solid var(--glass-border) !important;
+    box-shadow: var(--glass-shadow) !important;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* Hover effects for Cards */
+.dashboard-card:hover, .stat-card:hover {
+    transform: translateY(-5px) scale(1.02);
+    box-shadow: 0 15px 35px rgba(0,0,0,0.1) !important;
+}
+
+body.dark-mode .dashboard-card:hover {
+    box-shadow: 0 15px 40px rgba(99, 102, 241, 0.15) !important;
+    border-color: rgba(99, 102, 241, 0.25) !important;
+}
+
+/* Inputs & Selects */
+input, select, textarea {
+    background: rgba(255, 255, 255, 0.45) !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    /* backdrop-filter disabled */
+    transition: all 0.25s ease-in-out;
+}
+input:focus, select:focus, textarea:focus {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+    transform: translateY(-1px);
+}
+
+body.dark-mode input, body.dark-mode select, body.dark-mode textarea {
+    background: rgba(15, 23, 42, 0.4) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    color: #f1f5f9 !important;
+}
+body.dark-mode input:focus, body.dark-mode select:focus, body.dark-mode textarea:focus {
+    background: rgba(15, 23, 42, 0.7) !important;
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3) !important;
+}
+
+/* Premium Buttons */
+button, .btn {
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease !important;
+}
+button::after, .btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 300%;
+    height: 300%;
+    background: rgba(255, 255, 255, 0.1);
+    transform: translate(-50%, -50%) rotate(45deg) translateY(100%);
+    transition: transform 0.5s ease;
+}
+button:hover::after, .btn:hover::after {
+    transform: translate(-50%, -50%) rotate(45deg) translateY(-100%);
+}
+button:active, .btn:active {
+    transform: scale(0.95);
+}
+
+/* Tables */
+.table-container {
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+table th {
+    background: rgba(0,0,0,0.03) !important;
+    /* backdrop-filter disabled */
+}
+body.dark-mode table th {
+    background: rgba(255,255,255,0.05) !important;
+}
+table tr {
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+table tbody tr:hover {
+    background: rgba(16, 185, 129, 0.05) !important;
+}
+body.dark-mode table tbody tr:hover {
+    background: rgba(99, 102, 241, 0.15) !important;
+}
+
+/* Modals */
+.modal-content, .modal-glass-body {
+    background: var(--glass-bg) !important;
+    /* backdrop-filter disabled */
+    border: 1px solid var(--glass-border) !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+    animation: modalPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes modalPop {
+    0% { transform: scale(0.8) translateY(20px); opacity: 0; }
+    100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* =======================================================
+   ⚠️  Scrollbar rules removed from this file.
+   All scrollbar styles are now in: css/scrollbars.css
+   ======================================================= */

@@ -1,0 +1,674 @@
+/* ==========================================
+   💰 CSS قسم مراجعة الخزينة (Treasury Audit)
+   شامل التصميم الداكن الملكي الفاخر جداً والأنيميشن التفاعلي
+   ========================================== */
+
+.treasury-container {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 22px 22px 90px 22px;
+    background: radial-gradient(circle at top right, #0f1c3f, #091024 80%);
+    color: #f8fafc;
+    min-height: 100vh;
+    width: 100%;
+    font-family: 'Cairo', sans-serif;
+    box-sizing: border-box;
+}
+
+/* --- 1. كروت الإحصائيات العلوية الفاخرة --- */
+.treasury-top-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.tr-stat-card {
+    border-radius: 20px;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 110px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(10px);
+}
+
+.tr-stat-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.tr-stat-card:hover::before {
+    opacity: 1;
+}
+
+.tr-stat-card:hover {
+    transform: translateY(-5px) scale(1.01);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+}
+
+.tr-stat-card .card-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    letter-spacing: 0.3px;
+}
+
+.tr-stat-card .card-value {
+    font-size: 2.1rem;
+    font-weight: 900;
+    color: #ffffff;
+    text-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+    margin-top: 10px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.tr-stat-card .card-subtext {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.8);
+    margin-top: 4px;
+    font-weight: 700;
+}
+
+/* الألوان الزاهية جداً والفاخرة للكروت */
+.tr-card-red {
+    background: linear-gradient(135deg, #ef4444, #991b1b);
+    border: 1px solid rgba(239, 68, 68, 0.6);
+}
+
+.tr-card-green {
+    background: linear-gradient(135deg, #10b981, #065f46);
+    border: 1px solid rgba(16, 185, 129, 0.6);
+}
+
+.tr-card-blue {
+    background: linear-gradient(135deg, #3b82f6, #1e40af);
+    border: 1px solid rgba(59, 130, 246, 0.6);
+}
+
+.tr-card-orange {
+    background: linear-gradient(135deg, #f59e0b, #b45309);
+    border: 1px solid rgba(245, 158, 11, 0.6);
+}
+
+.tr-card-cyan {
+    background: linear-gradient(135deg, #06b6d4, #0e7490);
+    border: 1px solid rgba(6, 182, 212, 0.6);
+}
+
+.tr-card-purple {
+    background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+    border: 1px solid rgba(139, 92, 246, 0.6);
+}
+
+/* --- 2. الجزء الأوسط: الملخص المالي ونموذج الإدخال الموحد --- */
+.treasury-main-grid {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 22px;
+}
+
+@media (max-width: 1100px) {
+    .treasury-main-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* لوحة الملخص المالي السريع الجانبية */
+.treasury-sidebar-summary {
+    background: #111d3d;
+    border: 1.5px solid #233766;
+    border-radius: 22px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+
+.tr-summary-header {
+    font-size: 1.15rem;
+    font-weight: 900;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #1e2e57;
+}
+
+.tr-summary-item {
+    background: #17264e;
+    border-radius: 14px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid #283e73;
+    transition: transform 0.2s ease;
+}
+
+.tr-summary-item:hover {
+    transform: translateX(-3px);
+    background: #1e3163;
+}
+
+.tr-summary-item .label {
+    font-size: 0.9rem;
+    color: #cbd5e1;
+    font-weight: 800;
+}
+
+.tr-summary-item .val {
+    font-size: 1.3rem;
+    font-weight: 900;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* نموذج إضافة عملية جديدة الموحد والمتناسق */
+.treasury-form-box {
+    background: #111d3d;
+    border: 1.5px solid #233766;
+    border-radius: 22px;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+
+.tr-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #1e2e57;
+}
+
+.tr-form-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* صف حقول النموذج الأفقية بتصميم موحد رائع ومتطابق تماماً */
+.tr-form-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+@media (max-width: 1024px) {
+    .tr-form-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.tr-col-jump, .tr-col-date, .tr-col-cat, .tr-col-notes {
+    grid-column: span 1;
+}
+
+.tr-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.tr-field-group label {
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tr-input, .tr-select {
+    background: #091124;
+    border: 1.5px solid #283e70;
+    border-radius: 14px;
+    padding: 12px 16px;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 800;
+    outline: none;
+    height: 48px;
+    box-sizing: border-box;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+/* 📅 توحيد مربع التاريخ تماماً مع مربع البند والقفز السريع */
+#trDate {
+    height: 48px !important;
+    padding: 10px 14px !important;
+    font-family: inherit !important;
+    font-size: 0.95rem !important;
+    font-weight: 800 !important;
+    display: flex;
+    align-items: center;
+}
+
+.tr-input::placeholder {
+    color: #cbd5e1 !important;
+    font-weight: 700;
+    opacity: 1 !important;
+}
+
+.tr-input:focus, .tr-select:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.3), inset 0 2px 6px rgba(0, 0, 0, 0.5);
+    background: #0f1c3f;
+}
+
+/* مربعات مبالغ فوق وتحت المستطيلة الفاخرة */
+.tr-amount-boxes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 5px;
+}
+
+.tr-amount-card {
+    background: #091124;
+    border-radius: 18px;
+    padding: 18px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.tr-amount-card:hover {
+    transform: translateY(-3px);
+}
+
+.tr-amount-card.top-box {
+    border: 2px solid #10b981;
+    box-shadow: 0 10px 25px rgba(16, 185, 129, 0.25), inset 0 0 20px rgba(0, 0, 0, 0.6);
+}
+
+.tr-amount-card.bottom-box {
+    border: 2px solid #ef4444;
+    box-shadow: 0 10px 25px rgba(239, 68, 68, 0.25), inset 0 0 20px rgba(0, 0, 0, 0.6);
+}
+
+.tr-amount-card .lbl {
+    font-size: 0.95rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tr-amount-card.top-box .lbl { color: #34d399; }
+.tr-amount-card.bottom-box .lbl { color: #f87171; }
+
+.tr-amount-input {
+    background: transparent;
+    border: none;
+    color: #ffffff;
+    font-size: 2rem;
+    font-weight: 900;
+    outline: none;
+    text-align: right;
+    width: 100%;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* أزرار الحفظ والتنظيف الأنيقة */
+.tr-action-btns {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 5px;
+}
+
+.tr-btn-submit {
+    flex: 1;
+    background: linear-gradient(135deg, #10b981, #059669);
+    border: none;
+    border-radius: 16px;
+    padding: 15px 24px;
+    color: white;
+    font-size: 1.15rem;
+    font-weight: 900;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tr-btn-submit:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 30px rgba(16, 185, 129, 0.6);
+    background: linear-gradient(135deg, #34d399, #059669);
+}
+
+.tr-btn-submit:active {
+    transform: scale(0.98);
+}
+
+.tr-btn-clear {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    border: none;
+    border-radius: 16px;
+    width: 54px;
+    height: 54px;
+    color: white;
+    font-size: 1.4rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.4);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tr-btn-clear:hover {
+    transform: scale(1.08);
+    box-shadow: 0 12px 25px rgba(239, 68, 68, 0.6);
+}
+
+/* --- 3. تخطيط القسم السفلي: جدول سجل العمليات الشامل --- */
+.treasury-bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 22px;
+    width: 100%;
+}
+
+/* جدول سجل العمليات اليومية المميز */
+.tr-table-wrapper {
+    background: #111d3d;
+    border: 1.5px solid #233766;
+    border-radius: 22px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+}
+
+.tr-table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.tr-table-title {
+    font-size: 1.3rem;
+    font-weight: 900;
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tr-table-search {
+    background: #182852;
+    border: 1.5px solid #2b447a;
+    border-radius: 30px;
+    padding: 10px 22px;
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 700;
+    width: 270px;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.tr-table-search:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+    background: #1e3369;
+}
+
+.tr-table-container {
+    overflow-x: hidden;
+    width: 100%;
+    border-radius: 16px;
+    border: 1.5px solid #233766;
+    box-shadow: inset 0 0 15px rgba(0,0,0,0.2);
+}
+
+.tr-table {
+    width: 100%;
+    table-layout: auto;
+    border-collapse: collapse;
+    text-align: center;
+    font-size: 0.92rem;
+}
+
+.tr-table th {
+    background: #182852;
+    color: #94a3b8;
+    font-weight: 900;
+    padding: 14px 10px;
+    border-bottom: 2px solid #283e73;
+    white-space: normal;
+    font-size: 0.95rem;
+}
+
+.tr-table td {
+    padding: 14px 10px;
+    border-bottom: 1px solid #1e2e57;
+    color: #e2e8f0;
+    font-weight: 700;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.tr-table tbody tr {
+    transition: background 0.2s ease;
+}
+
+/* 🟢 تأثير الوقوف على صف السجل باللون الأخضر الهادئ دون أي لون أبيض */
+.tr-table tbody tr:hover {
+    background: rgba(16, 185, 129, 0.22) !important;
+}
+
+.tr-table tbody tr:hover td {
+    color: #6ee7b7 !important;
+}
+
+/* ملخص إجماليات الفئات أسفل الجدول */
+.tr-table-totals {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    background: linear-gradient(135deg, #182852, #1f356b);
+    border-radius: 16px;
+    padding: 16px 20px;
+    border: 1.5px solid #283e73;
+    margin-top: 5px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+}
+
+.tr-total-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #cbd5e1;
+}
+
+.tr-total-box .num {
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: #38bdf8;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ========================================================
+   ☀️ 🌙 دعم الوضع الفاتح والداكن الفاخر لقسم مراجعة الخزينة
+   ======================================================== */
+
+/* --- ☀️ 1. الوضع الفاتح (Light Mode) --- */
+body.light-mode .treasury-container {
+    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+    color: #1e293b;
+}
+
+body.light-mode .treasury-sidebar-summary,
+body.light-mode .treasury-form-box,
+body.light-mode .tr-table-wrapper {
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.06);
+}
+
+body.light-mode .tr-form-header,
+body.light-mode .tr-summary-header,
+body.light-mode .tr-table-title {
+    color: #0284c7;
+    border-bottom-color: #e2e8f0;
+}
+
+body.light-mode .tr-summary-item {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+body.light-mode .tr-summary-item .label {
+    color: #475569;
+}
+
+body.light-mode .tr-field-group label {
+    color: #475569;
+}
+
+body.light-mode .tr-input,
+body.light-mode .tr-select {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .tr-input:focus,
+body.light-mode .tr-select:focus {
+    border-color: #0284c7;
+    box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+    background: #ffffff;
+}
+
+body.light-mode .tr-amount-card {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+body.light-mode .tr-amount-card.top-box {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+}
+
+body.light-mode .tr-amount-card.bottom-box {
+    background: #fef2f2;
+    border-color: #fecaca;
+}
+
+body.light-mode .tr-amount-card.top-box .lbl { color: #059669; }
+body.light-mode .tr-amount-card.bottom-box .lbl { color: #dc2626; }
+
+body.light-mode .tr-amount-input {
+    color: #0f172a !important;
+}
+
+body.light-mode .tr-amount-input::placeholder {
+    color: #94a3b8;
+}
+
+body.light-mode .tr-table-container {
+    border-color: #cbd5e1;
+}
+
+body.light-mode .tr-table th {
+    background: #e2e8f0;
+    color: #334155;
+    border-bottom-color: #cbd5e1;
+}
+
+body.light-mode .tr-table td {
+    color: #1e293b;
+    border-bottom-color: #f1f5f9;
+}
+
+body.light-mode .tr-table tbody tr:hover {
+    background: rgba(16, 185, 129, 0.15) !important;
+}
+
+body.light-mode .tr-table tbody tr:hover td {
+    color: #047857 !important;
+}
+
+body.light-mode .tr-table-search {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .tr-table-search:focus {
+    border-color: #0284c7;
+    box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+body.light-mode .tr-table-totals {
+    background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+    border-color: #94a3b8;
+}
+
+body.light-mode .tr-total-box {
+    color: #334155;
+}
+
+body.light-mode .tr-total-box .num {
+    color: #0284c7;
+}
+
+/* --- 🌙 2. تأكيد وتثبيت الوضع الداكن (Dark Mode) --- */
+body.dark-mode .treasury-container {
+    background: radial-gradient(circle at top right, #0f1c3f, #091024 80%);
+    color: #f8fafc;
+}
+
+body.dark-mode .treasury-sidebar-summary,
+body.dark-mode .treasury-form-box,
+body.dark-mode .tr-table-wrapper {
+    background: #111d3d;
+    border: 1.5px solid #233766;
+}
+
+body.dark-mode .tr-table tbody tr:hover {
+    background: rgba(16, 185, 129, 0.22) !important;
+}
+
+body.dark-mode .tr-table tbody tr:hover td {
+    color: #6ee7b7 !important;
+}

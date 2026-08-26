@@ -1,0 +1,22 @@
+/* ============================================================
+   🎨 الخطوط المحلية ونظام الطباعة الفوري دون إنترنت
+   Cairo Font System & Offline Arabic Fallbacks
+   ============================================================ */
+
+@font-face {
+    font-family: 'Cairo';
+    font-style: normal;
+    font-weight: 400 900;
+    font-display: swap;
+    src: local('Cairo'), 
+         local('Cairo-Regular'), 
+         local('Cairo-Bold'), 
+         local('Segoe UI'), 
+         local('Tahoma'), 
+         local('Arial');
+}
+
+/* تطبيق الخط كافتراضي للنظام بالكامل مع بدائل النظام فائقة السرعة */
+html, body, button, input, select, textarea, table, .modal {
+    font-family: 'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+}
