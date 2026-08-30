@@ -1,7 +1,7 @@
 /**
- * Bayan POS - Store Manager (100% IndexedDB Powered)
- * نظام إدارة الإعدادات والبيانات في الذاكرة ومزامنتها لحظياً مع IndexedDB (Dexie)
- * استبدالاً كاملاً لـ localStorage بدون أي اعتماد على مساحة المتصفح المؤقتة.
+ * Bayan POS - Store Manager
+ * نظام وسيط لإدارة الإعدادات والبيانات الخفيفة في الذاكرة ومزامنتها مع IndexedDB (Dexie)
+ * استبدالاً لـ localStorage لتحسين الأداء وتوحيد قاعدة البيانات.
  */
 
 window.AppStore = {};
@@ -9,7 +9,7 @@ window.bayanDB = null;
 
 // دالة التهيئة الأولية (تستدعى مرة واحدة عند بدء التطبيق)
 async function initAppStore() {
-    console.log("🔄 جاري تهيئة نظام Store المرتبط بـ IndexedDB...");
+    console.log("🔄 جاري تهيئة نظام Store...");
     
     // ضمان وجود الداتابيز أو إنشائها وتوحيد المرجع مع window.db
     if (typeof window.db !== 'undefined' && window.db) {
@@ -44,46 +44,31 @@ async function initAppStore() {
             let hasMigrated = false;
 
             allSettings.forEach(item => {
-                let parsedVal = item.value;
-                if (typeof item.value === 'string' && (item.value.startsWith('{') || item.value.startsWith('['))) {
-                    try {
-                        parsedVal = JSON.parse(item.value);
-                    } catch(e) {
-                        parsedVal = item.value;
-                    }
-                }
-                window.AppStore[item.id] = parsedVal;
+                window.AppStore[item.id] = item.value;
             });
 
-            // عملية التهجير الشامل (Migration) من localStorage إلى IndexedDB لمرة واحدة
-            if (typeof localStorage !== 'undefined' && Object.keys(localStorage).length > 0) {
-                console.log("📦 يتم الآن نقل البيانات المتبقية من localStorage إلى IndexedDB...");
+            // عملية التهجير (Migration) من localStorage إلى IndexedDB لمرة واحدة
+            if (Object.keys(localStorage).length > 0) {
+                console.log("📦 يتم الآن نقل البيانات من localStorage إلى IndexedDB...");
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
-                    const rawVal = localStorage.getItem(key);
-                    let valToSave = rawVal;
-                    if (typeof rawVal === 'string' && (rawVal.startsWith('{') || rawVal.startsWith('['))) {
-                        try { valToSave = JSON.parse(rawVal); } catch(e) { valToSave = rawVal; }
-                    }
+                    const value = localStorage.getItem(key);
                     
-                    window.AppStore[key] = valToSave; // إضافتها للذاكرة
+                    window.AppStore[key] = value; // إضافتها للذاكرة
                     
                     // حفظها في IndexedDB
-                    await window.bayanDB.settings.put({ 
-                        id: key, 
-                        value: typeof valToSave === 'object' ? JSON.stringify(valToSave) : String(valToSave) 
-                    });
+                    await window.bayanDB.settings.put({ id: key, value: value });
                     hasMigrated = true;
                 }
                 
-                // تنظيف localStorage بعد التهجير لتوفير المساحة ومنع استخدامه نهائياً
+                // تنظيف localStorage بعد التهجير لتوفير المساحة
                 if (hasMigrated) {
                     localStorage.clear();
-                    console.log("✅ تم تفريغ وحذف localStorage بالكامل.");
+                    console.log("✅ تم تفريغ localStorage بنجاح.");
                 }
             }
 
-            console.log("✅ تم تجهيز الـ Store بنجاح من IndexedDB:", Object.keys(window.AppStore).length, "عنصر محمل.");
+            console.log("✅ تم تجهيز الـ Store بنجاح:", Object.keys(window.AppStore).length, "عنصر محمل.");
         } catch (error) {
             console.error("❌ خطأ أثناء تهيئة الـ Store أو تهجير البيانات:", error);
         }
@@ -92,72 +77,35 @@ async function initAppStore() {
     }
 }
 
-// دالة قراءة (متزامنة فائقة السرعة من الذاكرة)
+// دالة قراءة (متزامنة)
 function getStore(key) {
-    if (!key) return null;
-    if (window.AppStore.hasOwnProperty(key)) {
-        const val = window.AppStore[key];
-        // إذا كانت القيمة نصية مصفوفة أو كائن بصيغة JSON نرجعها كما هي لضمان التوافق التام
-        if (typeof val === 'object' && val !== null) {
-            return JSON.stringify(val);
-        }
-        return val;
-    }
-    return null;
+    return window.AppStore.hasOwnProperty(key) ? window.AppStore[key] : null;
 }
 
-// دالة قراءة كائن مفكك مباشرة (Parsed Object/Array)
-function getStoreObject(key, defaultValue = null) {
-    if (!key || !window.AppStore.hasOwnProperty(key)) return defaultValue;
-    const val = window.AppStore[key];
-    if (typeof val === 'object' && val !== null) return val;
-    if (typeof val === 'string') {
-        try { return JSON.parse(val); } catch(e) { return defaultValue; }
-    }
-    return val !== undefined ? val : defaultValue;
-}
-
-// دالة كتابة (تحفظ في الذاكرة فوراً وتحدث IndexedDB لحظياً)
+// دالة كتابة (تحفظ في الذاكرة فوراً وفي IndexedDB في الخلفية)
 function setStore(key, value) {
-    if (!key) return;
+    // 1. التحديث اللحظي في الذاكرة لضمان سرعة الواجهة
+    window.AppStore[key] = value;
     
-    let storedVal = value;
-    let dbValue = value;
-
-    if (typeof value === 'object' && value !== null) {
-        dbValue = JSON.stringify(value);
-        storedVal = value;
-    } else {
-        dbValue = String(value);
-        if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
-            try { storedVal = JSON.parse(value); } catch(e) { storedVal = value; }
-        }
-    }
-
-    // 1. التحديث اللحظي في الذاكرة لسرعة 0ms للواجهات
-    window.AppStore[key] = storedVal;
-    
-    // 2. الحفظ في IndexedDB مباشرة
+    // 2. الحفظ غير المتزامن في القاعدة
     if (window.bayanDB) {
-        window.bayanDB.settings.put({ id: key, value: dbValue }).catch(err => {
-            console.error(`❌ خطأ في حفظ الإعداد في IndexedDB [${key}]:`, err);
+        window.bayanDB.settings.put({ id: key, value: String(value) }).catch(err => {
+            console.error(`❌ خطأ في حفظ الإعداد [${key}]:`, err);
         });
     }
 }
 
 // دالة مسح إعداد
 function removeStore(key) {
-    if (!key) return;
-    
     // 1. المسح من الذاكرة
     if (window.AppStore.hasOwnProperty(key)) {
         delete window.AppStore[key];
     }
     
-    // 2. المسح من IndexedDB
+    // 2. المسح من القاعدة
     if (window.bayanDB) {
         window.bayanDB.settings.delete(key).catch(err => {
-            console.error(`❌ خطأ في حذف الإعداد من IndexedDB [${key}]:`, err);
+            console.error(`❌ خطأ في حذف الإعداد [${key}]:`, err);
         });
     }
 }
@@ -168,17 +116,9 @@ async function clearStore() {
     if (window.bayanDB) {
         try {
             await window.bayanDB.settings.clear();
-            console.log("🗑️ تم مسح كافة الإعدادات من IndexedDB بنجاح.");
+            console.log("🗑️ تم مسح كافة الإعدادات بنجاح.");
         } catch (error) {
-            console.error("❌ خطأ في مسح الإعدادات من IndexedDB:", error);
+            console.error("❌ خطأ في مسح الإعدادات:", error);
         }
     }
 }
-
-// توفير وصول عام للدوال
-window.initAppStore = initAppStore;
-window.getStore = getStore;
-window.getStoreObject = getStoreObject;
-window.setStore = setStore;
-window.removeStore = removeStore;
-window.clearStore = clearStore;

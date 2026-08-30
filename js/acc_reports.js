@@ -1984,52 +1984,9 @@
 
         }
 
-        // ================= إدارة المستخدمين والصلاحيات =================
-
-        /**
-
-         * دالة مزامنة المستخدمين مع سحابة بَيَان (Supabase)
-
-         */
-
+        // حفظ وإدارة المستخدمين محلياً 100%
         async function syncUsersToCloud() {
-
-            if (!supabaseClient) return;
-
-            try {
-
-                // ملاحظة: هذا يتطلب جدول 'pos_users' في قاعدة بيانات Supabase مع تفعيل صلاحيات RLS
-
-                const { data, error } = await supabaseClient
-
-                    .from('pos_users')
-
-                    .upsert(users.map(u => ({
-
-                        id: String(u.id),
-
-                        name: u.name,
-
-                        pin: u.pin,
-
-                        role: u.role,
-
-                        permissions: JSON.stringify(u.permissions),
-
-                        updated_at: new Date()
-
-                    })));
-
-                if (error) console.warn("📡 خطأ في مزامنة السحابة:", error.message);
-
-                else console.log("📡 تمت المزامنة السحابية بنجاح ✅");
-
-            } catch (err) {
-
-                console.error("📡 فشل الاتصال بالسحابة:", err);
-
-            }
-
+            // معطل ومحلي 100%
         }
 
         // ================= دوال إدارة المخازن (Warehouses) =================

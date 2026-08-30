@@ -63,13 +63,11 @@
         // فتح رابط خارجي بأمان عبر IPC (Electron) أو متصفح عادي
         function openExternalUrl(url) {
             try {
-                // الطريقة الأولى: ipcRenderer (الأسرع والأكثر أماناً مع main.js الحالي)
                 if (window.require) {
                     const { ipcRenderer } = window.require('electron');
                     if (ipcRenderer) { ipcRenderer.invoke('open-url', url); return; }
                 }
             } catch(e) {}
-            // الطريقة الاحتياطية: فتح في المتصفح الافتراضي
             window.open(url, '_blank');
         }
 
@@ -77,7 +75,6 @@
         function copyText(text, btn) {
             navigator.clipboard.writeText(text).then(() => {
                 const originalHTML = btn.innerHTML;
-                // تبديل للأيقونة "صح" مع تغيير اللون لأخضر
                 btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: white;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
                 btn.style.background = "#27ae60";
                 btn.style.borderColor = "#27ae60";
@@ -103,23 +100,32 @@
                 timestamp: new Date().toISOString(),
                 user: currentUser ? currentUser.name : 'System',
                 userId: currentUser ? currentUser.id : 0,
-                action: action, // e.g., 'DELETE_TRANSACTION', 'EDIT_USER'
+                action: action,
                 details: details,
                 warehouse: currentUser ? currentUser.warehouseName : 'Unknown'
             };
             auditLogs.push(entry);
             console.log(`🛡️ Audit Log: ${action}`, entry);
-            saveData(); // حفظ السجلات فورياً
+            saveData();
         }
-        let returnCart = []; // سلة مرتجع البيع
-        let purReturnCart = []; // سلة مرتجع الشراء
-        let currentAnalysisMode = 'detailed'; // وضع تحليل المبيعات (تفصيلي/تجميعي)
+        let returnCart = [];
+        let purReturnCart = [];
+        let currentAnalysisMode = 'detailed';
+
         function updateDatalists() {
             fillDatalist('discountReason', discountReasons);
             fillDatalist('taxReason', taxReasons);
             fillDatalist('purchaseDiscountReason', purchaseDiscountReasons);
             fillDatalist('purchaseTaxReason', purchaseTaxReasons);
             fillDatalist('categoriesList', window.inventoryCategories);
+
+            // تحديث قائمة الماركات
+            const brands = [...new Set((typeof productsDB !== 'undefined' ? productsDB : []).map(p => p.brand).filter(Boolean))];
+            fillDatalist('brandsList', brands);
+
+            // تحديث قائمة الموردين
+            const suppliers = (typeof accounts !== 'undefined' ? accounts : []).filter(a => a.type === 'supplier').map(a => a.name);
+            fillDatalist('suppliersDatalist', suppliers);
         }
 
         function fillDatalist(listId, array) {
@@ -127,7 +133,6 @@
             if (!list) return;
             list.innerHTML = '';
 
-            // إذا كان العنصر select، نضيف خيار "اختر" أولاً
             if (list.tagName === 'SELECT') {
                 const emptyOpt = document.createElement('option');
                 emptyOpt.value = '';
@@ -135,7 +140,7 @@
                 list.appendChild(emptyOpt);
             }
 
-            array.forEach(item => {
+            (array || []).forEach(item => {
                 const opt = document.createElement('option');
                 opt.value = item;
                 if (list.tagName === 'SELECT') opt.innerText = item;
@@ -378,10 +383,22 @@
                 return diffDays > 30;
             });
 
-            const total = lowStockItems.length + expiringItems.length + debtAccounts.length + delayedAccounts.length;
+            // أذونات التحويل المخزني المعلقة الواردة لهذا المخزن
+            const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+            const allPendingTransfers = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+                ? transactions.filter(t => t.type && t.type.includes('تحويل') && t.transferStatus === 'pending' && (t.warehouse === activeWH || t.toWarehouse === activeWH))
+                : [];
+            const pendingTransferInvoices = {};
+            allPendingTransfers.forEach(t => {
+                const invId = t.invoiceId || 'TR-UNKNOWN';
+                pendingTransferInvoices[invId] = true;
+            });
+            const activeTransfersCount = Object.keys(pendingTransferInvoices).length;
+
+            const total = lowStockItems.length + expiringItems.length + debtAccounts.length + delayedAccounts.length + activeTransfersCount;
             const badge = document.getElementById('notificationsBadge') || document.getElementById('bellBadge');
             if (badge) {
-                badge.innerText = total;
+                badge.innerText = total > 99 ? '99+' : total;
                 badge.style.display = total > 0 ? 'flex' : 'none';
             }
         }
@@ -1119,6 +1136,33 @@
             currentProductImageData = null;
             if (removeBtn) removeBtn.classList.add('hidden');
 
+            // إعادة تعيين حالة القفل والحماية للأرصدة
+            window.isVariantsStockLocked = true;
+            window.isMainStockLocked = true;
+            const vBtn = document.getElementById('btnToggleVariantsLock');
+            const vIcon = document.getElementById('variantsLockIcon');
+            const vText = document.getElementById('variantsLockText');
+            if (vIcon) vIcon.innerText = '🔒';
+            if (vText) vText.innerText = 'الكميات مقفلة (محمية)';
+            if (vBtn) {
+                vBtn.style.background = '#fffbeb';
+                vBtn.style.borderColor = '#f59e0b';
+                vBtn.style.color = '#b45309';
+            }
+            const mBtn = document.getElementById('toggleMainStockLockBtn');
+            const mInp = document.getElementById('newItemStock');
+            if (mBtn) {
+                mBtn.innerHTML = '🔒 مقفل';
+                mBtn.style.background = '#fffbeb';
+                mBtn.style.color = '#b45309';
+                mBtn.style.borderColor = '#f59e0b';
+            }
+            if (mInp) {
+                mInp.setAttribute('readonly', 'true');
+                mInp.style.background = '#f8fafc';
+                mInp.style.cursor = 'not-allowed';
+            }
+
             if (product && typeof product === 'object') {
                 currentEditingProductId = product.id;
                 fillProductModal(product);
@@ -1126,8 +1170,12 @@
                 currentEditingProductId = null;
                 if (typeof product === 'string') nameEl.value = product;
                 document.getElementById('newItemCategory').value = "عام";
+                if (document.getElementById('newItemBrand')) document.getElementById('newItemBrand').value = "";
+                if (document.getElementById('newItemSupplier')) document.getElementById('newItemSupplier').value = "";
                 document.getElementById('isQuickItem').checked = false; // تصفير الاختيار للأصناف الجديدة
+                if (mInp) mInp.dataset.origStock = "0";
                 addProductUnitRow('قطعة');
+                if (typeof renderProductWarehouseStocksTable === 'function') renderProductWarehouseStocksTable(null);
             }
 
             document.getElementById('newItemBarcode').focus();
@@ -1135,6 +1183,50 @@
             updateAllUnitSelects();
             if (typeof updateProductNavCounter === 'function') updateProductNavCounter();
         }
+
+        // --- فلترة محتويات السلة في المبيعات والمشتريات ---
+        window.filterCartItems = function(query) {
+            const rows = document.querySelectorAll('#cartTableBody tr');
+            const q = (query || '').trim().toLowerCase();
+            let firstMatch = null;
+
+            rows.forEach(row => {
+                const rowText = row.innerText.toLowerCase();
+                if (rowText.includes(q)) {
+                    row.style.display = "";
+                    row.style.background = q !== "" ? "rgba(39, 174, 96, 0.15)" : "";
+                    if (q !== "" && !firstMatch) firstMatch = row;
+                } else {
+                    row.style.display = "none";
+                }
+            });
+
+            if (firstMatch && q !== "") {
+                firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        };
+
+        window.filterPurchaseCartItems = function(query) {
+            const rows = document.querySelectorAll('#purchaseTableBody tr');
+            const q = (query || '').trim().toLowerCase();
+            let firstMatch = null;
+
+            rows.forEach(row => {
+                const rowText = row.innerText.toLowerCase();
+                if (rowText.includes(q)) {
+                    row.style.display = "";
+                    row.style.background = q !== "" ? "rgba(52, 152, 219, 0.15)" : "";
+                    if (q !== "" && !firstMatch) firstMatch = row;
+                } else {
+                    row.style.display = "none";
+                }
+            });
+
+            if (firstMatch && q !== "") {
+                firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        };
+
         window.showCustomPrompt = function(message, defaultValue = '') {
             return new Promise((resolve) => {
                 const modal = document.getElementById('customPromptModal');
@@ -1348,119 +1440,46 @@
 
             // Handle all setting tab button classes & set active highlight
             document.querySelectorAll('.settings-tab-btn, .settings-tab-btn-premium, .premium-tab-btn').forEach(b => b.classList.remove('active'));
+
+
+
+
+
+
+
             if (btn) {
                 btn.classList.add('active');
             } else {
                 const targetBtn = document.querySelector(`.premium-tab-btn[onclick*="'${tabName}'"]`) ||
                                   document.querySelector(`.settings-tab-btn[onclick*="'${tabName}'"]`) ||
-                                  document.querySelector(`.settings-tab-btn-premium[onclick*="'${tabName}'"]`) ||
-                                  document.querySelector(`[data-tab="${tabName}"]`);
+                                  document.querySelector(`.settings-tab-btn-premium[onclick*="'${tabName}'"]`);
                 if (targetBtn) targetBtn.classList.add('active');
             }
 
-            if (tabName === 'general') {
-                if (typeof renderPaymentMethodsSettings === 'function') renderPaymentMethodsSettings();
-            } else if (tabName === 'users') {
-                if (typeof renderUsersTable === 'function') renderUsersTable();
-            } else if (tabName === 'printing') {
-                loadPrintSettings();
-                loadPrintTemplateChoice();
-                if (typeof loadBarcodeLabelSettings === 'function') loadBarcodeLabelSettings();
-            } else if (tabName === 'warehouses') {
-                renderWarehousesTable();
-                updateSettingsWarehouseSelects();
-            } else if (tabName === 'trash') {
-                if (typeof trashManager !== 'undefined' && trashManager.loadTrash) {
-                    trashManager.loadTrash();
-                } else if (typeof renderTrashTable === 'function') {
-                    renderTrashTable();
-                }
-            }
+
+
         }
 
-        function updateSettingsWarehouseSelects() {
-            const select = document.getElementById('settingsActiveWarehouseSelect');
-            if (!select) return;
-            select.innerHTML = warehouses.map(w => `<option value="${w.name}" ${currentUser && currentUser.warehouseName === w.name ? 'selected' : ''}>${w.name}</option>`).join('');
-        }
 
-        // --- فلترة محتويات السلة (Cart Filter Logic) ---
-        function filterCartItems(query) {
-            const rows = document.querySelectorAll('#cartTableBody tr');
-            const q = query.trim().toLowerCase();
-            let firstMatch = null;
 
-            rows.forEach(row => {
-                // البحث في كل محتوى السطر (الاسم، السعر، الكمية، إلخ)
-                const rowText = row.innerText.toLowerCase();
-                if (rowText.includes(q)) {
-                    row.style.display = "";
-                    row.style.background = q !== "" ? "rgba(39, 174, 96, 0.15)" : ""; // تمييز باللون الأخضر
-                    if (q !== "" && !firstMatch) firstMatch = row;
-                } else {
-                    row.style.display = "none";
-                }
-            });
 
-            // تمرير تلقائي لأول صنف متطابق لسهولة التأكد
-            if (firstMatch && q !== "") {
-                firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        }
 
-        function filterPurchaseCartItems(query) {
-            const rows = document.querySelectorAll('#purchaseTableBody tr');
-            const q = query.trim().toLowerCase();
-            let firstMatch = null;
 
-            rows.forEach(row => {
-                const rowText = row.innerText.toLowerCase();
-                if (rowText.includes(q)) {
-                    row.style.display = "";
-                    row.style.background = q !== "" ? "rgba(52, 152, 219, 0.15)" : ""; // تمييز بالأزرق للمشتريات
-                    if (q !== "" && !firstMatch) firstMatch = row;
-                } else {
-                    row.style.display = "none";
-                }
-            });
 
-            if (firstMatch && q !== "") {
-                firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        }
 
-        function openNewAccountModal() {
-            // تصفير معرف التعديل لضمان أنها إضافة جديدة
-            document.getElementById('editAccId').value = '';
 
-            // تصفير الحقول
-            document.querySelectorAll('#newAccountModal input:not([type=radio]):not([type=checkbox]):not([type=hidden]), #newAccountModal textarea').forEach(el => el.value = '');
 
-            // تصفير الأرصدة الافتراضية
-            if (document.getElementById('accDebit')) document.getElementById('accDebit').value = '0';
-            if (document.getElementById('accCredit')) document.getElementById('accCredit').value = '0';
 
-            document.getElementById('newAccountModal').classList.remove('hidden');
-            // تعيين تاريخ اليوم للرصيد وتاريخ إنشاء الحساب في الفوتر
-            const todayStr = new Date().toLocaleDateString('en-CA');
-            document.getElementById('accBalDate').value = todayStr;
-            const createdEl = document.getElementById('accCreatedAt');
-            if (createdEl) createdEl.innerText = new Date().toLocaleDateString('ar-EG');
-            document.getElementById('accName').focus();
-        }
 
-        function closeNewAccountModal() {
-            document.getElementById('newAccountModal').classList.add('hidden');
-        }
 
-        function safeSetText(id, text) {
-            const el = document.getElementById(id);
-            if (el) el.innerText = text;
-        }
 
-        // ================= منطق استعلام الأصناف (Product Inquiry Logic) =================
+
+
+
+
+        // ================= استعلام الأصناف والمنتجات السريع =================
         function handleInquirySearch(query) {
-            query = query.trim().toLowerCase();
+            query = (query || '').trim().toLowerCase();
             const productListEl = document.getElementById('inquiryProductList');
             if (!productListEl) return;
 
@@ -1527,7 +1546,23 @@
 
             // تعبئة البيانات الأساسية
             document.getElementById('inquiryProductName').textContent = product.name;
+            if (document.getElementById('inquiryProductSysCode')) {
+                document.getElementById('inquiryProductSysCode').textContent = product.sysCode || product.id || '---';
+            }
             document.getElementById('inquiryProductCode').textContent = product.code || '---';
+            const scalePluEl = document.getElementById('inquiryProductScalePlu');
+            if (scalePluEl) {
+                scalePluEl.textContent = product.scalePlu || 'غير مسجل';
+            }
+            const brandBadge = document.getElementById('inquiryProductBrandBadge');
+            if (brandBadge) {
+                if (product.brand && product.brand.trim()) {
+                    brandBadge.style.display = 'inline-block';
+                    brandBadge.textContent = '🏷️ ' + product.brand.trim();
+                } else {
+                    brandBadge.style.display = 'none';
+                }
+            }
             document.getElementById('inquiryProductShelf').textContent = product.shelf || 'غير محدد';
             document.getElementById('inquiryProductCategory').textContent = product.category || 'عام';
 
@@ -1536,7 +1571,10 @@
             document.getElementById('inquiryPriceWholesale').textContent = parseFloat(product.wholesale || 0).toFixed(2);
 
             const costCard = document.getElementById('inquiryCostCard');
-            if (checkPermission('docs_purchase_price')) {
+            const posSettings = JSON.parse(getStore('pos_settings') || '{}');
+            const allowInquiryCost = posSettings.showInquiryCostPrice !== undefined ? !!posSettings.showInquiryCostPrice : false;
+
+            if (allowInquiryCost && checkPermission('docs_purchase_price')) {
                 costCard.style.display = 'flex';
                 document.getElementById('inquiryPriceCost').textContent = parseFloat(product.cost || product.cost_price || 0).toFixed(2);
             } else {
@@ -1669,10 +1707,7 @@
 
         // --- وظائف المشاركة والطباعة الفورية ---
 
-        // ================= 🤖 مساعد بيان الذكي (Gemini AI Assistant Logic) =================
-        let isAIVoiceActive = false;
-        let aiRecognition = null;
-function buildInvoiceHTML(data, templateChoice) {
+        function buildInvoiceHTML(data, templateChoice) {
     const itemsHtml = data.items.map(item => {
         const unitName = item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (item.unit || 'قطعة');
         return `
@@ -1975,281 +2010,4 @@ function buildInvoiceHTML(data, templateChoice) {
 
     return layout;
 }
-
-// ================= نظام إدارة تراخيص وصلاحيات الباقات الموحد =================
-window.aiConversationHistory = window.aiConversationHistory || [];
-
-function toggleAICopilot() {
-    const drawer = document.getElementById('aiCopilotDrawer');
-    if (!drawer) return;
-
-    const isHidden = drawer.style.right === '-420px' || drawer.style.right === '';
-    if (isHidden) {
-        drawer.style.right = '0px';
-        const alertBox = document.getElementById('aiKeyAlertBox');
-        window.getGeminiApiKeys().then(keys => {
-            if (alertBox) alertBox.style.display = (keys.length === 0) ? 'block' : 'none';
-        });
-        setTimeout(() => {
-            document.getElementById('aiChatInput')?.focus();
-        }, 400);
-    } else {
-        drawer.style.right = '-420px';
-        if (typeof isAIVoiceActive !== 'undefined' && isAIVoiceActive) stopAIVoice();
-    }
-}
-
-async function saveQuickAIKey() {
-    const key = document.getElementById('aiQuickApiKeyInput').value.trim();
-    if (!key) return alert('⚠️ يرجى إدخال مفتاح API صحيح');
-    try {
-        if (typeof db !== 'undefined' && db.settings) {
-            await db.settings.put({ id: 'gemini_key', value: key });
-            removeStore('bayan_gemini_key');
-        }
-    } catch(e) {
-        setStore('bayan_gemini_key', key);
-    }
-
-    const settingsInput = document.getElementById('geminiApiKeyInput');
-    if (settingsInput) settingsInput.value = key;
-
-    document.getElementById('aiKeyAlertBox').style.display = 'none';
-    showToast('✅ تم حفظ مفتاح API وتفعيل المساعد بنجاح!', 'success');
-}
-
-function getAILocalDatabaseContext() {
-    const accountsList = (window.accounts || []).slice(0, 50).map(a => {
-        const bal = typeof getAccountBalance === 'function' ? getAccountBalance(a.name) : 0;
-        return `- ${a.name} (${a.type}): رصيده ${bal.toFixed(2)} ج.م`;
-    }).join('\n');
-
-    const productsList = (window.productsDB || []).slice(0, 100).map(p => {
-        return `- ${p.name} (كود: ${p.code || '---'}, باركود: ${p.barcode || '---'}): المخزون العام: ${p.stock || 0} ${p.unit || 'قطعة'}, سعر البيع: ${p.price || 0} ج.م`;
-    }).join('\n');
-
-    const recentTransactions = (window.transactions || []).slice(-30).map(t => {
-        return `- فاتورة #${t.invoiceId || 'بدون'} | التاريخ: ${t.date} | النوع: ${t.type} | الطرف: ${t.partner || 'عام'} | الإجمالي: ${t.total || t.price || 0} ج.م`;
-    }).join('\n');
-
-    const activeTab = window.activeTabId || 'dashboard';
-    const user = (window.currentUser && window.currentUser.name) ? window.currentUser.name : 'المدير';
-
-    return `
-=== حالة النظام الحالية ===
-- المستخدم الحالي: ${user}
-- التبويب المفتوح حالياً: ${activeTab}
-
-=== قائمة العملاء والموردين وأرصدتهم الحالية ===
-${accountsList || 'لا توجد حسابات مسجلة حالياً.'}
-
-=== قائمة المنتجات والأسعار والمخزون الحالي ===
-${productsList || 'لا توجد أصناف في المخزن حالياً.'}
-
-=== ملخص آخر 30 حركة مالية وفواتير ===
-${recentTransactions || 'لا توجد فواتير مسجلة حالياً.'}
-`;
-}
-
-window.getGeminiApiKeys = async function() {
-
-    let apiKeys = [];
-    try {
-        if (typeof db !== 'undefined' && db.settings) {
-            const stored = await db.settings.get('gemini_key');
-            if (stored && stored.value) {
-                apiKeys = stored.value.split(/[\s,;\|]+/).map(k => k.trim()).filter(Boolean);
-            }
-        }
-    } catch(e) {}
-
-    if (apiKeys.length === 0) {
-        const userKeys = getStore('bayan_gemini_key');
-        if (userKeys) {
-            apiKeys = userKeys.split(/[\s,;\|]+/).map(k => k.trim()).filter(Boolean);
-        }
-    }
-    return apiKeys;
-};
-
-function checkAILimits() {
-    let usage = JSON.parse(getStore('bayan_ai_usage'));
-    if (!usage) {
-        usage = {
-            currentCount: 0,
-            lastResetTime: Date.now(),
-            weeklyCount: 0,
-            weeklyResetTime: Date.now()
-        };
-    }
-
-    const now = Date.now();
-    const twelveHoursMs = 12 * 60 * 60 * 1000;
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-
-    if (now - usage.lastResetTime >= twelveHoursMs) {
-        usage.currentCount = 0;
-        usage.lastResetTime = now;
-    }
-    if (now - usage.weeklyResetTime >= sevenDaysMs) {
-        usage.weeklyCount = 0;
-        usage.weeklyResetTime = now;
-    }
-
-    setStore('bayan_ai_usage', JSON.stringify(usage));
-    return usage;
-}
-
-function incrementAIUsage() {
-    let usage = checkAILimits();
-    usage.currentCount++;
-    usage.weeklyCount++;
-    setStore('bayan_ai_usage', JSON.stringify(usage));
-    if (typeof window.updateAILimitsUI === 'function') window.updateAILimitsUI();
-}
-
-window.updateAILimitsUI = function() {
-    const usage = checkAILimits();
-    const currentPct = Math.min(100, Math.round((usage.currentCount / AI_LIMIT_12H) * 100));
-    const currentTextEl = document.getElementById('aiCurrentUsageText');
-    const currentBarEl = document.getElementById('aiCurrentUsageBar');
-
-    if (currentTextEl) currentTextEl.innerText = `تم استخدام ${currentPct}%`;
-    if (currentBarEl) {
-        currentBarEl.style.width = `${currentPct}%`;
-        currentBarEl.style.background = currentPct >= 100 ? '#ef4444' : '#f8fafc';
-    }
-};
-
-async function sendAIChatMessage() {
-    const usage = checkAILimits();
-    if (usage.currentCount >= AI_LIMIT_12H) {
-        showCustomAlert({
-            type: 'warning',
-            titleText: '⚠️ تنبيه!',
-            msg: `لقد استنفدت الحد الأقصى للمساعد الذكي (${AI_LIMIT_12H} رسائل). يُعاد ضبط السقف خلال 12 ساعة.`
-        });
-        return;
-    }
-
-    const inputEl = document.getElementById('aiChatInput');
-    const query = inputEl.value.trim();
-    if (!query) return;
-
-    const apiKeys = await window.getGeminiApiKeys();
-    if (apiKeys.length === 0) {
-        alert('⚠️ يرجى تعيين مفتاح Gemini API أولاً لتشغيل المساعد.');
-        document.getElementById('aiKeyAlertBox').style.display = 'flex';
-        return;
-    }
-
-    appendAIChatBubble(query, 'user');
-    inputEl.value = '';
-
-    const loadingId = 'ai-loading-' + Date.now();
-    const messagesContainer = document.getElementById('aiChatMessages');
-    const loadingBubble = document.createElement('div');
-    loadingBubble.className = 'ai-loading-msg';
-    loadingBubble.id = loadingId;
-    loadingBubble.innerHTML = `<div class="ai-loading-dot"></div><div class="ai-loading-dot"></div><div class="ai-loading-dot"></div>`;
-    messagesContainer.appendChild(loadingBubble);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-    try {
-        const dbContext = getAILocalDatabaseContext();
-        const systemInstruction = `أنت "مساعد بَيَان الذكي" (Bayan AI Copilot)، خبير مالي وإداري محترف في نظام بَيَان المحاسبي. أجب باللغة العربية بأسلوب راقي ومبسط.`;
-        const fullPrompt = `${systemInstruction}\n\nبيانات البرامج الحالية:\n${dbContext}\n\nسؤال المستخدم: ${query}`;
-
-        let response = null;
-        let lastError = null;
-        for (let k = 0; k < apiKeys.length; k++) {
-            try {
-                response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKeys[k]}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: fullPrompt }] }] })
-                });
-                if (response.ok) { lastError = null; break; }
-            } catch (e) { lastError = e; }
-        }
-
-        if (lastError || !response || !response.ok) throw lastError || new Error("فشلت المحاولة.");
-
-        const data = await response.json();
-        const replyText = data.candidates[0].content.parts[0].text || 'فشل في توليد إجابة.';
-
-        const loader = document.getElementById(loadingId);
-        if (loader) loader.remove();
-
-        incrementAIUsage();
-        appendAIChatBubble(replyText, 'bot');
-    } catch (err) {
-        const loader = document.getElementById(loadingId);
-        if (loader) loader.remove();
-        appendAIChatBubble(`⚠️ مساعد بَيَان الذكي قيد التحديث، يرجى المحاولة لاحقاً.`, 'bot');
-    }
-}
-
-function appendAIChatBubble(text, sender) {
-    const messagesContainer = document.getElementById('aiChatMessages');
-    if (!messagesContainer) return;
-
-    const bubble = document.createElement('div');
-    bubble.className = sender === 'user' ? 'ai-user-msg' : 'ai-bot-msg';
-
-    let formattedText = text
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/\n/g, '<br>');
-
-    bubble.innerHTML = `<div style="line-height: 1.6;">${formattedText}</div>`;
-    messagesContainer.appendChild(bubble);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
-
-// ================= نافذة التنبيه وقف الحساب التلقائي (Bayan License Lock Modal) =================
-function handleInquirySearch(query) {
-    query = query.trim().toLowerCase();
-    const productListEl = document.getElementById('inquiryProductList');
-    if (!productListEl) return;
-
-    if (!query) {
-        renderInquiryProductList(productsDB);
-        return;
-    }
-
-    const filtered = productsDB.filter(p => {
-        const nameMatch = p.name && p.name.toLowerCase().includes(query);
-        const codeMatch = p.code && p.code.toLowerCase().includes(query);
-        const barcodeMatch = p.barcode && p.barcode.toLowerCase() === query;
-        const barcodeInclude = p.barcode && p.barcode.toLowerCase().includes(query);
-        return nameMatch || codeMatch || barcodeMatch || barcodeInclude;
-    });
-
-    renderInquiryProductList(filtered);
-}
-
-function renderInquiryProductList(products) {
-    const productListEl = document.getElementById('inquiryProductList');
-    if (!productListEl) return;
-
-    if (products.length === 0) {
-        productListEl.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px; font-size: 0.9rem;">⚠️ لا توجد نتائج مطابقة</div>';
-        return;
-    }
-
-    productListEl.innerHTML = products.map(p => `
-        <div class="inquiry-product-item" id="inquiry-item-${p.id}" onclick="selectProductForInquiry(${p.id})">
-            <div style="display: flex; flex-direction: column; gap: 4px; text-align: right;">
-                <div class="name">${p.name}</div>
-                <div class="code">كود: ${p.code || '---'} | باركود: ${p.barcode || '---'}</div>
-            </div>
-            <span style="font-size: 0.95rem; font-weight: 900; color: #6d28d9; white-space: nowrap;">${parseFloat(p.price || 0).toFixed(2)} ${typeof getCurrencySymbol === 'function' ? getCurrencySymbol() : 'ج.م'}</span>
-        </div>
-    `).join('');
-}
-
-// =========================================================================
-// 💰 دالة رمز العملة الشاملة والموحدة (Global Reactive Currency Symbol)
-// =========================================================================
 

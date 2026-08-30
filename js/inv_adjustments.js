@@ -58,6 +58,23 @@ window.selectedAdjItem = window.selectedAdjItem || null;
 function resetAdjustment() {
     window.adjCart = [];
     window.selectedAdjItem = null;
+    currentAdjHeaderUnit = null;
+
+    if (typeof isEditMode !== 'undefined') isEditMode = false;
+    if (typeof window.isEditMode !== 'undefined') window.isEditMode = false;
+    if (typeof editingInvoiceId !== 'undefined') editingInvoiceId = null;
+    if (typeof window.editingInvoiceId !== 'undefined') window.editingInvoiceId = null;
+    if (typeof editingInvoiceType !== 'undefined') editingInvoiceType = null;
+    if (typeof window.editingInvoiceType !== 'undefined') window.editingInvoiceType = null;
+    if (typeof editingOriginalItems !== 'undefined') editingOriginalItems = [];
+    if (typeof window.editingOriginalItems !== 'undefined') window.editingOriginalItems = [];
+
+    const saveBtn = document.querySelector('#adjustment-section .btn-save') || document.querySelector('#adjustment-section .acc-action-btn[onclick*="save"]');
+    if (saveBtn) {
+        saveBtn.style.background = 'linear-gradient(135deg, #16a34a, #15803d)';
+        saveBtn.innerText = '💾';
+    }
+
     if (document.getElementById('adjSearch')) document.getElementById('adjSearch').value = '';
     if (document.getElementById('adjQty')) document.getElementById('adjQty').value = '1';
     if (document.getElementById('adjPrice')) document.getElementById('adjPrice').value = '';
@@ -108,7 +125,7 @@ function handleAdjSearchEnter(query, event) {
         // 1. بحث فوري في باركود التشكيلات (Variant Barcode Match)
         pMatch = productsDB.find(p => {
             if (p.variants && Array.isArray(p.variants)) {
-                const vFound = p.variants.find(v => String(v.barcode || '').trim() === cleanQuery);
+                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
                 if (vFound) {
                     matchingVariant = vFound;
                     return true;
@@ -218,9 +235,9 @@ function handleAdjSearch(query) {
 
     if (filtered.length > 0) {
         resultsDiv.innerHTML = `
-            <div class="pos-search-panel" style="width: 100%; max-width: 650px; min-width: 320px; position: absolute; top: 100%; right: 0; z-index: 99999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 2px solid #cbd5e1; direction: rtl; text-align: right; margin-top: 6px; animation: modalFadeIn 0.2s ease-out;">
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 14px; border-top-right-radius: 14px;">
-                    <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج بحث تسوية المخزون (${filtered.length} صنف)</span>
+            <div class="pos-search-panel" style="width: 100%; max-width: 650px; min-width: 320px; position: absolute; top: 100%; right: 0; z-index: 99999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 2px solid #a7f3d0; direction: rtl; text-align: right; margin-top: 6px; animation: modalFadeIn 0.2s ease-out;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #ecfdf5; border-bottom: 1px solid #d1fae5; border-top-left-radius: 14px; border-top-right-radius: 14px;">
+                    <span style="font-weight: 800; font-size: 0.88rem; color: #047857;">🔍 نتائج بحث تسوية المخزون (${filtered.length} صنف)</span>
                     <button onclick="document.getElementById('adjSearchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة">❌</button>
                 </div>
                 <div style="max-height: 380px; overflow-y: auto; padding: 6px; scrollbar-gutter: stable;">
@@ -228,9 +245,9 @@ function handleAdjSearch(query) {
                         const costVal = parseFloat(p.cost) || 0;
                         const priceVal = parseFloat(p.price) || 0;
                         const activeWhName = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
-                        const stockVal = (typeof getWarehouseStock === 'function') ? getWarehouseStock(p.name, activeWhName) : ((p.warehouseStocks && p.warehouseStocks[activeWhName] !== undefined) ? (parseFloat(p.warehouseStocks[activeWhName]) || 0) : (parseFloat(p.stock) || 0));
+                        const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWhName) : (parseFloat(p.stock) || 0);
                         return `
-                            <div class="pos-search-row" onclick="
+                            <div class="pos-search-row adj-search-row" onclick="
                                 document.getElementById('adjSearchResults').style.display='none';
                                 const pSelected = productsDB.find(x => x.id === ${p.id});
                                 if (pSelected && pSelected.variants && pSelected.variants.length > 0) {
@@ -240,14 +257,14 @@ function handleAdjSearch(query) {
                                 } else {
                                     fillAdjustmentHeaderWithUnit(pSelected, ${JSON.stringify((p.units && p.units.length > 0) ? p.units[0] : { unitName: p.unit || 'قطعة', factor: 1, cost: p.cost }).replace(/"/g, '&quot;')});
                                 }" 
-                                style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 8px;">
+                                style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: all 0.15s ease; border-radius: 10px; gap: 8px;">
                                 <div style="flex: 1.5; min-width: 180px;">
                                     <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b;">${p.name}</div>
-                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${p.code || p.id}</b> | باركود: <b>${p.barcode || '---'}</b></div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#047857;">${p.code || p.id}</b> | باركود: <b>${p.barcode || '---'}</b></div>
                                 </div>
                                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                                     <div style="text-align: center; background: rgba(59, 130, 246, 0.08); padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.25);">
-                                        <div style="font-size: 0.7rem; color: #1d4ed8; font-weight: 800;">📦 الرصيد الحالي</div>
+                                        <div style="font-size: 0.7rem; color: #1d4ed8; font-weight: 800;">📦 الرصيد (${activeWhName})</div>
                                         <div style="font-weight: 900; font-size: 0.95rem; color: ${stockVal <= 5 ? '#ef4444' : '#1d4ed8'};">${stockVal} <span style="font-size:0.7rem;">${p.unit || 'قطعة'}</span></div>
                                     </div>
                                     <div style="text-align: center; background: rgba(34, 197, 94, 0.08); padding: 5px 14px; border-radius: 8px; border: 1.5px solid rgba(34, 197, 94, 0.25);">
@@ -348,7 +365,7 @@ function renderAdjTable() {
                         style="width: 80px; text-align: center; font-weight: 900; color: #2e86de; border: 2px solid #2e86de; border-radius: 8px; height: 32px; background: #fff;"
                         onchange="window.adjCart[${idx}].qty=parseFloat(this.value)||0; renderAdjTable();" title="تعديل الكمية">
                 </td>
-                <td style="background: rgba(94, 51, 112, 0.05); font-weight: 900; color: #5e3370; font-size: 1.2rem;">${stockAfter}</td>
+                <td style="background: rgba(16, 185, 129, 0.08); font-weight: 900; color: #047857; font-size: 1.2rem;">${stockAfter}</td>
                 <td>
                     <select class="unit-select" onchange="updateAdjItemUnit(${idx}, this.value)" style="width:100%; padding:2px; border-radius:4px; border:1px solid #ccc;">
                         ${unitOptions}
@@ -425,17 +442,23 @@ async function saveAdjustment() {
             return false;
         }
 
+        const isEditing = Boolean((typeof isEditMode !== 'undefined' && isEditMode) || (typeof window.isEditMode !== 'undefined' && window.isEditMode));
+        const editId = (typeof editingInvoiceId !== 'undefined' && editingInvoiceId) || (typeof window.editingInvoiceId !== 'undefined' && window.editingInvoiceId) || null;
+        const editType = (typeof editingInvoiceType !== 'undefined' && editingInvoiceType) || (typeof window.editingInvoiceType !== 'undefined' && window.editingInvoiceType) || 'تسوية مخزن ⚖️';
+
         let adjId;
-        if (typeof isEditMode !== 'undefined' && isEditMode && typeof editingInvoiceId !== 'undefined' && editingInvoiceId) {
-            adjId = editingInvoiceId;
+        if (isEditing && editId) {
+            adjId = editId;
             if (window.revertAndClearOldInvoice) {
-                await window.revertAndClearOldInvoice(editingInvoiceId, editingInvoiceType);
+                await window.revertAndClearOldInvoice(editId, editType);
             }
         } else {
             adjId = typeof getNextSequence === 'function' ? getNextSequence('تسوية') : ('ADJ-' + Date.now());
         }
         let grandTotal = 0;
-        const dt = typeof getTransactionDateTime === 'function' ? getTransactionDateTime('adjDate', 'adjTime') : { full: new Date().toLocaleString('ar-EG'), iso: new Date().toISOString(), time: '' };
+        const dt = (isEditing && typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+            ? editingOriginalDate
+            : (typeof getTransactionDateTime === 'function' ? getTransactionDateTime('adjDate', 'adjTime') : { full: new Date().toLocaleString('ar-EG'), iso: new Date().toISOString(), time: '' });
 
         const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
 
@@ -452,21 +475,19 @@ async function saveAdjustment() {
                 if (!p.warehouseStocks) p.warehouseStocks = {};
                 p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + newBaseStock;
 
-                // تحديث رصيد المقاس واللون المحدد بدقة (سواء بالزيادة الموجبة أو النقصان السالب)
-                if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+                if (p.variants && Array.isArray(p.variants)) {
                     const sVal = item.selectedSize || item.size || '';
                     const cVal = item.selectedColor || item.color || '';
                     const matchedVar = p.variants.find(v => 
-                        (!sVal || v.size === sVal) && 
-                        (!cVal || v.color === cVal)
+                        (v.size || '') === sVal && (v.color || '') === cVal
+                    ) || p.variants.find(v => 
+                        (!sVal || v.size === sVal) && (!cVal || v.color === cVal)
                     );
                     if (matchedVar) {
                         matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + newBaseStock;
                         if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                         matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + newBaseStock;
                     }
-                    // مزامنة رصيد الصنف الأساسي مع مجموع تشكيلاته
-                    p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                 }
 
                 const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
@@ -508,7 +529,7 @@ async function saveAdjustment() {
             warehouse: activeWH,
             user: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : '-',
             notes: document.getElementById('adjNotes') ? document.getElementById('adjNotes').value.trim() : '',
-            editDate: (typeof isEditMode !== 'undefined' && isEditMode) ? new Date().toLocaleString('ar-EG') : '-'
+            editDate: '-'
         });
 
         if (typeof saveData === 'function') await saveData();
@@ -1018,12 +1039,6 @@ async function savePriceAdjustments() {
             }
         }
 
-        if (typeof syncProductsToSupabase === 'function' && typeof supabaseClient !== 'undefined' && supabaseClient) {
-            try {
-                if (typeof toggleStatus === 'function') toggleStatus('cloud', 'sync');
-                await syncProductsToSupabase();
-            } catch(e) { console.warn("Cloud sync deferred:", e); }
-        }
 
         productsDB = await db.products.toArray();
 

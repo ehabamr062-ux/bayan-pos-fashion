@@ -141,7 +141,7 @@ const BayanBarcode = (function () {
         // 1. أولوية مطلقة للبحث في باركود التشكيلات الفريدة (Variant Barcode Match)
         for (const p of list) {
             if (p.variants && Array.isArray(p.variants)) {
-                const vFound = p.variants.find(v => String(v.barcode || '').trim() === clean);
+                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === clean);
                 if (vFound) {
                     return {
                         product: p,
@@ -225,6 +225,80 @@ const BayanBarcode = (function () {
     }
 
     /**
+     * تحليل وفك تشفير باركود الموازين الإلكترونية (EAN-13 Scale Barcode Parser)
+     * يدعم فك شفرة الباركودات مثل 2000003002207
+     * @param {string} cleanCode
+     * @returns {object|null}
+     */
+    function parseScaleBarcode(cleanCode) {
+        if (!cleanCode || typeof cleanCode !== 'string') return null;
+        cleanCode = cleanCode.trim();
+        if (cleanCode.length !== 13 || !/^\d{13}$/.test(cleanCode)) return null;
+
+        const s = typeof getBarcodeLabelSettings === 'function' ? getBarcodeLabelSettings() : {
+            scaleEnabled: true,
+            scalePrefix: '2',
+            scaleType: 'weight',
+            scalePluLength: 6,
+            scaleValueLength: 5
+        };
+
+        if (s.scaleEnabled === false) return null;
+
+        const prefix = String(s.scalePrefix || '2').trim();
+        if (!cleanCode.startsWith(prefix)) return null;
+
+        const pluLen = parseInt(s.scalePluLength, 10) || 6;
+        const valLen = parseInt(s.scaleValueLength, 10) || 5;
+        const prefLen = prefix.length;
+
+        // استخراج كود الصنف
+        const rawPlu = cleanCode.substring(prefLen, prefLen + pluLen);
+        const pluInt = parseInt(rawPlu, 10);
+        const pluStr = isNaN(pluInt) ? rawPlu : String(pluInt);
+
+        // استخراج قيمة الوزن أو السعر
+        const rawVal = cleanCode.substring(prefLen + pluLen, prefLen + pluLen + valLen);
+        const numVal = parseFloat(rawVal) || 0;
+
+        // البحث عن الصنف المطابق بكود الميزان أو كود النظام أو الكود الداخلي أو المعرف
+        if (typeof productsDB === 'undefined' || !Array.isArray(productsDB)) return null;
+
+        const product = productsDB.find(p => {
+            if (p.scalePlu && (String(p.scalePlu).trim() === pluStr || String(p.scalePlu).trim() === rawPlu)) return true;
+            if (p.sysCode && (String(p.sysCode).trim() === pluStr || String(p.sysCode).trim() === rawPlu)) return true;
+            if (p.code && (String(p.code).trim() === pluStr || String(p.code).trim() === rawPlu)) return true;
+            if (p.id && (String(p.id).trim() === pluStr || String(p.id).trim() === rawPlu)) return true;
+            if (p.barcode && (String(p.barcode).trim() === pluStr || String(p.barcode).trim() === rawPlu)) return true;
+            return false;
+        });
+
+        if (!product) return null;
+
+        let weight = 0;
+        let totalPrice = 0;
+        const unitPrice = parseFloat(product.price) || 0;
+
+        if (s.scaleType === 'price') {
+            totalPrice = numVal / 100;
+            weight = unitPrice > 0 ? parseFloat((totalPrice / unitPrice).toFixed(3)) : 1;
+        } else {
+            weight = numVal / 1000;
+            totalPrice = parseFloat((weight * unitPrice).toFixed(2));
+        }
+
+        return {
+            isScale: true,
+            product: product,
+            plu: pluStr,
+            rawPlu: rawPlu,
+            weight: weight,
+            unitPrice: unitPrice,
+            totalPrice: totalPrice
+        };
+    }
+
+    /**
      * المعالج المركزي لمسح الباركود والإضافة المباشرة للجداول
      * @param {string} code 
      * @param {string} source 
@@ -275,6 +349,46 @@ const BayanBarcode = (function () {
                 }
             }
             return;
+        }
+
+        // ⚖️ فحص باركود موازين الوزن الإلكترونية (Scale Barcodes)
+        const scaleMatch = parseScaleBarcode(cleanCode);
+        if (scaleMatch) {
+            if (targetScreen === 'sales') {
+                let added = false;
+                if (typeof completeAddToCart === 'function') {
+                    added = completeAddToCart(scaleMatch.product, null, null, scaleMatch.weight, scaleMatch.unitPrice);
+                } else if (typeof addToCart === 'function') {
+                    addToCart(scaleMatch.product.id, null, null, scaleMatch.weight);
+                    added = true;
+                }
+                if (added !== false) {
+                    playBeep(true);
+                    if (typeof showToast === 'function') {
+                        showToast(`⚖️ [ميزان] +${scaleMatch.weight} كجم ${scaleMatch.product.name} (${scaleMatch.totalPrice} ج.م)`, 'success');
+                    }
+                }
+                clearAndFocusSearch('productSearch');
+                return;
+            } else if (targetScreen === 'purchase') {
+                if (typeof addToPurchaseCart === 'function') {
+                    addToPurchaseCart(scaleMatch.product.id, null, null, null);
+                    const pRows = document.getElementById('purchaseTableBody')?.rows || [];
+                    if (pRows.length > 0) {
+                        const lastQtyInp = pRows[pRows.length - 1].querySelector('.purchase-qty-input') || pRows[pRows.length - 1].querySelector('input[type=number]');
+                        if (lastQtyInp) {
+                            lastQtyInp.value = scaleMatch.weight;
+                            if (typeof updatePurchaseTotals === 'function') updatePurchaseTotals();
+                        }
+                    }
+                }
+                playBeep(true);
+                if (typeof showToast === 'function') {
+                    showToast(`⚖️ [توريد ميزان] +${scaleMatch.weight} كجم ${scaleMatch.product.name}`, 'success');
+                }
+                clearAndFocusSearch('purchaseSearch');
+                return;
+            }
         }
 
         // البحث الدقيق عن الصنف أو الـ Variant
@@ -481,7 +595,7 @@ const BayanBarcode = (function () {
                 existing.qty = (parseFloat(existing.qty) || 0) + 1;
             } else {
                 const vCost = variant ? (parseFloat(variant.cost) || parseFloat(product.cost) || 0) : (parseFloat(product.cost) || 0);
-                const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي');
+                const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
                 let currentWhStock = (typeof getWarehouseStock === 'function') ? getWarehouseStock(product.name, fromWh) : (parseFloat(product.stock) || 0);
                 if (variant) {
                     if (variant.warehouseStocks && variant.warehouseStocks[fromWh] !== undefined) {
@@ -728,6 +842,7 @@ const BayanBarcode = (function () {
         validate,
         isDuplicate,
         findProductAndVariantByBarcode,
+        parseScaleBarcode,
         getActiveScanTarget,
         handleScan,
         startHardwareListener,

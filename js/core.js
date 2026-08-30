@@ -40,11 +40,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '1.0.1';
-window.APP_VERSION = '1.0.1';
+window.appVersion = '1.0.2';
+window.APP_VERSION = '1.0.2';
 
 async function fetchAppVersion() {
-    let version = '1.0.1';
+    let version = '1.0.2';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -58,7 +58,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '1.0.1';
+    if (!version) version = window.appVersion || '1.0.2';
     window.appVersion = version;
     window.APP_VERSION = version;
 
@@ -99,29 +99,24 @@ if ('serviceWorker' in navigator && window.location.protocol !== 'file:' && !nav
         navigator.serviceWorker.register('service-worker.js')
             .then(reg => {
                 console.log('Service Worker: Registered ✅');
+                // فحص وجود تحديثات جديدة بشكل دوري تلقائي
+                setInterval(() => {
+                    reg.update();
+                }, 1000 * 60 * 30); // كل 30 دقيقة
             })
             .catch(err => console.log('Service Worker: Failed ❌', err));
     });
+
+    // إعادة تحميل الصفحة فوراً عند تحديث ملفات النظام في الخلفية وتنشيط SW الجديد
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+    });
 }
 
-// Supabase Configuration - Disconnected for local offline usage
-const SUPABASE_URL = '';
-const SUPABASE_KEY = '';
-let supabaseClient = null;
-
-// Cloud initialization disabled for offline mode
-
-// تم إزالة نظام درع بَيَان (حماية السورس كود) لفتح النسخة تجارياً
-
-// --- 🛡️ نظام درع بَيَان السحابي (Bayan Shield Cloud Logic) ---
-
-// تم نقل التهيئة للأعلى لضمان التوفر الشامل
-
-const CLOUD_TABLES = ['users_subscriptions', 'users', 'المستخدمين_عام'];
-
-const PRIMARY_TABLE = 'users_subscriptions';
-
-// تم إزالة تشفير هوية الجهاز (HWID Encryption) لفتح النسخة تجارياً
+// نظام محلي 100% (Offline Local-First Architecture)
 
 async function checkSubscriptionStatus() {
     if (typeof checkLicenseAndLockApp === 'function') {
@@ -284,11 +279,6 @@ async function loadData() {
         console.warn("⚠️ LicenseService verify notice:", err);
     }
 
-    // جلب الإعلانات وتحديثها كل 10 دقائق
-
-    fetchAdminAnnouncements();
-
-    setInterval(fetchAdminAnnouncements, 10 * 60 * 1000);
 
     const savedSession = getStore('pos_session_user');
 
@@ -686,63 +676,3 @@ async function wipeAllSystemData() {
 }
 
 window.wipeAllSystemData = wipeAllSystemData;
-
-// PWA Install Prompt Logic
-let deferredPrompt;
-const installAppContainer = document.getElementById('installAppContainer');
-const installAppBtn = document.getElementById('installAppBtn');
-const closeInstallBtn = document.getElementById('closeInstallBtn');
-
-window.addEventListener('beforeinstallprompt', (e) => {
-    // Prevent the mini-infobar from appearing on mobile
-    e.preventDefault();
-    // Stash the event so it can be triggered later.
-    deferredPrompt = e;
-    // Update UI notify the user they can install the PWA
-    if (installAppContainer) {
-        installAppContainer.style.display = 'flex';
-        // Add a smooth slide up animation
-        installAppContainer.style.animation = 'slideUpFade 0.5s ease-out forwards';
-    }
-});
-
-if (installAppBtn) {
-    installAppBtn.addEventListener('click', async () => {
-        if (installAppContainer) {
-            installAppContainer.style.display = 'none';
-        }
-        if (deferredPrompt) {
-            // Show the install prompt
-            deferredPrompt.prompt();
-            // Wait for the user to respond to the prompt
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log(`User response to the install prompt: ${outcome}`);
-            // We've used the prompt, and can't use it again, throw it away
-            deferredPrompt = null;
-        }
-    });
-}
-
-if (closeInstallBtn) {
-    closeInstallBtn.addEventListener('click', () => {
-        if (installAppContainer) {
-            installAppContainer.style.animation = 'slideDownFade 0.5s ease-in forwards';
-            setTimeout(() => {
-                installAppContainer.style.display = 'none';
-            }, 500);
-        }
-    });
-}
-
-// Register Service Worker
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-            .then(registration => {
-                console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            })
-            .catch(err => {
-                console.log('ServiceWorker registration failed: ', err);
-            });
-    });
-}

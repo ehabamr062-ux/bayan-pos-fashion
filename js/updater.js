@@ -732,56 +732,52 @@
     window.cloudAnnouncementsHistory = [];
 
     // تحميل سجل الإشعارات السحابية السابقة
-    try {
-        const storedAnn = (typeof getStore === 'function') ? getStore('bayan_cloud_announcements_history') : null;
-        window.cloudAnnouncementsHistory = storedAnn ? JSON.parse(storedAnn) : [];
-    } catch(e) { window.cloudAnnouncementsHistory = []; }
+    const storedAnn = getStore('bayan_cloud_announcements_history');
+    if (storedAnn) {
+        try {
+            window.cloudAnnouncementsHistory = JSON.parse(storedAnn) || [];
+        } catch (e) { }
+    }
 
     window.checkCloudAnnouncements = async function () {
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 6000);
-            const res = await fetch(GITHUB_BROADCAST_URL + '?t=' + Date.now(), { signal: controller.signal });
-            clearTimeout(timeoutId);
-
+            const url = 'https://raw.githubusercontent.com/ehabamr062-ux/Bayan-Pos-System/main/announcements.json?t=' + Date.now();
+            const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) return;
             const data = await res.json();
-            if (!data) return;
-
-            // دعم تلقي رسالة واحدة (Object) أو قائمة رسائل سحابية (Array)
-            const items = Array.isArray(data) ? data : [data];
-            if (items.length === 0) return;
+            if (!Array.isArray(data)) return;
 
             let hasNewActive = false;
 
-            items.forEach(item => {
-                if (!item || !item.message) return;
-                const itemId = String(item.id || item.title || 'announcement_1');
+            data.forEach(item => {
+                const itemId = String(item.id || item.title || '').trim();
+                if (!itemId) return;
+
                 const formattedItem = {
-                    ...item,
                     id: itemId,
-                    title: item.title || 'إشعار سحابي',
-                    receivedAt: item.receivedAt || new Date().toISOString()
+                    title: item.title || 'تنبيه من إدارة بيان POS',
+                    message: item.message || '',
+                    date: item.date || new Date().toISOString(),
+                    type: item.type || 'info',
+                    link: item.link || '',
+                    linkText: item.linkText || 'معرفة المزيد 🔗',
+                    maxViews: item.maxViews !== undefined ? item.maxViews : 1,
+                    alwaysShow: !!item.alwaysShow,
+                    active: item.active !== undefined ? !!item.active : true
                 };
 
-                const existingIdx = window.cloudAnnouncementsHistory.findIndex(a => String(a.id) === itemId);
-                if (existingIdx >= 0) {
-                    window.cloudAnnouncementsHistory[existingIdx] = {
-                        ...window.cloudAnnouncementsHistory[existingIdx],
-                        ...formattedItem,
-                        updatedAt: new Date().toISOString()
-                    };
+                const existingIndex = window.cloudAnnouncementsHistory.findIndex(h => h.id === itemId);
+                if (existingIndex !== -1) {
+                    window.cloudAnnouncementsHistory[existingIndex] = formattedItem;
                 } else {
-                    window.cloudAnnouncementsHistory.push(formattedItem);
+                    window.cloudAnnouncementsHistory.unshift(formattedItem);
                 }
 
                 if (formattedItem.active) {
-                    window.latestCloudAnnouncement = formattedItem;
                     hasNewActive = true;
 
-                    // فحص الظهور المنبثق التلقائي (مرة واحدة فقط كحد أقصى)
                     const seenKey = 'bayan_seen_count_' + itemId;
-                    const viewCount = parseInt((typeof getStore === 'function' ? getStore(seenKey) : null) || '0', 10);
+                    const viewCount = parseInt(getStore(seenKey) || '0', 10);
                     const maxViews = formattedItem.alwaysShow ? Infinity : (formattedItem.maxViews !== undefined ? parseInt(formattedItem.maxViews, 10) : 1);
 
                     if (viewCount < maxViews) {
@@ -792,57 +788,51 @@
                 }
             });
 
-            // حفظ السجل كاملاً في التخزين المركزي
             const historyStr = JSON.stringify(window.cloudAnnouncementsHistory);
-            if (typeof setStore === 'function') {
-                setStore('bayan_cloud_announcements_history', historyStr);
-            }
+            setStore('bayan_cloud_announcements_history', historyStr);
 
             if (typeof updateNotifications === 'function') {
                 updateNotifications();
             }
         } catch (e) {
-            // صامت في حالة عدم وجود إنترنت
         }
     };
 
-    function showCloudBroadcastModal(data, seenKey, currentCount = 0) {
+    function showCloudBroadcastModal(item, seenKey, currentCount) {
         if (document.getElementById('bayan-broadcast-overlay')) return;
 
         const overlay = document.createElement('div');
         overlay.id = 'bayan-broadcast-overlay';
         overlay.style.cssText = `
-            position: fixed; inset: 0; background: rgba(10, 10, 24, 0.8);
-            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-            z-index: 9999998; display: flex; align-items: center; justify-content: center;
-            animation: updaterFadeIn 0.3s ease; direction: rtl; font-family: 'Cairo', 'Segoe UI', sans-serif;
+            position: fixed; inset: 0; z-index: 99999;
+            background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center;
+            direction: rtl; font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+            animation: fadeIn 0.3s ease-out;
         `;
 
-        const icon = data.icon || '🎉';
-        const title = data.title || 'إشعار من إدارة نظام بيان POS';
-        const message = data.message || '';
-        const link = data.link || '';
-        const linkText = data.linkText || 'معرفة المزيد 🔗';
+        const title = item.title || '📢 إشعار هام من إدارة نظام بيان POS';
+        const message = item.message || '';
+        const link = item.link || '';
+        const linkText = item.linkText || 'معرفة المزيد 🔗';
 
         overlay.innerHTML = `
-            <div style="background: linear-gradient(145deg, #1e113a, #0f172a); border: 2px solid rgba(212, 175, 55, 0.6); border-radius: 26px; padding: 32px 36px; width: 500px; max-width: 92vw; box-shadow: 0 25px 60px rgba(0,0,0,0.8), 0 0 30px rgba(212, 175, 55, 0.25); position: relative; color: white;">
-                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; border-bottom: 1.5px solid rgba(255,255,255,0.1); padding-bottom: 15px;">
-                    <div style="width: 52px; height: 52px; background: linear-gradient(135deg, #d4af37, #b45309); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 26px; box-shadow: 0 8px 20px rgba(212, 175, 55, 0.35);">
-                        ${icon}
-                    </div>
+            <div style="background: linear-gradient(135deg, #0f172a, #1e293b); border: 2px solid rgba(212, 175, 55, 0.5); border-radius: 24px; padding: 28px; width: 90%; max-width: 480px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; color: white;">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 16px;">
+                    <div style="font-size: 2.2rem;">📢</div>
                     <div>
-                        <h3 style="margin: 0; font-size: 1.3rem; font-weight: 900; color: #fde047;">${title}</h3>
-                        <p style="margin: 4px 0 0; font-size: 0.85rem; color: #cbd5e1; font-weight: 700;">رسالة مباشرة من فريق التطوير</p>
+                        <div style="font-weight: 900; font-size: 1.2rem; color: #fbbf24;">${title}</div>
+                        <p style="margin: 4px 0 0; font-size: 0.8rem; color: #cbd5e1; font-weight: 700;">رسالة مباشرة من فريق التطوير</p>
                     </div>
                 </div>
 
-                <div style="background: rgba(255,255,255,0.06); border-radius: 16px; padding: 18px 20px; font-size: 0.98rem; font-weight: 700; line-height: 1.8; color: #f8fafc; margin-bottom: 22px; border: 1px solid rgba(255,255,255,0.1); white-space: pre-line;">
+                <div style="background: rgba(255,255,255,0.06); border-radius: 16px; padding: 18px 20px; font-size: 0.95rem; font-weight: 700; line-height: 1.8; color: #f8fafc; margin-bottom: 22px; border: 1px solid rgba(255,255,255,0.1); white-space: pre-line;">
                     ${message}
                 </div>
 
                 <div style="display: flex; gap: 12px;">
-                    ${link ? `<button onclick="window.open('${link}', '_blank'); document.getElementById('bayan-broadcast-overlay').remove(); if(typeof setStore==='function') setStore('${seenKey}', '${currentCount + 1}');" style="flex:1; padding: 12px; background: linear-gradient(135deg, #10b981, #059669); color:white; border:none; border-radius:12px; font-weight:900; cursor:pointer; font-size:0.95rem;">${linkText}</button>` : ''}
-                    <button onclick="document.getElementById('bayan-broadcast-overlay').remove(); if(typeof setStore==='function') setStore('${seenKey}', '${currentCount + 1}');" style="flex:1; padding: 12px; background: rgba(255,255,255,0.15); color:white; border:1px solid rgba(255,255,255,0.25); border-radius:12px; font-weight:900; cursor:pointer; font-size:0.95rem;">إغلاق ✅</button>
+                    ${link ? `<button onclick="window.open('${link}', '_blank'); document.getElementById('bayan-broadcast-overlay').remove(); setStore('${seenKey}', '${currentCount + 1}');" style="flex:1; padding: 12px; background: linear-gradient(135deg, #10b981, #059669); color:white; border:none; border-radius:12px; font-weight:900; cursor:pointer; font-size:0.95rem;">${linkText}</button>` : ''}
+                    <button onclick="document.getElementById('bayan-broadcast-overlay').remove(); setStore('${seenKey}', '${currentCount + 1}');" style="flex:1; padding: 12px; background: rgba(255,255,255,0.15); color:white; border:1px solid rgba(255,255,255,0.25); border-radius:12px; font-weight:900; cursor:pointer; font-size:0.95rem;">إغلاق ✅</button>
                 </div>
             </div>
         `;

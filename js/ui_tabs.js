@@ -229,7 +229,7 @@
                     'sales', 'purchase', 'receipt', 'disbursement',
                     'sales-return', 'purchase-return', 'inventory',
                     'accounts', 'daily-report', 'history', 'invoices',
-                    'analysis', 'item-history', 'adjustment', 'reports-hub', 'warehouse-report', 'price-tracking', 'product-inquiry', 'ai-assistant', 'statement', 'treasury-audit'
+                    'analysis', 'item-history', 'adjustment', 'reports-hub', 'warehouse-report', 'product-inquiry', 'statement', 'treasury-audit'
                 ];
 
                 // التحقق من صلاحية كل قسم بشكل مستقل ودقيق
@@ -275,7 +275,7 @@
                             'invoices': 'الفواتير', 'analysis': 'تحليل المبيعات',
                             'item-history': 'حركة صنف', 'adjustment': 'تسوية',
                             'reports-hub': 'مركز التقارير', 'warehouse-report': 'أرصدة المخازن',
-                            'price-tracking': 'متابعة الأسعار', 'product-inquiry': 'استعلام الأصناف', 'ai-assistant': '🤖 مساعد بيان',
+                            'product-inquiry': 'استعلام الأصناف',
                             'statement': 'كشف حساب', 'treasury-audit': '💰 مراجعة الخزينة'
                         };
 
@@ -333,14 +333,6 @@
                 }
                 if (targetTab.type === 'settings') { 
                     loadSettings(); 
-                    if (typeof openSettingsTab === 'function') {
-                        const activeBtn = document.querySelector('#premium-settings-sidebar .premium-tab-btn.active');
-                        if (activeBtn) {
-                            activeBtn.click();
-                        } else {
-                            openSettingsTab('business');
-                        }
-                    }
                     renderUsersTable(); 
                     renderTrashTable(); 
                     renderWarehousesTable();
@@ -912,31 +904,43 @@
                     if (state.time) document.getElementById('adjTime').value = state.time;
 
                     isEditMode = Boolean(state.isEditMode);
+                    window.isEditMode = isEditMode;
                     editingInvoiceId = state.editingInvoiceId || null;
+                    window.editingInvoiceId = editingInvoiceId;
                     editingOriginalDate = state.editingOriginalDate || null;
                     editingInvoiceType = state.editingInvoiceType || null;
+                    window.editingInvoiceType = editingInvoiceType;
                     editingOriginalItems = Array.isArray(state.editingOriginalItems) ? [...state.editingOriginalItems] : [];
+                    window.editingOriginalItems = editingOriginalItems;
+
+                    if (editingInvoiceId && document.getElementById('adjBadgeID')) {
+                        document.getElementById('adjBadgeID').innerText = editingInvoiceId;
+                    }
                 } else {
                     window.adjCart = [];
                     if (typeof adjCart !== 'undefined') adjCart = [];
                     isEditMode = false;
+                    window.isEditMode = false;
                     editingInvoiceId = null;
+                    window.editingInvoiceId = null;
                     editingOriginalDate = null;
                     editingInvoiceType = null;
+                    window.editingInvoiceType = null;
                     editingOriginalItems = [];
+                    window.editingOriginalItems = [];
                     const now = new Date();
                     document.getElementById('adjDate').value = now.toLocaleDateString('en-CA');
                     document.getElementById('adjTime').value = now.toTimeString().slice(0, 5);
                 }
 
-                const adjSaveBtn = document.querySelector('#adjustment-section .btn-save');
+                const adjSaveBtn = document.querySelector('#adjustment-section .btn-save') || document.querySelector('#adjustment-section .acc-action-btn[onclick*="save"]');
                 if (adjSaveBtn) {
                     if (isEditMode) {
-                        adjSaveBtn.style.background = 'var(--main-orange, #f59e0b)';
+                        adjSaveBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
                         adjSaveBtn.innerText = '💾 حفظ التعديلات (F9)';
                     } else {
-                        adjSaveBtn.style.background = '';
-                        adjSaveBtn.innerText = '💾 حفظ التسوية (F9)';
+                        adjSaveBtn.style.background = 'linear-gradient(135deg, #16a34a, #15803d)';
+                        adjSaveBtn.innerText = '💾';
                     }
                 }
 
@@ -1030,10 +1034,7 @@
                     }
                 }
             }
-            if (type === 'price-tracking') {
-                if (typeof initPriceTracking === 'function') initPriceTracking();
-            }
-                        if (type === 'product-inquiry') {
+            if (type === 'product-inquiry') {
                 setTimeout(() => {
                     const searchInput = document.getElementById('inquirySearchInput');
                     if (searchInput) searchInput.focus();
@@ -1104,9 +1105,7 @@
                 'settings': '⚙️ الإعدادات',
                 'adjustment': '⚖️ تسوية',
                 'reports-hub': '📈 مركز التقارير',
-                'price-tracking': '💰 الأسعار',
-                'product-inquiry': '🔍 استعلام',
-                'ai-assistant': '🤖 مساعد'
+                'product-inquiry': '🔍 استعلام'
             };
 
             tabBar.innerHTML = '';
@@ -1299,10 +1298,6 @@
             }
         }
         window.closeCurrentSectionTab = closeCurrentSectionTab;
-
-        function showCloseWarning() {
-            document.getElementById('confirmModal').classList.remove('hidden');
-        }
 
         function hideCloseWarning() {
             document.getElementById('confirmModal').classList.add('hidden');

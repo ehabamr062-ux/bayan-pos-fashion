@@ -170,8 +170,22 @@ app.on('second-instance', () => {
     }
 });
 
+const server_hub = require('./server_hub.js');
+
 app.whenReady().then(() => {
     createWindow();
+
+    // تشغيل السيرفر الشبكي المحلي المدمج لربط أجهزة التابلت والفروع
+    try {
+        server_hub.startServer(__dirname, (event, data) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send(event, data);
+            }
+        });
+    } catch (err) {
+        console.error('[ServerHub] Failed to start local server:', err.message);
+    }
+
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -509,4 +523,59 @@ ipcMain.handle('quit-and-install-update', () => {
 
 ipcMain.handle('get-app-version', () => {
     return app.getVersion();
+});
+
+// =========================================================================
+// 🌐 Local Server Hub IPC Handlers
+// =========================================================================
+ipcMain.handle('get-local-server-info', () => {
+    return {
+        isRunning: true,
+        ip: server_hub.getLocalIPAddress(),
+        port: server_hub.SERVER_PORT,
+        pairedCount: server_hub.getPairedDevicesList().length,
+        pendingTransfersCount: server_hub.getInTransitTransfersList().filter(t => t.transferStatus === 'pending').length
+    };
+});
+
+ipcMain.handle('get-paired-devices', () => {
+    return server_hub.getPairedDevicesList();
+});
+
+ipcMain.handle('remove-paired-device', (event, deviceId) => {
+    return server_hub.removePairedDevice(deviceId);
+});
+
+ipcMain.handle('get-pending-pairing-requests', () => {
+    return server_hub.getPendingPairingRequests();
+});
+
+ipcMain.handle('approve-pairing-request', (event, reqId) => {
+    return server_hub.approvePairingRequest(reqId);
+});
+
+ipcMain.handle('get-in-transit-transfers', () => {
+    return server_hub.getInTransitTransfersList();
+});
+
+ipcMain.handle('sync-in-transit-transfers', (event, list) => {
+    return server_hub.updateInTransitTransfersList(list);
+});
+
+ipcMain.handle('sync-master-db', (event, dbData) => {
+    return server_hub.updateMasterDbData(dbData);
+});
+
+ipcMain.handle('get-master-db', () => {
+    return server_hub.getMasterDbData();
+});
+
+ipcMain.handle('fix-firewall-rule', async () => {
+    const { exec } = require('child_process');
+    return new Promise((resolve) => {
+        exec('powershell -Command "Start-Process cmd -ArgumentList \'/c netsh advfirewall firewall add rule name=\\\"Bayan POS Local Server\\\" dir=in action=allow protocol=TCP localport=4545 profile=any\' -Verb RunAs"', (err) => {
+            if (err) resolve({ success: false, message: err.message });
+            else resolve({ success: true });
+        });
+    });
 });

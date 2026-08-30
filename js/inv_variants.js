@@ -30,7 +30,22 @@ function getBarcodeLabelSettings() {
     try {
         const stored = typeof getStore === 'function' ? getStore('bayan_barcode_label_settings') : null;
         if (stored) {
-            return JSON.parse(stored);
+            const parsed = JSON.parse(stored);
+            return Object.assign({
+                width: 50,
+                height: 25,
+                offsetX: 0,
+                barcodeHeight: 24,
+                showShopName: true,
+                showItemName: true,
+                showPrice: true,
+                showCode: true,
+                scaleEnabled: true,
+                scalePrefix: '2',
+                scaleType: 'weight',
+                scalePluLength: 6,
+                scaleValueLength: 5
+            }, parsed);
         }
     } catch(e) {}
     return {
@@ -41,7 +56,12 @@ function getBarcodeLabelSettings() {
         showShopName: true,
         showItemName: true,
         showPrice: true,
-        showCode: true
+        showCode: true,
+        scaleEnabled: true,
+        scalePrefix: '2',
+        scaleType: 'weight',
+        scalePluLength: 6,
+        scaleValueLength: 5
     };
 }
 
@@ -54,12 +74,37 @@ function saveBarcodeLabelSettings() {
         showShopName: document.getElementById('bcShowShopName')?.checked ?? true,
         showItemName: document.getElementById('bcShowItemName')?.checked ?? true,
         showPrice: document.getElementById('bcShowPrice')?.checked ?? true,
-        showCode: document.getElementById('bcShowCode')?.checked ?? true
+        showCode: document.getElementById('bcShowCode')?.checked ?? true,
+        scaleEnabled: document.getElementById('scaleBarcodeEnabled')?.checked ?? true,
+        scalePrefix: document.getElementById('scaleBarcodePrefix')?.value || '2',
+        scaleType: document.getElementById('scaleBarcodeType')?.value || 'weight',
+        scalePluLength: parseInt(document.getElementById('scalePluLength')?.value, 10) || 6,
+        scaleValueLength: parseInt(document.getElementById('scaleValueLength')?.value, 10) || 5
     };
     if (typeof setStore === 'function') {
         setStore('bayan_barcode_label_settings', JSON.stringify(s));
     }
-    if (typeof showToast === 'function') showToast("✅ تم حفظ إعدادات ومقاسات طابعة الباركود بنجاح!", "success");
+    if (typeof showToast === 'function') showToast("✅ تم حفظ إعدادات الباركود وموازين الوزن بنجاح!", "success");
+}
+
+function highlightActiveBarcodePreset(width, height) {
+    document.querySelectorAll('.bc-preset-btn').forEach(btn => {
+        btn.style.background = '#ffffff';
+        btn.style.borderColor = '#e2e8f0';
+        btn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.03)';
+        const badge = btn.querySelector('.preset-badge');
+        if (badge) badge.style.display = 'none';
+    });
+
+    const targetId = `bc-preset-${width}-${height}`;
+    const activeBtn = document.getElementById(targetId);
+    if (activeBtn) {
+        activeBtn.style.background = '#f0fdf4';
+        activeBtn.style.borderColor = '#059669';
+        activeBtn.style.boxShadow = '0 0 0 2px rgba(5, 150, 105, 0.2)';
+        const badge = activeBtn.querySelector('.preset-badge');
+        if (badge) badge.style.display = 'block';
+    }
 }
 
 function loadBarcodeLabelSettings() {
@@ -72,23 +117,50 @@ function loadBarcodeLabelSettings() {
     if (document.getElementById('bcShowItemName')) document.getElementById('bcShowItemName').checked = s.showItemName;
     if (document.getElementById('bcShowPrice')) document.getElementById('bcShowPrice').checked = s.showPrice;
     if (document.getElementById('bcShowCode')) document.getElementById('bcShowCode').checked = s.showCode;
+
+    // Scale barcode settings
+    if (document.getElementById('scaleBarcodeEnabled')) document.getElementById('scaleBarcodeEnabled').checked = s.scaleEnabled ?? true;
+    if (document.getElementById('scaleBarcodePrefix')) document.getElementById('scaleBarcodePrefix').value = s.scalePrefix || '2';
+    if (document.getElementById('scaleBarcodeType')) document.getElementById('scaleBarcodeType').value = s.scaleType || 'weight';
+    if (document.getElementById('scalePluLength')) document.getElementById('scalePluLength').value = s.scalePluLength || 6;
+    if (document.getElementById('scaleValueLength')) document.getElementById('scaleValueLength').value = s.scaleValueLength || 5;
+
+    highlightActiveBarcodePreset(s.width, s.height);
+}
+
+function applyBarcodePreset(width, height, offsetX = 0, barcodeHeight = 24, btnElement = null) {
+    if (document.getElementById('bcLabelWidth')) document.getElementById('bcLabelWidth').value = width;
+    if (document.getElementById('bcLabelHeight')) document.getElementById('bcLabelHeight').value = height;
+    if (document.getElementById('bcLabelOffsetX')) document.getElementById('bcLabelOffsetX').value = offsetX;
+    if (document.getElementById('bcBarcodeHeight')) document.getElementById('bcBarcodeHeight').value = barcodeHeight;
+    
+    highlightActiveBarcodePreset(width, height);
+    saveBarcodeLabelSettings();
+    if (typeof showToast === 'function') {
+        showToast(`🎯 تم اختيار قالب (${width}×${height} مم) وحفظه بنجاح!`, "info");
+    }
 }
 
 function testPrintBarcodeLabel() {
     const testItem = {
         id: 999,
-        name: 'منتج تجريبي للتجربة',
+        name: 'قميص كاجوال رجالي - M / أبيض',
         code: 'TEST-101',
-        barcode: '123456789012',
-        price: 99.00
+        barcode: '2026010199',
+        price: 350.00
     };
-    executePrinting([testItem], 1);
+    if (typeof executePrinting === 'function') {
+        executePrinting([testItem], 1);
+    } else if (typeof showToast === 'function') {
+        showToast("⚠️ جاري تجهيز معاينة ملصق الباركود...", "info");
+    }
 }
 
 window.getBarcodeLabelSettings = getBarcodeLabelSettings;
 window.saveBarcodeLabelSettings = saveBarcodeLabelSettings;
 window.loadBarcodeLabelSettings = loadBarcodeLabelSettings;
 window.testPrintBarcodeLabel = testPrintBarcodeLabel;
+window.applyBarcodePreset = applyBarcodePreset;
 
 function isBarcodeInUseAnywhere(barcode, excludeBarcode = null) {
     if (!barcode) return false;
@@ -175,33 +247,101 @@ async function executePrinting(modeOrTargets, copies = 1) {
         }
     });
 
+    // 1. إنشاء عناصر الباركود ورسم الـ SVG محلياً عبر JsBarcode الموجود في النافذة
+    let labelsHtml = '';
+    let labelIdx = 0;
+
+    // حاوية مؤقتة لرسم الباركود بدقة
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.top = '-9999px';
+    document.body.appendChild(tempContainer);
+
+    printableItems.forEach(item => {
+        const priceFormatted = (item.price || 0).toFixed(2) + ' ' + currency;
+        const hasVariantInfo = !!(item.size || item.color);
+
+        for (let i = 0; i < item.copies; i++) {
+            labelIdx++;
+            const svgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svgEl.id = `temp-barcode-${labelIdx}`;
+            tempContainer.appendChild(svgEl);
+
+            if (window.JsBarcode) {
+                try {
+                    const bcStr = String(item.barcode || '').trim();
+                    window.JsBarcode(svgEl, bcStr, {
+                        format: "CODE128",
+                        width: 1.35,
+                        height: parseInt(bSettings.barcodeHeight || 26, 10),
+                        displayValue: true,
+                        fontSize: 9,
+                        font: "Segoe UI, Arial, sans-serif",
+                        fontOptions: "bold",
+                        textMargin: 1,
+                        margin: 2
+                    });
+                } catch(err) {
+                    console.warn("Barcode rendering error:", err);
+                }
+            }
+
+            const svgString = svgEl.outerHTML;
+
+            labelsHtml += `
+                <div class="barcode-label">
+                    ${bSettings.showShopName ? `<div class="shop-title">${shopName}</div>` : ''}
+                    ${bSettings.showItemName ? `<div class="item-name" title="${item.name}">${item.name}</div>` : ''}
+                    ${hasVariantInfo ? `
+                        <div class="variant-badge-row">
+                            ${item.size ? `<span class="size-badge">SIZE: ${item.size}</span>` : ''}
+                            ${item.color ? `<span class="color-badge">لون: ${item.color}</span>` : ''}
+                        </div>
+                    ` : ''}
+                    ${bSettings.showCode && item.code ? `<div class="item-code-line">كود: ${item.code}</div>` : ''}
+                    ${svgString}
+                    ${bSettings.showPrice ? `<div class="price-tag">${priceFormatted}</div>` : ''}
+                </div>
+            `;
+        }
+    });
+
+    // إزالة الحاوية المؤقتة
+    document.body.removeChild(tempContainer);
+
     const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+        return showToast("⚠️ يرجى السماح بالنوافذ المنبثقة للطباعة!", "error");
+    }
+
     printWindow.document.write(`
-        <html>
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
         <head>
+            <meta charset="UTF-8">
             <title>طباعة ملصقات الباركود والملابس</title>
             <style>
                 @page {
                     size: ${bSettings.width}mm ${bSettings.height}mm;
-                    margin: 0mm;
+                    margin: 0mm !important;
                 }
                 * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
                 html, body {
                     width: ${bSettings.width}mm;
+                    height: ${bSettings.height}mm;
                     margin: 0 !important;
                     padding: 0 !important;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-family: 'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                     direction: rtl;
                     text-align: center;
                     background: #fff;
                     color: #000;
+                    overflow: hidden;
                 }
                 .label-container {
                     width: 100%;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
+                    display: block;
                     margin: 0;
                     padding: 0;
                 }
@@ -209,7 +349,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     width: ${bSettings.width}mm;
                     height: ${bSettings.height}mm;
                     max-height: ${bSettings.height}mm;
-                    padding: 0.8mm 1.5mm;
+                    padding: 1.2mm 1.5mm;
                     margin: 0 auto;
                     position: relative;
                     left: ${bSettings.offsetX}mm;
@@ -220,77 +360,98 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     page-break-after: always;
                     page-break-inside: avoid;
                     overflow: hidden;
-                    border: 1px dashed #ccc;
                     box-sizing: border-box;
                 }
-                .shop-title { font-size: 7.5pt; font-weight: 800; color: #000; line-height: 1; margin: 0; }
-                .item-name { font-size: 8.5pt; font-weight: 900; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: #000; line-height: 1.1; }
-                .variant-badge-row { display: flex; justify-content: center; gap: 4px; align-items: center; width: 100%; font-size: 7pt; font-weight: 800; }
-                .size-badge { background: #000; color: #fff; padding: 0.5px 3px; border-radius: 2px; }
-                .color-badge { color: #333; }
-                .item-code-line { font-size: 6.5pt; font-weight: 900; color: #000; margin: 0; line-height: 1; }
-                .price-tag { font-size: 9.5pt; font-weight: 900; color: #000; border: 1.2px solid #000; padding: 0.5mm 5mm; border-radius: 3px; background: #fff; line-height: 1.1; margin: 0; }
-                svg { max-width: 96%; height: ${bSettings.barcodeHeight || 24}px; margin: 0 auto; display: block; }
+                .shop-title { 
+                    font-size: 8.5pt; 
+                    font-weight: 900; 
+                    color: #000000; 
+                    line-height: 1.1; 
+                    margin: 0;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    max-width: 100%;
+                }
+                .item-name { 
+                    font-size: 9.5pt; 
+                    font-weight: 900; 
+                    margin: 0; 
+                    white-space: nowrap; 
+                    overflow: hidden; 
+                    text-overflow: ellipsis; 
+                    max-width: 100%; 
+                    color: #000000; 
+                    line-height: 1.15; 
+                }
+                .variant-badge-row { 
+                    display: flex; 
+                    justify-content: center; 
+                    gap: 6px; 
+                    align-items: center; 
+                    width: 100%; 
+                    font-size: 8.5pt; 
+                    font-weight: 900; 
+                    margin: 0;
+                }
+                .size-badge { 
+                    background: #000000; 
+                    color: #ffffff; 
+                    padding: 1px 6px; 
+                    border-radius: 4px; 
+                    font-weight: 900;
+                    font-size: 8.5pt;
+                }
+                .color-badge { 
+                    color: #000000; 
+                    font-weight: 900;
+                    font-size: 8.5pt;
+                }
+                .item-code-line { 
+                    font-size: 7.5pt; 
+                    font-weight: 900; 
+                    color: #000000; 
+                    margin: 0; 
+                    line-height: 1; 
+                }
+                .price-tag { 
+                    font-size: 11pt; 
+                    font-weight: 900; 
+                    color: #000000; 
+                    border: 1.5px solid #000000; 
+                    padding: 0.8mm 5mm; 
+                    border-radius: 4px; 
+                    background: #ffffff; 
+                    line-height: 1.1; 
+                    margin: 0; 
+                }
+                svg { 
+                    max-width: 95%; 
+                    width: 95%;
+                    height: 28px !important;
+                    margin: 0 auto; 
+                    display: block; 
+                }
                 @media print {
-                    html, body { width: ${bSettings.width}mm; margin: 0 !important; padding: 0 !important; }
+                    html, body { width: ${bSettings.width}mm; height: ${bSettings.height}mm; margin: 0 !important; padding: 0 !important; }
                     .barcode-label { border: none !important; box-shadow: none !important; }
                 }
             </style>
         </head>
         <body>
-            <div class="label-container" id="printableLabels"></div>
+            <div class="label-container">
+                ${labelsHtml}
+            </div>
         </body>
         </html>
     `);
 
-    const labelsDiv = printWindow.document.getElementById('printableLabels');
-    let labelIdx = 0;
-
-    printableItems.forEach(item => {
-        const priceFormatted = (item.price || 0).toFixed(2) + ' ' + currency;
-        const hasVariantInfo = !!(item.size || item.color);
-
-        for (let i = 0; i < item.copies; i++) {
-            labelIdx++;
-            const label = printWindow.document.createElement('div');
-            label.className = 'barcode-label';
-            label.innerHTML = `
-                ${bSettings.showShopName ? `<div class="shop-title">${shopName}</div>` : ''}
-                ${bSettings.showItemName ? `<div class="item-name" title="${item.name}">${item.name}</div>` : ''}
-                ${hasVariantInfo ? `
-                    <div class="variant-badge-row">
-                        ${item.size ? `<span class="size-badge">SIZE: ${item.size}</span>` : ''}
-                        ${item.color ? `<span class="color-badge">لون: ${item.color}</span>` : ''}
-                    </div>
-                ` : ''}
-                ${bSettings.showCode && item.code ? `<div class="item-code-line">كود: ${item.code}</div>` : ''}
-                <svg id="barcode-${labelIdx}"></svg>
-                ${bSettings.showPrice ? `<div class="price-tag">${priceFormatted}</div>` : ''}
-            `;
-            labelsDiv.appendChild(label);
-
-            if (window.JsBarcode) {
-                try {
-                    window.JsBarcode(label.querySelector('svg'), String(item.barcode), {
-                        format: "CODE128",
-                        width: 1.3,
-                        height: bSettings.barcodeHeight || 24,
-                        displayValue: true,
-                        fontSize: 8,
-                        textMargin: 0,
-                        margin: 0
-                    });
-                } catch(err) {
-                    console.warn("Barcode rendering error:", err);
-                }
-            }
-        }
-    });
+    printWindow.document.close();
 
     setTimeout(() => {
         printWindow.focus();
         printWindow.print();
-    }, 400);
+    }, 250);
 }
 
 function applyPresetSizes(presetType) {
@@ -298,8 +459,14 @@ function applyPresetSizes(presetType) {
     if (!input) return;
     if (presetType === 'clothes') {
         input.value = 'S, M, L, XL, XXL, 3XL';
+    } else if (presetType === 'pants') {
+        input.value = '28, 30, 32, 34, 36, 38, 40, 42';
     } else if (presetType === 'shoes') {
         input.value = '38, 39, 40, 41, 42, 43, 44, 45';
+    } else if (presetType === 'kids') {
+        input.value = '0-3M, 3-6M, 1Y, 2Y, 4Y, 6Y, 8Y, 10Y, 12Y';
+    } else if (presetType === 'suits') {
+        input.value = '48, 50, 52, 54, 56, 58';
     }
 }
 
@@ -328,8 +495,17 @@ function addVariantRow(size = '', color = '', barcode = '', stock = 1, price = n
     const defaultCost = cost !== null ? cost : (parseFloat(document.getElementById('newItemCost')?.value) || 0);
     const autoBarcode = barcode || generateVariantBarcode(size, color, rowIdx);
     const effectiveStock = (stock !== undefined && stock !== null && stock !== '') ? stock : 1;
+    const isLocked = (typeof window.isVariantsStockLocked !== 'undefined') ? window.isVariantsStockLocked : true;
 
     const tr = document.createElement('tr');
+    tr.dataset.origStock = effectiveStock;
+    tr.dataset.origPrice = defaultPrice;
+    tr.dataset.origWs = defaultWs;
+    tr.dataset.origCost = defaultCost;
+    tr.dataset.origBarcode = autoBarcode;
+    tr.dataset.origSize = size;
+    tr.dataset.origColor = color;
+
     tr.innerHTML = `
         <td style="font-weight: bold; color: #64748b;">${rowIdx}</td>
         <td>
@@ -341,43 +517,32 @@ function addVariantRow(size = '', color = '', barcode = '', stock = 1, price = n
                 style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px;">
         </td>
         <td>
-            <div style="display: flex; gap: 4px; align-items: center;">
-                <input type="text" class="search-input var-barcode-input" value="${autoBarcode}" placeholder="باركود القطعة"
-                    style="height: 32px; font-family: monospace; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; letter-spacing: 0.5px; font-size: 0.8rem;">
-                <button type="button" class="bayan-btn" onclick="this.previousElementSibling.value = generateVariantBarcode();"
-                    style="padding: 2px 6px; height: 32px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.75rem;" title="توليد باركود جديد">⚡</button>
-            </div>
+            <input type="text" class="search-input var-barcode-input" value="${autoBarcode}" placeholder="باركود القطعة"
+                style="height: 32px; font-family: monospace; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; letter-spacing: 0.5px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
         </td>
         <td>
-            <div style="display: flex; gap: 3px; align-items: center; justify-content: center;">
-                <button type="button" class="var-lock-btn" onclick="toggleDetailedStockLock(this)"
-                    data-locked="true"
-                    style="background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; width: 24px; height: 32px; cursor: pointer; font-size: 0.75rem; padding: 0;"
-                    title="قفل الحقل ضد التعديل بالخطأ (اضغط لفتح القفل)">🔒</button>
-                <input type="number" class="search-input var-stock-input" value="${effectiveStock}" min="0"
-                    data-original-stock="${effectiveStock}"
-                    readonly
-                    style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; cursor: not-allowed;">
-                <button type="button" class="var-undo-btn" onclick="undoDetailedStockChange(this)"
-                    style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; width: 24px; height: 32px; cursor: pointer; font-size: 0.8rem; padding: 0; color: #64748b;"
-                    title="استرجاع الكمية السابقة (${effectiveStock})">↩️</button>
-            </div>
+            <input type="number" class="search-input var-stock-input" value="${effectiveStock}" min="0" data-orig-stock="${effectiveStock}"
+                ${isLocked ? 'readonly' : ''}
+                onfocus="if(window.isVariantsStockLocked) { this.blur(); if(typeof showToast==='function') showToast('🔒 الكميات مقفلة ومحمية. انقر على زر القفل 🔓 في الأعلى للتعديل', 'warning'); } else { this.select(); }"
+                style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; background: ${isLocked ? '#f8fafc' : '#ffffff'}; cursor: ${isLocked ? 'not-allowed' : 'text'};">
         </td>
         <td>
-            <input type="number" class="search-input var-price-input" value="${defaultPrice}"
+            <input type="number" class="search-input var-price-input" value="${defaultPrice}" data-orig-price="${defaultPrice}"
                 style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; color: #047857;">
         </td>
         <td>
-            <input type="number" class="search-input var-ws-input" value="${defaultWs}"
+            <input type="number" class="search-input var-ws-input" value="${defaultWs}" data-orig-ws="${defaultWs}"
                 style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; color: #0284c7;">
         </td>
         <td>
-            <input type="number" class="search-input var-cost-input" value="${defaultCost}"
+            <input type="number" class="search-input var-cost-input" value="${defaultCost}" data-orig-cost="${defaultCost}"
                 style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; color: #d97706;">
         </td>
-        <td>
+        <td style="white-space: nowrap; padding: 4px;">
+            <button type="button" onclick="restoreSingleVariantRow(this)" title="استعادة القيم الأصلية لهذا الصف"
+                style="background: #f0fdf4; color: #166534; border: 1px solid #86efac; border-radius: 6px; padding: 4px 6px; cursor: pointer; font-weight: bold; margin-left: 3px;">🔄</button>
             <button type="button" onclick="this.closest('tr').remove(); updateVariantsCountBadge(); renderSmartMatrixView();"
-                style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-weight: bold;">✕</button>
+                style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-weight: bold;" title="حذف هذا الصف">✕</button>
         </td>
     `;
     tbody.appendChild(tr);
@@ -627,6 +792,10 @@ function toggleVariantsViewMode(mode = 'matrix') {
     }
 }
 
+// متغيرات حالة القفل والحماية للأرصدة
+window.isVariantsStockLocked = true;
+window.isMainStockLocked = true;
+
 function renderSmartMatrixView() {
     const wrapper = document.getElementById('smartMatrixWrapper');
     if (!wrapper) return;
@@ -644,20 +813,14 @@ function renderSmartMatrixView() {
     // استخراج كافة المقاسات والألوان الفريدة
     const sizeSet = new Set();
     const colorSet = new Set();
-    const matrixMap = {}; // key: `${color}__${size}` => { rowIndex, stock, barcode, price, cost }
+    const matrixMap = {}; // key: `${color}__${size}` => { rowIndex, stock, origStock, barcode, price, cost }
 
     for (let i = 0; i < rows.length; i++) {
         const size = rows[i].querySelector('.var-size-input')?.value?.trim() || 'موحد';
         const color = rows[i].querySelector('.var-color-input')?.value?.trim() || 'موحد';
-        const stockInp = rows[i].querySelector('.var-stock-input');
-        const stock = parseFloat(stockInp?.value) || 0;
-        
-        // قراءة الكمية الأصلية الثابتة التي دخل بها الصنف للتعديل
-        let origStock = stockInp ? stockInp.dataset.originalStock : undefined;
-        if (origStock === undefined || origStock === null) {
-            origStock = String(stock);
-            if (stockInp) stockInp.dataset.originalStock = origStock;
-        }
+        const stockInput = rows[i].querySelector('.var-stock-input');
+        const stock = parseFloat(stockInput?.value) || 0;
+        const origStock = (stockInput && stockInput.dataset.origStock !== undefined) ? parseFloat(stockInput.dataset.origStock) : stock;
 
         sizeSet.add(size);
         colorSet.add(color);
@@ -665,12 +828,13 @@ function renderSmartMatrixView() {
         matrixMap[`${color}__${size}`] = {
             rowIndex: i,
             stock: stock,
-            originalStock: origStock
+            origStock: origStock
         };
     }
 
     const sizes = Array.from(sizeSet);
     const colors = Array.from(colorSet);
+    const isLocked = (typeof window.isVariantsStockLocked !== 'undefined') ? window.isVariantsStockLocked : true;
 
     // حساب إجماليات المقاسات (الأعمدة)
     const colTotals = {};
@@ -697,31 +861,22 @@ function renderSmartMatrixView() {
         sizes.forEach(sz => {
             const item = matrixMap[`${col}__${sz}`];
             const stockVal = item ? item.stock : 0;
-            const origStockVal = item ? item.originalStock : '0';
             const rIdx = item ? item.rowIndex : -1;
+            const origVal = item ? item.origStock : 0;
+            const isChanged = item && origVal !== undefined && origVal !== stockVal;
             rowSum += stockVal;
             colTotals[sz] += stockVal;
             grandTotalStock += stockVal;
 
             if (item) {
                 cellsHtml += `
-                    <td style="padding: 6px; border: 1px solid #f1f5f9;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 3px;">
-                            <button type="button" class="matrix-lock-btn" onclick="toggleMatrixStockLock(this)"
-                                data-locked="true"
-                                style="background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; width: 22px; height: 26px; cursor: pointer; font-size: 0.72rem; padding: 0;"
-                                title="قفل الحقل ضد التعديل بالخطأ (اضغط لفتح القفل)">🔒</button>
-                            <input type="number" value="${stockVal}" min="0" data-row-index="${rIdx}"
-                                data-original-stock="${origStockVal}"
-                                oninput="syncMatrixInputToDetailedRow(${rIdx}, this.value, false)"
-                                onchange="syncMatrixInputToDetailedRow(${rIdx}, this.value, true)"
-                                onfocus="this.select()"
-                                readonly
-                                style="width: 52px; height: 30px; font-size: 0.95rem; font-weight: 900; text-align: center; border: 1.5px solid #cbd5e1; border-radius: 6px; color: ${stockVal > 0 ? '#047857' : '#94a3b8'}; background: #f8fafc; cursor: not-allowed;">
-                            <button type="button" class="matrix-undo-btn" onclick="undoMatrixStockChange(this, ${rIdx})"
-                                style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; width: 22px; height: 26px; cursor: pointer; font-size: 0.75rem; padding: 0; color: #64748b;"
-                                title="استرجاع الكمية الأصلية السابقة (${origStockVal})">↩️</button>
-                        </div>
+                    <td style="padding: 6px; border: 1px solid #f1f5f9; position: relative;">
+                        <input type="number" value="${stockVal}" min="0" data-row-index="${rIdx}" data-orig-stock="${origVal}"
+                            ${isLocked ? 'readonly' : ''}
+                            onchange="syncMatrixInputToDetailedRow(${rIdx}, this.value)"
+                            onfocus="if(window.isVariantsStockLocked) { this.blur(); if(typeof showToast==='function') showToast('🔒 الكميات مقفلة ومحمية. انقر على زر القفل 🔓 في الأعلى للتعديل', 'warning'); } else { this.select(); }"
+                            style="width: 58px; height: 32px; font-size: 1rem; font-weight: 900; text-align: center; border: 1.5px solid ${isChanged ? '#f59e0b' : (isLocked ? '#cbd5e1' : '#3b82f6')}; border-radius: 6px; color: ${stockVal > 0 ? '#047857' : '#64748b'}; background: ${isLocked ? (stockVal > 0 ? '#f8fafc' : '#ffffff') : '#eff6ff'}; cursor: ${isLocked ? 'not-allowed' : 'text'};"
+                            title="${isChanged ? `القيمة الأصلية السابقة: ${origVal}` : ''}">
                     </td>
                 `;
             } else {
@@ -743,7 +898,9 @@ function renderSmartMatrixView() {
                 <td style="padding: 8px 12px; font-weight: 900; font-size: 1rem; color: #0284c7; background: #f0f9ff; border: 1px solid #e0f2fe;">
                     ${rowSum}
                 </td>
-                <td style="padding: 6px; border: 1px solid #f1f5f9;">
+                <td style="padding: 6px; border: 1px solid #f1f5f9; white-space: nowrap;">
+                    <button type="button" onclick="restoreColorRowInMatrix('${col}')"
+                        style="background: #f0fdf4; color: #166534; border: 1px solid #86efac; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-weight: 900; margin-left: 3px;" title="استعادة أرصدة هذا اللون للأصل">🔄</button>
                     <button type="button" onclick="removeColorRowFromMatrix('${col}')"
                         style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-weight: 900;" title="حذف كل مقاسات هذا اللون">✕</button>
                 </td>
@@ -781,96 +938,176 @@ function syncMatrixInputToDetailedRow(rowIndex, newStock) {
     renderSmartMatrixView();
 }
 
-// 🔒 دالة قفل / فتح تعديل الكمية في الشبكة الذكية
-window.toggleMatrixStockLock = function(btn) {
-    const container = btn.closest('div');
-    if (!container) return;
-    const input = container.querySelector('input[type="number"]');
-    if (!input) return;
+// استعادة القيم الأصلية لصف واحد في جدول التشكيلات
+window.restoreSingleVariantRow = function(btn) {
+    const tr = btn.closest('tr');
+    if (!tr) return;
+    const stockInp = tr.querySelector('.var-stock-input');
+    const priceInp = tr.querySelector('.var-price-input');
+    const wsInp = tr.querySelector('.var-ws-input');
+    const costInp = tr.querySelector('.var-cost-input');
 
-    const isLocked = btn.dataset.locked === 'true';
-    if (isLocked) {
-        // فتح القفل
-        btn.dataset.locked = 'false';
-        btn.innerText = '🔓';
-        btn.style.background = '#dcfce7';
-        btn.style.borderColor = '#86efac';
-        input.removeAttribute('readonly');
-        input.style.cursor = 'text';
-        input.style.background = '#fff';
-        input.style.borderColor = '#10b981';
-        input.focus();
-        input.select();
-        showToast("🔓 تم فتح قفل الكمية للتعديل", "info");
-    } else {
-        // إعادة القفل
-        btn.dataset.locked = 'true';
-        btn.innerText = '🔒';
-        btn.style.background = '#f1f5f9';
-        btn.style.borderColor = '#cbd5e1';
-        input.setAttribute('readonly', 'true');
-        input.style.cursor = 'not-allowed';
-        input.style.background = '#f8fafc';
-        input.style.borderColor = '#cbd5e1';
-    }
-};
+    if (stockInp && stockInp.dataset.origStock !== undefined) stockInp.value = stockInp.dataset.origStock;
+    if (priceInp && priceInp.dataset.origPrice !== undefined) priceInp.value = priceInp.dataset.origPrice;
+    if (wsInp && wsInp.dataset.origWs !== undefined) wsInp.value = wsInp.dataset.origWs;
+    if (costInp && costInp.dataset.origCost !== undefined) costInp.value = costInp.dataset.origCost;
 
-// ↩️ دالة استرجاع الكمية السابقة في الشبكة الذكية
-window.undoMatrixStockChange = function(btn, rowIndex) {
-    const container = btn.closest('div');
-    if (!container) return;
-    const input = container.querySelector('input[type="number"]');
-    if (!input) return;
-
-    const origStock = input.dataset.originalStock || '0';
-    input.value = origStock;
-    syncMatrixInputToDetailedRow(rowIndex, origStock);
-    showToast(`↩️ تم استرجاع الكمية الأصلية: (${origStock})`, "success");
-};
-
-// 🔒 دالة قفل / فتح تعديل الكمية في الجدول التفصيلي
-window.toggleDetailedStockLock = function(btn) {
-    const container = btn.closest('div');
-    if (!container) return;
-    const input = container.querySelector('.var-stock-input');
-    if (!input) return;
-
-    const isLocked = btn.dataset.locked === 'true';
-    if (isLocked) {
-        btn.dataset.locked = 'false';
-        btn.innerText = '🔓';
-        btn.style.background = '#dcfce7';
-        btn.style.borderColor = '#86efac';
-        input.removeAttribute('readonly');
-        input.style.cursor = 'text';
-        input.style.background = '#fff';
-        input.style.borderColor = '#10b981';
-        input.focus();
-        input.select();
-        showToast("🔓 تم فتح قفل الكمية للتعديل", "info");
-    } else {
-        btn.dataset.locked = 'true';
-        btn.innerText = '🔒';
-        btn.style.background = '#f1f5f9';
-        btn.style.borderColor = '#cbd5e1';
-        input.setAttribute('readonly', 'true');
-        input.style.cursor = 'not-allowed';
-        input.style.background = '#f8fafc';
-        input.style.borderColor = '#cbd5e1';
-    }
-};
-
-// ↩️ دالة استرجاع الكمية السابقة في الجدول التفصيلي
-window.undoDetailedStockChange = function(btn) {
-    const container = btn.closest('div');
-    if (!container) return;
-    const input = container.querySelector('.var-stock-input');
-    if (!input) return;
-
-    const origStock = input.dataset.originalStock || '0';
-    input.value = origStock;
     renderSmartMatrixView();
-    showToast(`↩️ تم استرجاع الكمية الأصلية: (${origStock})`, "success");
+    if (typeof showToast === 'function') showToast('🔄 تمت استعادة القيم الأصلية لهذا الصف', 'success');
+};
+
+// استعادة أرصدة لون محدد في الماتريكس
+window.restoreColorRowInMatrix = function(col) {
+    const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+    let count = 0;
+    for (let i = 0; i < rows.length; i++) {
+        const colInp = rows[i].querySelector('.var-color-input');
+        if (colInp && colInp.value.trim() === col) {
+            const stockInp = rows[i].querySelector('.var-stock-input');
+            if (stockInp && stockInp.dataset.origStock !== undefined) {
+                stockInp.value = stockInp.dataset.origStock;
+                count++;
+            }
+        }
+    }
+    renderSmartMatrixView();
+    if (typeof showToast === 'function') showToast(`🔄 تم استعادة أرصدة لون (${col}) للأصل`, 'success');
+};
+
+// تبديل حالة قفل كميات المقاسات والألوان
+window.toggleVariantsStockLock = function() {
+    window.isVariantsStockLocked = !window.isVariantsStockLocked;
+    const btn = document.getElementById('btnToggleVariantsLock');
+    const icon = document.getElementById('variantsLockIcon');
+    const text = document.getElementById('variantsLockText');
+    if (window.isVariantsStockLocked) {
+        if (icon) icon.innerText = '🔒';
+        if (text) text.innerText = 'الكميات مقفلة (محمية)';
+        if (btn) {
+            btn.style.background = '#fffbeb';
+            btn.style.borderColor = '#f59e0b';
+            btn.style.color = '#b45309';
+        }
+        if (typeof showToast === 'function') showToast('🔒 تم قفل وحماية الكميات من التعديل العفوي', 'info');
+    } else {
+        if (icon) icon.innerText = '🔓';
+        if (text) text.innerText = 'تعديل الكميات متاح';
+        if (btn) {
+            btn.style.background = '#ecfdf5';
+            btn.style.borderColor = '#10b981';
+            btn.style.color = '#047857';
+        }
+        if (typeof showToast === 'function') showToast('🔓 تم فتح تعديل الكميات. يمكنك التعديل الآن بحرية', 'success');
+    }
+    renderSmartMatrixView();
+    syncDetailedTableLockState();
+};
+
+// مزامنة حالة القفل مع جدول التشكيلات التفصيلي
+window.syncDetailedTableLockState = function() {
+    const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+    for (let i = 0; i < rows.length; i++) {
+        const stockInp = rows[i].querySelector('.var-stock-input');
+        if (stockInp) {
+            if (window.isVariantsStockLocked) {
+                stockInp.setAttribute('readonly', 'true');
+                stockInp.style.background = '#f8fafc';
+                stockInp.style.cursor = 'not-allowed';
+            } else {
+                stockInp.removeAttribute('readonly');
+                stockInp.style.background = '#ffffff';
+                stockInp.style.cursor = 'text';
+            }
+        }
+    }
+};
+
+// استعادة كافة الأرصدة والتشكيلات الأصلية المحفوظة
+window.restoreAllVariantsStock = function() {
+    const tbody = document.getElementById('productVariantsTableBody');
+    if (!tbody) return;
+
+    // إذا كانت هناك نسخة أصلية محفوظة للصنف عند فتحه، نقوم بإعادة بناء أي صفوف حُذفت
+    if (window.initialModalVariants && Array.isArray(window.initialModalVariants) && window.initialModalVariants.length > 0) {
+        tbody.innerHTML = '';
+        window.initialModalVariants.forEach(v => {
+            addVariantRow(v.size, v.color, v.barcode, v.stock, v.price, v.wholesale, v.cost);
+        });
+    } else {
+        const rows = tbody.rows || [];
+        for (let i = 0; i < rows.length; i++) {
+            const stockInp = rows[i].querySelector('.var-stock-input');
+            const priceInp = rows[i].querySelector('.var-price-input');
+            const wsInp = rows[i].querySelector('.var-ws-input');
+            const costInp = rows[i].querySelector('.var-cost-input');
+
+            if (stockInp && stockInp.dataset.origStock !== undefined) stockInp.value = stockInp.dataset.origStock;
+            if (priceInp && priceInp.dataset.origPrice !== undefined) priceInp.value = priceInp.dataset.origPrice;
+            if (wsInp && wsInp.dataset.origWs !== undefined) wsInp.value = wsInp.dataset.origWs;
+            if (costInp && costInp.dataset.origCost !== undefined) costInp.value = costInp.dataset.origCost;
+        }
+    }
+    updateVariantsCountBadge();
+    renderSmartMatrixView();
+    if (typeof showToast === 'function') showToast(`🔄 تمت استعادة كافة الأرصدة والتشكيلات الأصلية السابقة بنجاح`, 'success');
+};
+
+// تطبيق كمية موحدة على جميع التشكيلات بنقرة واحدة
+window.applyUniformQtyToAllVariants = function() {
+    const qty = parseFloat(document.getElementById('fillAllVariantsQtyInput')?.value);
+    if (isNaN(qty) || qty < 0) {
+        if (typeof showToast === 'function') showToast('⚠️ يرجى إدخال كمية صحيحة للتعبئة الموحدة!', 'warning');
+        return;
+    }
+    const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+    if (rows.length === 0) {
+        if (typeof showToast === 'function') showToast('⚠️ لا توجد تشكيلات حالياً لتطبيق الكمية عليها!', 'warning');
+        return;
+    }
+    for (let i = 0; i < rows.length; i++) {
+        const stockInp = rows[i].querySelector('.var-stock-input');
+        if (stockInp) {
+            stockInp.value = qty;
+        }
+    }
+    renderSmartMatrixView();
+    if (typeof showToast === 'function') showToast(`⚡ تم تطبيق كمية (${qty}) على جميع التشكيلات بنجاح`, 'success');
+};
+
+// قفل / فتح رصيد الصنف الافتتاحي في تبويب الكميات
+window.toggleMainStockLock = function() {
+    window.isMainStockLocked = !window.isMainStockLocked;
+    const inp = document.getElementById('newItemStock');
+    const btn = document.getElementById('toggleMainStockLockBtn');
+    if (!inp || !btn) return;
+    if (window.isMainStockLocked) {
+        inp.setAttribute('readonly', 'true');
+        inp.style.background = '#f8fafc';
+        inp.style.cursor = 'not-allowed';
+        btn.innerHTML = '🔒 مقفل';
+        btn.style.background = '#fffbeb';
+        btn.style.color = '#b45309';
+        btn.style.borderColor = '#f59e0b';
+        if (typeof showToast === 'function') showToast('🔒 تم قفل الرصيد الافتتاحي وحمايته', 'info');
+    } else {
+        inp.removeAttribute('readonly');
+        inp.style.background = '#ffffff';
+        inp.style.cursor = 'text';
+        btn.innerHTML = '🔓 تعديل';
+        btn.style.background = '#ecfdf5';
+        btn.style.color = '#047857';
+        btn.style.borderColor = '#10b981';
+        if (typeof showToast === 'function') showToast('🔓 تم فتح الرصيد الافتتاحي للتعديل', 'success');
+    }
+};
+
+// استعادة رصيد الصنف الافتتاحي الأصلي
+window.restoreMainStock = function() {
+    const inp = document.getElementById('newItemStock');
+    if (inp && inp.dataset.origStock !== undefined) {
+        inp.value = inp.dataset.origStock;
+        if (typeof showToast === 'function') showToast('🔄 تمت استعادة الرصيد الافتتاحي الأصلي بنجاح', 'success');
+    }
 };
 
 function createVariantAndRenderMatrix(size, color) {
@@ -882,57 +1119,22 @@ function createVariantAndRenderMatrix(size, color) {
     renderSmartMatrixView();
 }
 
-// 🗑️ سلة التراجع عن حذف التشكيلات
-window._deletedVariantsStack = window._deletedVariantsStack || [];
-
 function removeColorRowFromMatrix(colorName) {
     const tbody = document.getElementById('productVariantsTableBody');
     if (!tbody) return;
 
     const rows = Array.from(tbody.rows);
-    const deletedInThisAction = [];
-
     rows.forEach(r => {
         const cVal = r.querySelector('.var-color-input')?.value?.trim() || 'موحد';
         if (cVal === colorName) {
-            deletedInThisAction.push({
-                size: r.querySelector('.var-size-input')?.value || '',
-                color: cVal,
-                barcode: r.querySelector('.var-barcode-input')?.value || '',
-                stock: parseFloat(r.querySelector('.var-stock-input')?.value) || 0,
-                price: parseFloat(r.querySelector('.var-price-input')?.value) || null,
-                wholesale: parseFloat(r.querySelector('.var-ws-input')?.value) || null,
-                cost: parseFloat(r.querySelector('.var-cost-input')?.value) || null
-            });
             r.remove();
         }
     });
 
-    if (deletedInThisAction.length > 0) {
-        window._deletedVariantsStack.push(deletedInThisAction);
-    }
-
     updateVariantsCountBadge();
     renderSmartMatrixView();
-    showToast(`🗑️ تم حذف لون (${colorName}) - اضغط زر "↩️ تراجع عن الحذف" للاسترجاع`, "warning");
+    showToast(`🗑️ تم حذف تشكيلات لون (${colorName})`, "info");
 }
-
-// ↩️ دالة التراجع عن آخر حذف في كارت الصنف
-window.undoLastDeletedVariants = function() {
-    if (!window._deletedVariantsStack || window._deletedVariantsStack.length === 0) {
-        return showToast("⚠️ لا توجد عناصر محذوفة مؤخراً لاسترجاعها!", "info");
-    }
-
-    const lastDeleted = window._deletedVariantsStack.pop();
-    if (Array.isArray(lastDeleted) && lastDeleted.length > 0) {
-        lastDeleted.forEach(v => {
-            addVariantRow(v.size, v.color, v.barcode, v.stock, v.price, v.wholesale, v.cost);
-        });
-        updateVariantsCountBadge();
-        renderSmartMatrixView();
-        showToast(`✅ تم استرجاع (${lastDeleted.length}) تشكيلات محذوفة بنجاح!`, "success");
-    }
-};
 
 window.toggleVariantsViewMode = toggleVariantsViewMode;
 window.renderSmartMatrixView = renderSmartMatrixView;

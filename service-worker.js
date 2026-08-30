@@ -3,9 +3,9 @@
 //  النسخة المطورة للعمل أوفلاين 100%
 // ============================================================
 
-const CACHE_NAME = 'bayan-pos-v1.0.1';
-const STATIC_CACHE = 'bayan-static-v1.0.1';
-const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.1';
+const CACHE_NAME = 'bayan-pos-v1.0.2';
+const STATIC_CACHE = 'bayan-static-v1.0.2';
+const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.2';
 
 // كافة ملفات النظام الأساسية المتوفرة محلياً (بدون تكرار لتفادي خطأ Entry already exists على GitHub Pages)
 const STATIC_FILES = [
@@ -29,7 +29,6 @@ const STATIC_FILES = [
     './js/app_backup.js',
     './js/app_license.js',
     './js/app_export_share.js',
-    './js/app_ai_assistant.js',
     './js/security.js',
     './js/ui_theme_custom.js',
     './js/ui_tabs.js',
@@ -50,8 +49,6 @@ const STATIC_FILES = [
     './js/acc_vouchers.js',
     './js/acc_reports.js',
     './js/acc_partners.js',
-    './js/price_tracking.js',
-    './js/price_tracking_fixes.js',
     './js/receipt_disburse_fixes.js',
     './js/history_enhancements.js',
     './js/barcode.js',
@@ -61,10 +58,10 @@ const STATIC_FILES = [
     './js/init.js',
     './js/print.js',
     './js/updater.js',
+    './js/local_network_hub.js',
     './lib/html2canvas.min.js',
     './lib/dexie.js',
     './lib/xlsx.full.min.js',
-    './lib/supabase.min.js',
     './lib/JsBarcode.all.min.js',
     './lib/Sortable.min.js',
     './lib/chart.min.js',
@@ -72,6 +69,12 @@ const STATIC_FILES = [
     './media/logo.png',
     './media/bayan_logo.png',
     './media/logo.ico',
+    './media/wallpapers/fashion_boutique.jpg',
+    './media/wallpapers/royal_gold.png',
+    './media/wallpapers/neon_abstract.jpg',
+    './media/wallpapers/deep_space.png',
+    './media/wallpapers/emerald_3d.png',
+    './media/wallpapers/cyber_tech.png',
     './media/wallpapers/mountains.jpg',
     './media/wallpapers/burj.jpg',
     './media/wallpapers/beach.jpg',

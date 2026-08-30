@@ -1619,7 +1619,22 @@
         }
 
         .pos-search-row:hover, .pos-search-row.selected {
-            background: #eff6ff !important;
-            border-right: 5px solid #3b82f6 !important;
-            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15) !important;
+            background: linear-gradient(135deg, #064e3b, #047857) !important;
+            background-color: #064e3b !important;
+            border-right: 6px solid #10b981 !important;
+            border-color: #059669 !important;
+            color: #ffffff !important;
+            box-shadow: 0 8px 22px rgba(6, 78, 59, 0.45) !important;
+            transform: translateX(-4px) scale(1.01) !important;
+        }
+
+        .pos-search-row:hover div,
+        .pos-search-row:hover span,
+        .pos-search-row:hover b {
+            color: #ffffff !important;
+        }
+
+        .pos-search-row:hover div[style*="background"] {
+            background: rgba(255, 255, 255, 0.15) !important;
+            border-color: rgba(255, 255, 255, 0.35) !important;
         }

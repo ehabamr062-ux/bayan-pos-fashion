@@ -16,7 +16,10 @@ async function saveNewItem(mode = 'save') {
     const sysCode = document.getElementById('newItemSysCode').value;
     const barcode = document.getElementById('newItemBarcode').value;
     const code = document.getElementById('newItemCode').value;
+    const scalePlu = document.getElementById('newItemScalePlu')?.value?.trim() || '';
     const category = document.getElementById('newItemCategory').value;
+    const brand = document.getElementById('newItemBrand')?.value?.trim() || '';
+    const supplier = document.getElementById('newItemSupplier')?.value?.trim() || '';
     const shelf = document.getElementById('newItemShelf').value;
 
     let stock = parseFloat(document.getElementById('newItemStock').value) || 0;
@@ -235,8 +238,9 @@ async function saveNewItem(mode = 'save') {
         ...(existingProduct || {}),
         id: finalId,
         sysCode: sysCode || String(finalId),
+        scalePlu: scalePlu,
         name, price, cost, wholesale, minPrice, discount,
-        barcode, code, category, shelf,
+        barcode, code, category, brand, supplier, shelf,
         stock, minStock, expiry, notes,
         units,
         variants,
@@ -459,7 +463,7 @@ function fillProductModal(p) {
     if (document.getElementById('newItemPrice')) document.getElementById('newItemPrice').value = p.price || 0;
     if (document.getElementById('newItemWholesale')) document.getElementById('newItemWholesale').value = p.wholesale || 0;
     if (document.getElementById('newItemCost')) document.getElementById('newItemCost').value = p.cost || 0;
-    const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي');
+    const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
     let currentWhStock = 0;
     if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[activeWH] !== undefined) {
         currentWhStock = parseFloat(p.warehouseStocks[activeWH]) || 0;
@@ -471,9 +475,15 @@ function fillProductModal(p) {
     if (document.getElementById('newItemDiscount')) document.getElementById('newItemDiscount').value = p.discount || 0;
     if (document.getElementById('newItemBarcode')) document.getElementById('newItemBarcode').value = p.barcode || '';
     if (document.getElementById('newItemCode')) document.getElementById('newItemCode').value = p.code || '';
+    if (document.getElementById('newItemScalePlu')) document.getElementById('newItemScalePlu').value = p.scalePlu || '';
     if (document.getElementById('newItemCategory')) document.getElementById('newItemCategory').value = p.category || 'عام';
+    if (document.getElementById('newItemBrand')) document.getElementById('newItemBrand').value = p.brand || '';
+    if (document.getElementById('newItemSupplier')) document.getElementById('newItemSupplier').value = p.supplier || '';
     if (document.getElementById('newItemShelf')) document.getElementById('newItemShelf').value = p.shelf || '';
-    if (document.getElementById('newItemStock')) document.getElementById('newItemStock').value = currentWhStock;
+    if (document.getElementById('newItemStock')) {
+        document.getElementById('newItemStock').value = currentWhStock;
+        document.getElementById('newItemStock').dataset.origStock = currentWhStock;
+    }
     if (document.getElementById('newItemMinStock')) document.getElementById('newItemMinStock').value = p.minStock || 0;
     if (document.getElementById('newItemCostQty')) document.getElementById('newItemCostQty').value = p.cost || 0;
     if (document.getElementById('newItemExpiry')) document.getElementById('newItemExpiry').value = p.expiry || '';
@@ -518,6 +528,7 @@ function fillProductModal(p) {
     const vBody = document.getElementById('productVariantsTableBody');
     if (vBody) {
         vBody.innerHTML = '';
+        window.initialModalVariants = [];
         let hasApparelSizes = false;
         if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
             p.variants.forEach(v => {
@@ -530,6 +541,15 @@ function fillProductModal(p) {
                 } else {
                     vStockForActiveWH = parseFloat(v.stock) || 0;
                 }
+                window.initialModalVariants.push({
+                    size: v.size,
+                    color: v.color,
+                    barcode: v.barcode,
+                    stock: vStockForActiveWH,
+                    price: v.price,
+                    wholesale: v.wholesale,
+                    cost: v.cost
+                });
                 addVariantRow(v.size, v.color, v.barcode, vStockForActiveWH, v.price, v.wholesale, v.cost);
             });
         }
@@ -547,8 +567,125 @@ function fillProductModal(p) {
     }
 
     if (typeof calculateUnitPrices === 'function') calculateUnitPrices();
+    if (typeof renderProductWarehouseStocksTable === 'function') renderProductWarehouseStocksTable(p);
     updateProductNavCounter();
 }
+
+// عرض توزيع الرصيد على المخازن والفروع المسجلة
+window.renderProductWarehouseStocksTable = function(p) {
+    const tbody = document.getElementById('productWarehouseStocksBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const whList = (window.warehouses && Array.isArray(window.warehouses) && window.warehouses.length > 0)
+        ? window.warehouses
+        : [{ name: 'المخزن الرئيسي' }];
+
+    const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
+        ? currentUser.warehouseName
+        : 'المخزن الرئيسي';
+
+    whList.forEach(w => {
+        const whName = typeof w === 'string' ? w : (w.name || 'المخزن الرئيسي');
+        let stockInWh = 0;
+        if (p && p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+            stockInWh = p.variants.reduce((sum, v) => {
+                const q = (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[whName] !== undefined)
+                    ? parseFloat(v.warehouseStocks[whName])
+                    : (whName === 'المخزن الرئيسي' ? parseFloat(v.stock) || 0 : 0);
+                return sum + (isNaN(q) ? 0 : q);
+            }, 0);
+        } else if (p && p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[whName] !== undefined) {
+            stockInWh = parseFloat(p.warehouseStocks[whName]) || 0;
+        } else if (p && whName === 'المخزن الرئيسي') {
+            stockInWh = parseFloat(p.stock) || 0;
+        }
+
+        const isActive = whName === activeWH;
+        const tr = document.createElement('tr');
+        tr.style.background = isActive ? '#f0fdf4' : 'transparent';
+        tr.innerHTML = `
+            <td style="padding: 8px 10px; text-align: right; font-weight: 800; color: #1e293b;">
+                ${isActive ? '⭐ ' : '🏢 '} ${whName} ${isActive ? '<span style="font-size: 0.72rem; color: #047857; background: #dcfce7; padding: 2px 6px; border-radius: 4px; margin-right: 4px;">(الفرع النشط)</span>' : ''}
+            </td>
+            <td style="padding: 8px 10px; font-weight: 900; font-size: 0.95rem; color: ${stockInWh > 0 ? '#047857' : '#94a3b8'};">
+                ${stockInWh}
+            </td>
+            <td style="padding: 8px 10px;">
+                ${stockInWh > 0 
+                    ? '<span style="color: #047857; font-weight: 800; font-size: 0.78rem;">متوفر ✅</span>' 
+                    : '<span style="color: #ef4444; font-weight: 800; font-size: 0.78rem;">نفذ ⚠️</span>'}
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+};
+
+// توليد باركود دولي فريد تلقائياً للصنف الرئيسي
+window.generateMainProductBarcode = function() {
+    const sysCode = document.getElementById('newItemSysCode')?.value || String(Date.now()).slice(-6);
+    const cleanSys = String(sysCode).replace(/\D/g, '').slice(-5) || '10001';
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    const barcode = `20${cleanSys}${rand}`.slice(0, 13);
+    const inp = document.getElementById('newItemBarcode');
+    if (inp) {
+        inp.value = barcode;
+        if (typeof showToast === 'function') showToast(`⚡ تم توليد باركود فريد: ${barcode}`, 'success');
+    }
+};
+
+// طباعة تيكت الباركود مباشرة من كارت الصنف
+window.printCurrentProductBarcodeDirect = function() {
+    const name = document.getElementById('newItemName')?.value || 'صنف جديد';
+    const barcode = document.getElementById('newItemBarcode')?.value || document.getElementById('newItemSysCode')?.value || '2000000000001';
+    const price = parseFloat(document.getElementById('newItemPrice')?.value) || 0;
+    const brand = document.getElementById('newItemBrand')?.value || '';
+
+    const labelItem = {
+        name: name,
+        barcode: barcode,
+        price: price,
+        brand: brand
+    };
+
+    if (typeof printHangtagSingleItem === 'function') {
+        printHangtagSingleItem(labelItem);
+    } else {
+        const printWindow = window.open('', '_blank', 'width=380,height=420');
+        if (!printWindow) return alert('يرجى السماح بالنوافذ المنبثقة للطباعة');
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html dir="rtl">
+            <head>
+                <meta charset="utf-8">
+                <title>طباعة تيكت - ${name}</title>
+                <style>
+                    body { font-family: 'Cairo', sans-serif; text-align: center; padding: 12px; margin: 0; }
+                    .tag-card { border: 1.5px dashed #000; padding: 14px; border-radius: 10px; width: 220px; margin: auto; }
+                    .brand { font-size: 11px; font-weight: bold; color: #444; }
+                    .name { font-size: 13px; font-weight: 900; margin: 4px 0; }
+                    .price { font-size: 16px; font-weight: 900; margin: 6px 0; color: #000; }
+                    .barcode-lines { font-family: monospace; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
+                    .barcode-num { font-family: monospace; font-size: 13px; font-weight: bold; margin-top: 3px; }
+                </style>
+            </head>
+            <body>
+                <div class="tag-card">
+                    ${brand ? `<div class="brand">🏷️ ${brand}</div>` : ''}
+                    <div class="name">${name}</div>
+                    <div class="price">${price.toFixed(2)} ج.م</div>
+                    <div class="barcode-lines">|||||||||||||||||||</div>
+                    <div class="barcode-num">${barcode}</div>
+                </div>
+                <script>
+                    window.onload = function() { window.print(); setTimeout(function() { window.close(); }, 500); }
+                </script>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+    }
+};
 
 // =========================================================================
 // 👕 دوال إدارة المقاسات والألوان وتوليد الباركودات الذكي (Variant Matrix Logic)

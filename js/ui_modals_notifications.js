@@ -49,10 +49,44 @@
             const activeDelayed = allDelayed.filter(a => !window.acknowledgedDelayed.includes(a.id));
             const archivedDelayed = allDelayed.filter(a => window.acknowledgedDelayed.includes(a.id));
 
+            // أذونات التحويل المخزني المعلقة الواردة لهذا المخزن
+            const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+            const allPendingTransfers = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+                ? transactions.filter(t => t.type && t.type.includes('تحويل') && t.transferStatus === 'pending' && (t.warehouse === activeWH || t.toWarehouse === activeWH))
+                : [];
+
+            // تجميع التحويلات حسب رقم الإذن invoiceId
+            const pendingTransferInvoices = {};
+            allPendingTransfers.forEach(t => {
+                const invId = t.invoiceId || 'TR-UNKNOWN';
+                if (!pendingTransferInvoices[invId]) {
+                    pendingTransferInvoices[invId] = {
+                        id: invId,
+                        date: t.date,
+                        sourceWarehouse: t.sourceWarehouse,
+                        warehouse: t.warehouse,
+                        user: t.user || '-',
+                        notes: t.notes || '',
+                        items: []
+                    };
+                }
+                pendingTransferInvoices[invId].items.push(t);
+            });
+
+            const pendingTransfersList = Object.values(pendingTransferInvoices);
+            const activeTransfersCount = pendingTransfersList.length;
+
             const activeProductsTotal = activeLowStock.length + activeExpiring.length;
             const activeAccountsTotal = activeDebt.length + activeDelayed.length;
-            const totalActiveCount = activeProductsTotal + activeAccountsTotal;
+            const totalActiveCount = activeProductsTotal + activeAccountsTotal + activeTransfersCount;
             const totalArchivedCount = archivedLowStock.length + archivedExpiring.length + archivedDebt.length + archivedDelayed.length;
+
+            // تحديث شارة جرس الإشعارات في الهيدر فوراً
+            const topBell = document.getElementById('bellBadge');
+            if (topBell) {
+                topBell.innerText = totalActiveCount;
+                topBell.style.display = totalActiveCount > 0 ? 'flex' : 'none';
+            }
 
             const createRows = (items, type, isArchived) => items.map(item => {
                 const isProd = type === 'low-stock';
@@ -123,35 +157,99 @@
 
             const existingModal = document.getElementById('notifyModal');
             const modalContent = `
-                <div class="glass-card-premium" style="background: #ffffff; border: 1px solid #e2e8f0; padding: 0; border-radius: 22px; width: 780px; max-width: 95%; max-height: 88vh; overflow: hidden; box-shadow: 0 30px 70px rgba(15, 23, 42, 0.2); display: flex; flex-direction: column; direction: rtl; font-family: inherit;">
+                <div class="glass-card-premium" style="background: #ffffff; border: 1px solid #e2e8f0; padding: 0; border-radius: 22px; width: 820px; max-width: 95%; max-height: 88vh; overflow: hidden; box-shadow: 0 30px 70px rgba(15, 23, 42, 0.2); display: flex; flex-direction: column; direction: rtl; font-family: inherit;">
 
                     <!-- Header -->
                     <div style="background: linear-gradient(135deg, #0f172a, #1e293b); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; color: white;">
                         <h3 style="margin:0; font-size: 1.25rem; font-weight: 900; display: flex; align-items: center; gap: 10px; color: #f8fafc;">
-                            <span style="font-size: 1.4rem;">🔔</span> مركز إدارة التنبيهات ونواقص البضاعة والصلاحيات
+                            <span style="font-size: 1.4rem;">🔔</span> مركز إدارة التنبيهات والتحويلات الواردة
                         </h3>
                         <button onclick="document.getElementById('notifyModal').remove()" style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">&times;</button>
                     </div>
 
-                    <!-- Custom Tabs (4 تبويبات مخصصة) -->
+                    <!-- Custom Tabs (5 تبويبات مخصصة وشاملة) -->
                     <div style="display: flex; background: #f8fafc; border-bottom: 1.5px solid #e2e8f0; overflow-x: auto;">
-                        <div onclick="showNotificationsModal('products')" style="flex: 1; min-width: 130px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'products' ? '#10b981' : 'transparent'}; color: ${activeTab === 'products' ? '#047857' : '#64748b'}; background: ${activeTab === 'products' ? 'rgba(16, 185, 129, 0.08)' : 'transparent'};">
+                        <div onclick="showNotificationsModal('products')" style="flex: 1; min-width: 125px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'products' ? '#10b981' : 'transparent'}; color: ${activeTab === 'products' ? '#047857' : '#64748b'}; background: ${activeTab === 'products' ? 'rgba(16, 185, 129, 0.08)' : 'transparent'};">
                             📦 البضاعة والصلاحية <span style="background:${activeProductsTotal > 0 ? '#ef4444' : '#e2e8f0'}; color:${activeProductsTotal > 0 ? '#fff' : '#64748b'}; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${activeProductsTotal}</span>
                         </div>
-                        <div onclick="showNotificationsModal('accounts')" style="flex: 1; min-width: 130px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'accounts' ? '#3b82f6' : 'transparent'}; color: ${activeTab === 'accounts' ? '#1d4ed8' : '#64748b'}; background: ${activeTab === 'accounts' ? 'rgba(59, 130, 246, 0.08)' : 'transparent'};">
+                        <div onclick="showNotificationsModal('transfers')" style="flex: 1; min-width: 135px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'transfers' ? '#059669' : 'transparent'}; color: ${activeTab === 'transfers' ? '#047857' : '#64748b'}; background: ${activeTab === 'transfers' ? 'rgba(5, 150, 105, 0.08)' : 'transparent'};">
+                            🚚 تحويلات واردة <span style="background:${activeTransfersCount > 0 ? '#059669' : '#e2e8f0'}; color:${activeTransfersCount > 0 ? '#fff' : '#64748b'}; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${activeTransfersCount}</span>
+                        </div>
+                        <div onclick="showNotificationsModal('accounts')" style="flex: 1; min-width: 125px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'accounts' ? '#3b82f6' : 'transparent'}; color: ${activeTab === 'accounts' ? '#1d4ed8' : '#64748b'}; background: ${activeTab === 'accounts' ? 'rgba(59, 130, 246, 0.08)' : 'transparent'};">
                             💳 تنبيهات الحسابات <span style="background:${activeAccountsTotal > 0 ? '#ef4444' : '#e2e8f0'}; color:${activeAccountsTotal > 0 ? '#fff' : '#64748b'}; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${activeAccountsTotal}</span>
                         </div>
-                        <div onclick="showNotificationsModal('archived')" style="flex: 1; min-width: 130px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'archived' ? '#f59e0b' : 'transparent'}; color: ${activeTab === 'archived' ? '#b45309' : '#64748b'}; background: ${activeTab === 'archived' ? 'rgba(245, 158, 11, 0.08)' : 'transparent'};">
+                        <div onclick="showNotificationsModal('archived')" style="flex: 1; min-width: 120px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'archived' ? '#f59e0b' : 'transparent'}; color: ${activeTab === 'archived' ? '#b45309' : '#64748b'}; background: ${activeTab === 'archived' ? 'rgba(245, 158, 11, 0.08)' : 'transparent'};">
                             📁 سجل الاستلام <span style="background:#e2e8f0; color:#475569; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${totalArchivedCount}</span>
                         </div>
-                        <div onclick="showNotificationsModal('cloud')" style="flex: 1; min-width: 140px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'cloud' ? '#8b5cf6' : 'transparent'}; color: ${activeTab === 'cloud' ? '#6d28d9' : '#64748b'}; background: ${activeTab === 'cloud' ? 'rgba(139, 92, 246, 0.08)' : 'transparent'};">
+                        <div onclick="showNotificationsModal('cloud')" style="flex: 1; min-width: 130px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'cloud' ? '#8b5cf6' : 'transparent'}; color: ${activeTab === 'cloud' ? '#6d28d9' : '#64748b'}; background: ${activeTab === 'cloud' ? 'rgba(139, 92, 246, 0.08)' : 'transparent'};">
                             ☁️ الإشعارات السحابية ${window.latestCloudAnnouncement && window.latestCloudAnnouncement.active ? '<span style="background:#ef4444; width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:3px;"></span>' : ''}
                         </div>
                     </div>
 
                     <!-- Content Area -->
                     <div style="padding: 20px 24px; flex: 1; overflow-y: auto; background: #fff; min-height: 280px;">
-                        ${activeTab === 'products' ? `
+                        ${activeTab === 'transfers' ? `
+                            ${(activeTransfersCount === 0) ? `
+                                <div style="text-align: center; padding: 45px 20px; color: #64748b;">
+                                    <div style="font-size: 3.2rem; margin-bottom: 12px;">🚚✨</div>
+                                    <div style="font-weight: 900; font-size: 1.15rem; color: #0f172a;">لا توجد تحويلات واردة بانتظار الاستلام!</div>
+                                    <div style="font-size: 0.88rem; margin-top: 5px; color: #64748b;">جميع الشحنات المحولة إلى (${activeWH}) تم فحصها واستلامها واعتمادها بنجاح.</div>
+                                </div>
+                            ` : `
+                                <div style="margin-bottom: 15px; display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:0.88rem; font-weight:800; color:#1e293b;">أذونات التحويل الواردة بانتظار المراجعة والاستلام (${activeTransfersCount}):</span>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:16px;">
+                                    ${pendingTransfersList.map(tr => `
+                                        <div style="background:#f8fafc; border:2px solid #a7f3d0; border-radius:16px; padding:18px 20px; box-shadow:0 4px 15px rgba(0,0,0,0.04);">
+                                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px dashed #cbd5e1; padding-bottom:12px; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                                                <div>
+                                                    <span style="background:#047857; color:#fff; font-weight:900; font-size:0.82rem; padding:4px 12px; border-radius:20px;">إذن تحويل #${tr.id}</span>
+                                                    <span style="color:#0f172a; font-weight:bold; font-size:0.9rem; margin-right:8px;">من: <b style="color:#2563eb;">${tr.sourceWarehouse}</b> ⬅️ إلى: <b style="color:#059669;">${tr.warehouse}</b></span>
+                                                </div>
+                                                <div style="font-size:0.8rem; color:#64748b; font-weight:bold;">
+                                                    🕒 ${tr.date || ''} | 👤 المرسل: ${tr.user}
+                                                </div>
+                                            </div>
+
+                                            <div style="background:#fff; border-radius:10px; border:1px solid #e2e8f0; overflow:hidden; margin-bottom:12px;">
+                                                <table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:center;">
+                                                    <thead style="background:#f1f5f9; color:#475569; font-weight:bold;">
+                                                        <tr>
+                                                            <th style="padding:6px 10px; text-align:right;">الصنف</th>
+                                                            <th style="padding:6px 10px;">المقاس</th>
+                                                            <th style="padding:6px 10px;">اللون</th>
+                                                            <th style="padding:6px 10px;">الكمية المحولة</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        ${tr.items.map(it => `
+                                                            <tr style="border-top:1px solid #f1f5f9;">
+                                                                <td style="padding:8px 10px; font-weight:bold; color:#0f172a; text-align:right;">${it.product}</td>
+                                                                <td style="padding:8px 10px; color:#64748b;">${it.selectedSize || it.size || '-'}</td>
+                                                                <td style="padding:8px 10px; color:#64748b;">${it.selectedColor || it.color || '-'}</td>
+                                                                <td style="padding:8px 10px; font-weight:900; color:#047857; font-size:0.95rem;">${it.qty} ${it.unit || ''}</td>
+                                                            </tr>
+                                                        `).join('')}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            ${tr.notes ? `<div style="font-size:0.82rem; color:#64748b; margin-bottom:12px; background:#fff; padding:6px 12px; border-radius:8px; border:1px solid #e2e8f0;">📝 ملاحظات المرسل: ${tr.notes}</div>` : ''}
+
+                                            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                                                <button onclick="if(confirm('هل أنت متأكد من رفض إذن التحويل #${tr.id} وإرجاع البضاعة للمخزن المصدر؟')) window.rejectTransferFromNotify('${tr.id}')" style="background:#fee2e2; color:#dc2626; border:1.5px solid #fca5a5; border-radius:9px; padding:8px 16px; font-weight:bold; font-size:0.85rem; cursor:pointer;">
+                                                    ❌ رفض الإذن
+                                                </button>
+                                                <button onclick="window.acceptTransferFromNotify('${tr.id}')" style="background:linear-gradient(135deg, #10b981, #047857); color:#fff; border:none; border-radius:9px; padding:8px 24px; font-weight:900; font-size:0.9rem; cursor:pointer; box-shadow:0 3px 8px rgba(16,185,129,0.35);">
+                                                    ✅ موافقة واستلام الشحنة
+                                                </button>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            `}
+                        ` : activeTab === 'products' ? `
                             ${(activeProductsTotal === 0) ? `
                                 <div style="text-align: center; padding: 45px 20px; color: #64748b;">
                                     <div style="font-size: 3.2rem; margin-bottom: 12px;">🎉</div>
@@ -1541,7 +1639,7 @@
             else if (typeStr.includes('تحويل')) cleanType = 'تحويل';
 
             if (window.editTransaction) {
-                window.editTransaction(t.invoiceId, cleanType, t.id);
+                window.editTransaction(t.invoiceId, cleanType);
             }
         }
 

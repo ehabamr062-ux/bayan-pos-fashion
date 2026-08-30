@@ -3219,18 +3219,25 @@ details>summary {
 .quick-wp-bar {
             position: fixed;
             bottom: 20px;
-            left: 20px;
+            left: 18px;
             z-index: 100000;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 12px;
-            background: rgba(0, 0, 0, 0.4);
-            padding: 10px 18px;
+            gap: 5px;
+            background: rgba(0, 0, 0, 0.45);
+            padding: 8px 5px;
             border-radius: 18px;
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-            transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            max-height: 72vh;
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+        .quick-wp-bar::-webkit-scrollbar {
+            display: none;
         }
 
         .quick-info-widget {

@@ -1,6 +1,36 @@
 // ============================================================
 //  إدارة حسابات العملاء والموردين وكشوف الحساب (Partners & Statements)
 // ============================================================
+        window.openNewAccountModal = function(defaultType = null) {
+            if (typeof checkPermission === 'function' && !checkPermission('accounts_add')) return;
+            
+            if (document.getElementById('editAccId')) document.getElementById('editAccId').value = '';
+            document.querySelectorAll('#newAccountModal input:not([type=radio]):not([type=checkbox]):not([type=hidden]), #newAccountModal textarea').forEach(el => el.value = '');
+
+            if (document.getElementById('accDebit')) document.getElementById('accDebit').value = '0';
+            if (document.getElementById('accCredit')) document.getElementById('accCredit').value = '0';
+
+            if (defaultType) {
+                const r = document.querySelector(`input[name="accType"][value="${defaultType}"]`);
+                if (r) r.checked = true;
+            }
+
+            const modal = document.getElementById('newAccountModal');
+            if (modal) modal.classList.remove('hidden');
+
+            const todayStr = new Date().toLocaleDateString('en-CA');
+            if (document.getElementById('accBalDate')) document.getElementById('accBalDate').value = todayStr;
+            const createdEl = document.getElementById('accCreatedAt');
+            if (createdEl) createdEl.innerText = new Date().toLocaleDateString('ar-EG');
+            const nameInp = document.getElementById('accName');
+            if (nameInp) nameInp.focus();
+        };
+
+        window.closeNewAccountModal = function() {
+            const modal = document.getElementById('newAccountModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
         window.previewAccImage = function(event) {
 
             const file = event.target.files[0];
@@ -216,79 +246,6 @@
             setStore('pos_acc_cols', JSON.stringify(accountsColumnVisibility));
 
             renderAccountsTable();
-
-        }
-
-        function showAccountsColumnCustomizer() {
-
-            const cols = [
-
-                { id: 0, name: "م" },
-
-                { id: 1, name: "كود الحساب" },
-
-                { id: 2, name: "اسم الحساب" },
-
-                { id: 3, name: "طبيعة الحساب" },
-
-                { id: 4, name: "التصنيف" },
-
-                { id: 5, name: "مدين (عليه)" },
-
-                { id: 6, name: "دائن (له)" },
-
-                { id: 7, name: "إجمالي البيع" },
-
-                { id: 8, name: "آخر تاريخ قبض" },
-
-                { id: 9, name: "آخر حركة" },
-
-                { id: 10, name: "تحديد" }
-
-            ];
-
-            let html = `<div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; padding:15px;">`;
-
-            cols.forEach(c => {
-
-                const checked = accountsColumnVisibility[c.id] ? 'checked' : '';
-
-                html += `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:5px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0; font-size:0.85rem;">
-
-                            <input type="checkbox" ${checked} onchange="toggleAccountsColumn(${c.id}, this.checked)"> ${c.name}
-
-                         </label>`;
-
-            });
-
-            html += `</div>`;
-
-            const modal = document.createElement('div');
-
-            modal.className = 'modal-overlay';
-
-            modal.innerHTML = `
-
-                <div class="login-box" style="width: 480px; text-align: right; padding: 25px; border: 2px solid var(--gold); background: #fff;">
-
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">
-
-                        <h3 style="margin:0; color:#1e293b;">⚙️ تخصيص أعمدة الحسابات</h3>
-
-                        <button onclick="this.closest('.modal-overlay').remove()" style="background:none; border:none; font-size:1.8rem; cursor:pointer; color:#94a3b8;">&times;</button>
-
-                    </div>
-
-                    ${html}
-
-                    <button class="action-btn btn-save" style="width:100%; margin-top:15px; background:var(--main-blue); color:white;" onclick="this.closest('.modal-overlay').remove()">حفظ وإغلاق</button>
-
-                </div>
-
-            `;
-
-            document.body.appendChild(modal);
-
         }
 
         function showInventoryColumnCustomizer() {
@@ -771,6 +728,7 @@
                     row.classList.add('acc-selected-row');
                 }
                 row.onclick = () => selectAccountRow(acc.id);
+                row.ondblclick = () => openSelectedAccountStatement();
 
                 const frozenBadge = (acc.inactive === true || acc.inactive === 'true' || acc.isFrozen === true) 
                     ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: #ffffff; font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 12px; margin-right: 6px; display: inline-flex; align-items: center; gap: 3px;">❄️ مجمد</span>` 
@@ -800,7 +758,7 @@
 
                     8: lastReceiptDate,
                     9: lastTransDate,
-                    10: `<div style="display:flex; justify-content:center; align-items:center; width:100%;"><input type="radio" name="accSelect" ${selectedAccountID === acc.id ? 'checked' : ''} style="width: 20px; height: 20px; accent-color: #be185d; cursor: pointer;"></div>`
+                    10: `<div style="display:flex; justify-content:center; align-items:center; width:100%;"><input type="radio" name="accSelect" ${selectedAccountID === acc.id ? 'checked' : ''} onclick="event.stopPropagation(); selectAccountRow(${acc.id});" style="width: 20px; height: 20px; accent-color: #be185d; cursor: pointer;"></div>`
                 };
 
                 accountsColumnOrder.forEach(colIdx => {
@@ -839,6 +797,24 @@
             window.selectedAccountID = id;
             renderAccountsTable(); // إعادة رسم لتحديث التحديد البصري
         }
+
+        window.openSelectedAccountStatement = function() {
+            if (!selectedAccountID) {
+                if (typeof showToast === 'function') showToast("⚠️ يرجى تحديد واختيار حساب من الجدول أولاً!", "warning");
+                else alert("⚠️ يرجى تحديد واختيار حساب من الجدول أولاً!");
+                return;
+            }
+            const acc = accounts.find(a => a.id === selectedAccountID);
+            if (!acc) {
+                if (typeof showToast === 'function') showToast("⚠️ لم يتم العثور على الحساب المختار!", "error");
+                return;
+            }
+
+            if (typeof switchSection === 'function') switchSection('statement');
+            if (document.getElementById('stmtAccountSelector')) document.getElementById('stmtAccountSelector').value = acc.name;
+            if (typeof updateActiveTabTitle === 'function') updateActiveTabTitle(acc.name, 'كشف حساب');
+            generateAccountStatement(acc.id);
+        };
 
         async function editSelectedAccount() {
 
@@ -959,43 +935,39 @@
         }
 
         async function deleteSelectedAccount() {
-
+            if (!checkPermission('accounts_delete')) return;
             if (!selectedAccountID) return alert("⚠️ يرجى اختيار حساب من الجدول أولاً!");
 
             const acc = accounts.find(a => a.id === selectedAccountID);
-
             if (!acc) return;
 
+            const bal = Math.abs((parseFloat(acc.debit) || 0) - (parseFloat(acc.credit) || 0));
+            if (bal > 0.01) {
+                if (typeof showToast === 'function') showToast(`⚠️ لا يمكن حذف الحساب "${acc.name}" لأنه يحتوي على رصيد قائم (${bal.toFixed(2)} ج.م)! يرجى تسوية الحساب أولاً.`, "warning");
+                else alert(`لا يمكن حذف الحساب "${acc.name}" لأنه يحتوي على رصيد قائم!`);
+                return;
+            }
+
             if (confirm(`🚨 هل أنت متأكد من حذف الحساب "${acc.name}" ونقله لسلة المحذوفات؟`)) {
-
-                // التحقق مما إذا كان الحساب له حركات مسجلة
-
                 const hasTrans = transactions.some(t => t.partner === acc.name);
-
                 if (hasTrans) {
-
                     if (!confirm("⚠️ هذا الحساب له حركات (فواتير/سندات) مسجلة. حذفه قد يؤدي لتضارب في التقارير. هل تريد الاستمرار؟")) return;
-
                 }
 
-                // نقل للسلة
-
-                await trashManager.moveToTrash(acc, 'account', acc.name);
+                if (typeof trashManager !== 'undefined' && trashManager.moveToTrash) {
+                    await trashManager.moveToTrash(acc, 'account', `حساب: ${acc.name}`);
+                } else if (typeof addToTrash === 'function') {
+                    addToTrash('account', acc, `حساب: ${acc.name}`);
+                }
 
                 accounts = accounts.filter(a => a.id !== selectedAccountID);
-
                 await db.accounts.delete(selectedAccountID);
-
                 await saveData();
 
                 selectedAccountID = null;
-
                 renderAccountsTable();
-
                 showToast("✅ تم نقل الحساب إلى سلة المحذوفات");
-
             }
-
         }
 
         window.printStatement = function() {
@@ -1217,34 +1189,42 @@
             let targetId = accountId;
             if (!targetId) {
                 const selectorInput = document.getElementById('stmtAccountSelector');
-                if (selectorInput && selectorInput.value.trim()) {
-                    const matchedAcc = accounts.find(a => a.name === selectorInput.value.trim());
+                const typedVal = selectorInput ? selectorInput.value.trim() : '';
+                
+                if (typedVal) {
+                    const matchedAcc = accounts.find(a => a.name === typedVal || String(a.code) === typedVal);
                     if (matchedAcc) targetId = matchedAcc.id;
                 }
-            }
-            if (typeof targetId !== 'number' && typeof targetId !== 'string') {
-                targetId = selectedAccountID;
+                
+                if (!targetId && typeof selectedAccountID !== 'undefined' && selectedAccountID) {
+                    targetId = selectedAccountID;
+                }
             }
 
             if (!targetId) {
-                document.getElementById('statementTableBody').innerHTML = '<tr><td colspan="10" style="text-align:center;">الرجاء اختيار الحساب أولاً لعرض التقرير</td></tr>';
+                document.getElementById('statementTableBody').innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 30px; font-weight: bold; color: #64748b;">الرجاء اختيار الحساب أولاً لعرض التقرير</td></tr>';
                 document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="8" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
                 document.getElementById('stmtFinalBalance').innerText = '0.00';
                 document.getElementById('statementHeaderAccName').style.display = 'none';
                 
                 // Disable action buttons
-                document.getElementById('stmtActionPrintDoc').disabled = true;
-                document.getElementById('stmtActionEdit').disabled = true;
-                document.getElementById('stmtActionDelete').disabled = true;
+                if (document.getElementById('stmtActionPrintDoc')) document.getElementById('stmtActionPrintDoc').disabled = true;
+                if (document.getElementById('stmtActionEdit')) document.getElementById('stmtActionEdit').disabled = true;
+                if (document.getElementById('stmtActionDelete')) document.getElementById('stmtActionDelete').disabled = true;
                 return;
             }
 
             const acc = accounts.find(a => a.id === targetId);
             if (!acc) return;
 
-            document.getElementById('stmtAccountSelector').value = acc.name;
-            document.getElementById('statementHeaderAccName').innerText = acc.name;
-            document.getElementById('statementHeaderAccName').style.display = 'block';
+            selectedAccountID = acc.id;
+            window.selectedAccountID = acc.id;
+
+            if (document.getElementById('stmtAccountSelector')) document.getElementById('stmtAccountSelector').value = acc.name;
+            if (document.getElementById('statementHeaderAccName')) {
+                document.getElementById('statementHeaderAccName').innerText = acc.name;
+                document.getElementById('statementHeaderAccName').style.display = 'block';
+            }
 
             // تعيين التاريخ تلقائياً إذا كان فارغاً
             const todayISO = new Date().toLocaleDateString('en-CA');
@@ -1290,12 +1270,13 @@
 
             runningBalance = startBalance;
 
-            // فلترة العمليات من سجل الحركات (transactions)
+            const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+            const targetPartnerClean = cleanAr(acc.name);
 
-            const accTrans = transactions.filter(t => t.partner === acc.name);
+            // فلترة العمليات من سجل الحركات (transactions) مع مطابقة مرنة للأسماء والهمزات
+            const accTrans = transactions.filter(t => t.partner === acc.name || cleanAr(t.partner) === targetPartnerClean);
 
             // ترتيب العمليات حسب التاريخ لضمان تسلسل الرصيد
-
             accTrans.sort((a, b) => new Date(a.dateISO) - new Date(b.dateISO));
 
             // تجميع الحركات (Grouping by InvoiceID)
@@ -1737,149 +1718,70 @@
             }
         };
 
-        function exportAccountStatementToExcel() {
+        window.exportAccountStatementToExcel = function() {
+            const table = document.getElementById('stmtMasterTable') || document.querySelector('#statement-section .stmt-table');
+            if (!table) return alert('❌ لا توجد بيانات لتصديرها');
 
-            const table = document.querySelector('#statementModal .invoice-table');
-
-            if (!table) return;
-
-            const headerInfo = document.getElementById('statementHeaderInfo');
-
-            const accName = headerInfo ? headerInfo.querySelector('h3').innerText.replace('👤 كشف حساب:', '').trim() : 'كشف_حساب';
-
-            const fileName = `كشف_حساب_${accName}_${new Date().toLocaleDateString('ar-EG')}.csv`;
+            const accName = document.getElementById('statementHeaderAccName')?.innerText || document.getElementById('stmtAccountSelector')?.value || 'كشف_حساب';
+            const fileName = `كشف_حساب_${accName.trim().replace(/\s+/g, '_')}_${new Date().toLocaleDateString('ar-EG')}.csv`;
 
             let csv = "\uFEFF"; // BOM for Excel UTF-8
-
             const rows = table.querySelectorAll('tr');
 
             rows.forEach(row => {
-
                 const cols = row.querySelectorAll('th, td');
-
                 const rowData = [];
-
                 cols.forEach(col => {
-
                     if (col.style.display !== 'none') {
-
-                        rowData.push('"' + col.innerText.replace(/"/g, '""') + '"');
-
+                        rowData.push('"' + col.innerText.replace(/"/g, '""').trim() + '"');
                     }
-
                 });
-
                 if (rowData.length > 0) csv += rowData.join(',') + "\r\n";
-
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-
             const link = document.createElement("a");
-
             link.href = URL.createObjectURL(blob);
-
             link.download = fileName;
-
             link.click();
 
-            showToast("✅ تم تصدير كشف الحساب بنجاح");
+            if (typeof showToast === 'function') showToast("✅ تم تصدير كشف الحساب إلى Excel بنجاح", "success");
+        };
 
-        }
-
-        function shareAccountStatement(platform) {
-
-            const headerInfo = document.getElementById('statementHeaderInfo');
-
-            if (!headerInfo) return;
-
-            const accName = headerInfo.querySelector('h3').innerText.replace('👤 كشف حساب:', '').trim();
-
-            const fromDate = document.getElementById('stmtDateFrom').value || '---';
-
-            const toDate = document.getElementById('stmtDateTo').value || '---';
-
-            // استخراج الرصيد من النص
-
-            const balanceText = headerInfo.innerText.split('الرصيد الحالي:')[1] || '---';
+        window.shareAccountStatement = function(platform) {
+            const accName = document.getElementById('statementHeaderAccName')?.innerText || document.getElementById('stmtAccountSelector')?.value || 'العميل';
+            const fromDate = document.getElementById('stmtDateFrom')?.value || '---';
+            const toDate = document.getElementById('stmtDateTo')?.value || '---';
+            const balanceText = document.getElementById('stmtFinalBalance')?.innerText || '0.00';
+            const shopName = document.getElementById('shopName')?.value || (typeof getStore === 'function' ? getStore('shopName') : '') || 'بيان POS';
 
             const message = `📄 *كشف حساب تفصيلي*\n` +
-
-                          `👤 *العميل:* ${accName}\n` +
-
+                          `👤 *الطرف:* ${accName}\n` +
                           `📅 *الفترة:* من ${fromDate} إلى ${toDate}\n` +
-
                           `💰 *الرصيد الحالي:* ${balanceText.trim()}\n` +
-
-                          `بواسطة: *${shopName || 'بيان POS'}*`;
+                          `بواسطة: *${shopName}*`;
 
             const encodedMessage = encodeURIComponent(message);
-
             const url = (platform === 'whatsapp') ? 
-
                 `https://wa.me/?text=${encodedMessage}` : 
-
                 `https://t.me/share/url?url=${encodedMessage}`;
 
             window.open(url, '_blank');
+        };
 
-        }
+        window.shareSelectedStatementTransactions = function(platform) {
+            const accName = document.getElementById('statementHeaderAccName')?.innerText || document.getElementById('stmtAccountSelector')?.value || 'العميل';
+            const balanceText = document.getElementById('stmtFinalBalance')?.innerText || '0.00';
+            const shopName = document.getElementById('shopName')?.value || (typeof getStore === 'function' ? getStore('shopName') : '') || 'بيان POS';
 
-        function shareSelectedStatementTransactions(platform) {
-
-            const checkedRows = document.querySelectorAll('#statementTableBody tr input.stmt-row-select:checked');
-
-            if (checkedRows.length === 0) return alert("❌ يرجى تحديد حركة واحدة على الأقل للمشاركة.");
-
-            const headerInfo = document.getElementById('statementHeaderInfo');
-
-            const accName = headerInfo.querySelector('h3').innerText.replace('👤 كشف حساب:', '').trim();
-
-            let message = `📄 *ملخص عمليات محددة*\n👤 *العميل:* ${accName}\n------------------\n`;
-
-            checkedRows.forEach(chk => {
-
-                const row = chk.closest('tr');
-
-                const cells = row.querySelectorAll('td');
-
-                // ملاحظة: الفهرس 1 هو التاريخ، 2 هو النوع، 3 هو البيان، 4 مدين، 5 دائن
-
-                const date = cells[1].innerText;
-
-                const type = cells[2].innerText;
-
-                const note = cells[3].innerText;
-
-                const debit = cells[4].innerText;
-
-                const credit = cells[5].innerText;
-
-                message += `📅 ${date}\n🔘 ${type}\n📝 ${note}\n`;
-
-                if (debit !== '-') message += `🔴 عليه: ${debit}\n`;
-
-                if (credit !== '-') message += `🟢 له: ${credit}\n`;
-
-                message += `------------------\n`;
-
-            });
-
-            message += `بواسطة: *${shopName || 'بيان POS'}*`;
-
+            const message = `📄 *كشف حساب*\n👤 *الطرف:* ${accName}\n💰 *الرصيد:* ${balanceText.trim()}\nبواسطة: *${shopName}*`;
             const encodedMessage = encodeURIComponent(message);
-
             const url = (platform === 'whatsapp') ? 
-
                 `https://wa.me/?text=${encodedMessage}` : 
-
                 `https://t.me/share/url?url=${encodedMessage}`;
 
             window.open(url, '_blank');
-
-            toggleShareMenu('stmtShareMenu');
-
-        }
+        };
 
         function printAccountStatement() {
 

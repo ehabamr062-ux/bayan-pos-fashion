@@ -368,11 +368,14 @@
         }
 
         .settings-tab-content {
-            width: 100% !important;
-            min-width: 100% !important;
-            max-width: 100% !important;
-            box-sizing: border-box !important;
-            overflow-x: hidden !important;
+            animation: slideUpFade 0.5s ease forwards;
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         @keyframes fadeIn {
@@ -3193,7 +3196,303 @@ body.bayan-variants-disabled #bayanVariantPickerOverlay {
 
 
 
+/* ======================================================== */
+/* === Extracted from index.html === */
+/* ======================================================== */
 
+#premium-settings-wrapper {
+                    display: flex !important;
+                    flex-direction: row !important;
+                    /* Sidebar on Right in RTL */
+                    background: transparent !important;
+                    height: 100% !important;
+                    border-radius: 25px !important;
+                    overflow: hidden !important;
+                    border: none !important;
+                    box-shadow: none !important;
+                    margin: 0 !important;
+                    font-family: "Cairo", sans-serif !important;
+                    direction: rtl !important;
+                }
+
+                #premium-settings-sidebar {
+                    width: 280px !important;
+                    background: #f3f4f6 !important;
+                    /* Solid Light Grey */
+                    display: flex !important;
+                    flex-direction: column !important;
+                    padding: 25px 0 !important;
+                    border-right: 1px solid #e5e7eb !important;
+                    /* Border on the right of content */
+                    flex-shrink: 0 !important;
+                    overflow-y: auto !important;
+                    scrollbar-width: none !important;
+                    -ms-overflow-style: none !important;
+                }
+
+                /* إخفاء شريط التمرير الأوسط المزعج في السايدبار */
+                #premium-settings-sidebar::-webkit-scrollbar {
+                    display: none !important;
+                    width: 0 !important;
+                    height: 0 !important;
+                }
+
+                .premium-sidebar-header {
+                    padding: 0 20px 25px 20px !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: flex-start !important;
+                    gap: 15px !important;
+                }
+
+                .premium-sidebar-title {
+                    color: #111827 !important;
+                    font-size: 1.4rem !important;
+                    font-weight: 800 !important;
+                    margin: 0 !important;
+                }
+
+                .premium-logo-box {
+                    width: 45px !important;
+                    height: 45px !important;
+                    background: #064e3b !important;
+                    /* Solid Green Logo Box */
+                    border-radius: 12px !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    font-weight: 900 !important;
+                    color: white !important;
+                    font-size: 1.3rem !important;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+                }
+
+                .premium-badge {
+                    background: #ffffff !important;
+                    color: #064e3b !important;
+                    margin: 0 15px 20px 15px !important;
+                    padding: 10px !important;
+                    border-radius: 10px !important;
+                    font-size: 0.85rem !important;
+                    font-weight: 800 !important;
+                    text-align: center !important;
+                    border: 1px solid #064e3b !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    gap: 8px !important;
+                }
+
+                .premium-tab-btn {
+                    width: 100% !important;
+                    padding: 14px 20px !important;
+                    border: none !important;
+                    background: transparent !important;
+                    color: #4b5563 !important;
+                    font-size: 0.95rem !important;
+                    font-weight: 700 !important;
+                    cursor: pointer !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: flex-start !important;
+                    gap: 12px !important;
+                    transition: all 0.2s ease !important;
+                    border-left: 4px solid transparent !important;
+                    text-align: right !important;
+                }
+
+                .premium-tab-btn:hover {
+                    background: #e5e7eb !important;
+                    color: #111827 !important;
+                }
+
+                .premium-tab-btn.active {
+                    background: #064e3b !important;
+                    /* Solid Dark Green Background */
+                    color: white !important;
+                    /* White text for contrast */
+                    font-weight: 800 !important;
+                    box-shadow: 0 4px 12px rgba(6, 78, 59, 0.2) !important;
+                }
+
+                .premium-tab-btn .btn-icon {
+                    width: 32px !important;
+                    height: 32px !important;
+                    background: white !important;
+                    border-radius: 8px !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    font-size: 1.1rem !important;
+                    color: #064e3b !important;
+                }
+
+                .premium-tab-btn.active .btn-icon {
+                    background: rgba(255, 255, 255, 0.2) !important;
+                    color: white !important;
+                }
+
+                #premium-settings-content {
+                    flex: 1 !important;
+                    background: #f8fafc !important;
+                    /* Very light background for contrast */
+                    padding: 35px !important;
+                    overflow-y: auto !important;
+                    height: 100% !important;
+                    /* جعل الطول 100% من الأب للسماح بالتمرير */
+                    box-sizing: border-box !important;
+                    /* مهم جداً لمنع التاكل بسبب البادينج */
+                    direction: rtl !important;
+                }
+
+                /* --- تخصيص شريط التمرير السريع والمميز --- */
+                #premium-settings-content::-webkit-scrollbar {
+                    width: 10px;
+                }
+
+                #premium-settings-content::-webkit-scrollbar-track {
+                    background: #f1f5f9;
+                    border-radius: 10px;
+                }
+
+                #premium-settings-content::-webkit-scrollbar-thumb {
+                    background: linear-gradient(180deg, #064e3b, #0ea5e9);
+                    border-radius: 10px;
+                    border: 2px solid #f1f5f9;
+                }
+
+                #premium-settings-content::-webkit-scrollbar-thumb:hover {
+                    background: linear-gradient(180deg, #0ea5e9, #064e3b);
+                }
+
+                /* --- 🏠 Modern Settings Cards --- */
+                #premium-settings-content .settings-group,
+                #premium-settings-content .card,
+                #premium-settings-content .settings-tab-content>div:first-child {
+                    background: white !important;
+                    border-radius: 16px !important;
+                    padding: 25px !important;
+                    border: 1px solid #e5e7eb !important;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+                    margin-bottom: 25px !important;
+                }
+
+                /* --- 📝 Modern Inputs & Selects --- */
+                #premium-settings-content input[type="text"],
+                #premium-settings-content input[type="number"],
+                #premium-settings-content input[type="password"],
+                #premium-settings-content input[type="email"],
+                #premium-settings-content select,
+                #premium-settings-content textarea {
+                    width: 100% !important;
+                    padding: 12px 15px !important;
+                    border: 2px solid #e5e7eb !important;
+                    border-radius: 10px !important;
+                    font-family: "Cairo", sans-serif !important;
+                    font-size: 0.95rem !important;
+                    transition: all 0.2s ease !important;
+                    background: #f9fafb !important;
+                    color: #111827 !important;
+                    outline: none !important;
+                }
+
+                #premium-settings-content input:focus,
+                #premium-settings-content select:focus,
+                #premium-settings-content textarea:focus {
+                    border-color: #064e3b !important;
+                    /* Green Focus Border */
+                    background: white !important;
+                    box-shadow: 0 0 0 4px rgba(6, 78, 59, 0.1) !important;
+                }
+
+                /* --- 🔘 Modern Action Buttons --- */
+                #premium-settings-content button.action-btn,
+                #premium-settings-content .save-btn,
+                #premium-settings-content button[onclick*="save"],
+                #premium-settings-content button[onclick*="add"] {
+                    background: #064e3b !important;
+                    /* Solid Green */
+                    color: white !important;
+                    padding: 12px 25px !important;
+                    border-radius: 10px !important;
+                    font-weight: 800 !important;
+                    border: none !important;
+                    cursor: pointer !important;
+                    transition: all 0.2s ease !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    gap: 10px !important;
+                    font-family: "Cairo", sans-serif !important;
+                }
+
+                #premium-settings-content button:hover {
+                    background: #053e2f !important;
+                    transform: translateY(-2px) !important;
+                    box-shadow: 0 5px 15px rgba(6, 78, 59, 0.2) !important;
+                }
+
+                /* --- 🏷️ Labels and Headers --- */
+                #premium-settings-content label {
+                    display: block !important;
+                    font-weight: 800 !important;
+                    color: #374151 !important;
+                    margin-bottom: 8px !important;
+                    font-size: 0.9rem !important;
+                }
+
+                #premium-settings-content h3 {
+                    color: #064e3b !important;
+                    border-bottom: 2px solid #f3f4f6 !important;
+                    padding-bottom: 12px !important;
+                    margin-bottom: 20px !important;
+                    font-weight: 900 !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    gap: 10px !important;
+                }
+
+                /* --- 🚀 Force Solid Styles on Legacy Sections --- */
+                #premium-settings-content [style*="linear-gradient"] {
+                    background: white !important;
+                    color: #111827 !important;
+                    border: 1px solid #e5e7eb !important;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+                }
+
+                #premium-settings-content [style*="linear-gradient"] h1,
+                #premium-settings-content [style*="linear-gradient"] h2,
+                #premium-settings-content [style*="linear-gradient"] h3,
+                #premium-settings-content [style*="linear-gradient"] p {
+                    color: #111827 !important;
+                }
+
+                #premium-settings-content [style*="linear-gradient"] h1 {
+                    color: #064e3b !important;
+                }
+
+                #premium-settings-content .table-container {
+                    background: white !important;
+                    border: 1px solid #e5e7eb !important;
+                    border-radius: 12px !important;
+                    overflow: hidden !important;
+                }
+
+                #premium-settings-content table thead {
+                    background: #f9fafb !important;
+                }
+
+                #premium-settings-content table thead th {
+                    color: #4b5563 !important;
+                    font-weight: 800 !important;
+                    border-bottom: 2px solid #f3f4f6 !important;
+                    padding: 15px !important;
+                }
+
+                #premium-settings-content table tbody td {
+                    padding: 12px 15px !important;
+                    border-bottom: 1px solid #f3f4f6 !important;
+                }
 
 .nav-card-premium {
             background: white;

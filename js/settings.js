@@ -67,6 +67,7 @@ async function saveSettings() {
         taxEnabled: document.getElementById('appTaxEnabled').checked,
         allowBackdating: document.getElementById('allowBackdating').checked,
         allowHistoryEdit: document.getElementById('allowHistoryEdit').checked,
+        showInquiryCostPrice: document.getElementById('showInquiryCostPrice') ? document.getElementById('showInquiryCostPrice').checked : false,
         // Business Profile & UI Customization Settings
         businessType: document.getElementById('appBusinessType') ? document.getElementById('appBusinessType').value : "clothing",
         directToSalesOnLogin: document.getElementById('directToSalesOnLogin') ? document.getElementById('directToSalesOnLogin').checked : true,
@@ -76,19 +77,6 @@ async function saveSettings() {
         visibleDashboardSections: getDashboardSectionsVisibilityState()
     };
     setStore('pos_settings', JSON.stringify(settings));
-
-    // ✅ أمان: حفظ Gemini API Key في IndexedDB (لا يظهر في F12)
-    const geminiKey = document.getElementById('geminiApiKeyInput').value.trim();
-    try {
-        if (typeof db !== 'undefined' && db.settings) {
-            await db.settings.put({ id: 'gemini_key', value: geminiKey });
-            removeStore('bayan_gemini_key'); // حذف القديم
-        }
-    } catch(e) {
-        setStore('bayan_gemini_key', geminiKey); // fallback
-    }
-    const quickInput = document.getElementById('aiQuickApiKeyInput');
-    if (quickInput) quickInput.value = geminiKey;
 
     // Apply permissions immediately
     applyPermissions();
@@ -184,7 +172,7 @@ function applyBusinessTypeUI() {
         'sales', 'sales-return', 'receipt', 'disbursement', 'daily-report',
         'invoices', 'accounts', 'inventory', 'product-inquiry', 'treasury',
         'statement', 'calculator', 'analysis', 'new-account', 'new-item',
-        'price-tracking', 'ai-assistant', 'shortcuts', 'adjustment',
+        'shortcuts', 'adjustment',
         'history', 'price-mgmt', 'transfer', 'warehouse-report', 'purchase', 'purchase-return'
     ];
     const activeClothingSections = ['sales', 'sales-return', 'receipt', 'disbursement', 'daily-report', 'invoices', 'accounts', 'inventory', 'statement'];
@@ -274,6 +262,9 @@ function loadSettings() {
     if (settings.taxEnabled !== undefined) document.getElementById('appTaxEnabled').checked = settings.taxEnabled;
     if (settings.allowBackdating !== undefined) document.getElementById('allowBackdating').checked = settings.allowBackdating;
     if (settings.allowHistoryEdit !== undefined) document.getElementById('allowHistoryEdit').checked = settings.allowHistoryEdit;
+    if (settings.showInquiryCostPrice !== undefined && document.getElementById('showInquiryCostPrice')) {
+        document.getElementById('showInquiryCostPrice').checked = settings.showInquiryCostPrice;
+    }
 
     // Load Business Profile Settings
     const bType = settings.businessType || 'clothing';
@@ -305,28 +296,13 @@ function loadSettings() {
 
     if (typeof updateAllCurrencyLabels === 'function') updateAllCurrencyLabels();
 
-    // ✅ أمان: قراءة Gemini Key من IndexedDB أولاً
-    const geminiInput = document.getElementById('geminiApiKeyInput');
-    const quickInput2 = document.getElementById('aiQuickApiKeyInput');
-    (async () => {
-        let geminiKey = '';
-        try {
-            if (typeof db !== 'undefined' && db.settings) {
-                const stored = await db.settings.get('gemini_key');
-                if (stored && stored.value) geminiKey = stored.value;
-            }
-        } catch(e) {}
-        // Fallback للنظام القديم
-        if (!geminiKey) {
-            const oldKey = getStore('bayan_gemini_key');
-            if (oldKey) geminiKey = oldKey;
-        }
-        if (geminiInput) geminiInput.value = geminiKey;
-        if (quickInput2) quickInput2.value = geminiKey;
-    })();
-
     // Apply Logic Constraints based on Permissions
     applyPermissions();
+
+    // تحميل وتثبيت إعدادات الباركود وتحديد القالب المختار دائماً
+    if (typeof loadBarcodeLabelSettings === 'function') {
+        loadBarcodeLabelSettings();
+    }
 }
 
 function applyPermissions() {

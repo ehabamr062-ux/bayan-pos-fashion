@@ -682,24 +682,23 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                 p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + baseQty;
 
                 // تحديث رصيد التشكيلة (المقاس واللون) في مصفوفة الصنف عند مرتجع البيع
-                if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+                if (p.variants && Array.isArray(p.variants)) {
                     const sSize = String(item.selectedSize || item.size || '').trim();
                     const sColor = String(item.selectedColor || item.color || '').trim();
-                    let matchedVar = (typeof window.findProductVariant === 'function')
-                        ? window.findProductVariant(p, sSize, sColor)
-                        : p.variants.find(v => (!sSize || String(v.size || '').trim().toLowerCase() === sSize.toLowerCase()) && (!sColor || String(v.color || '').trim().toLowerCase() === sColor.toLowerCase()));
-                    
-                    // إذا لم يتم تحديد مقاس/لون محدد، نرجعه للتشكيلة الأولى
-                    if (!matchedVar && p.variants.length > 0) {
-                        matchedVar = p.variants[0];
+                    if (sSize || sColor) {
+                        const matchedVar = p.variants.find(v => 
+                            (String(v.size || '').trim() === sSize) && 
+                            (String(v.color || '').trim() === sColor)
+                        ) || p.variants.find(v => 
+                            (!sSize || String(v.size || '').trim() === sSize) && 
+                            (!sColor || String(v.color || '').trim() === sColor)
+                        );
+                        if (matchedVar) {
+                            matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
+                            if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
+                            matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
+                        }
                     }
-                    if (matchedVar) {
-                        matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
-                        if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
-                        matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
-                    }
-                    // مزامنة رصيد الصنف الأساسي مع مجموع تشكيلاته
-                    p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                 }
             }
 
@@ -733,6 +732,10 @@ async function saveSalesReturn(force = false, accountChecked = false) {
             const originalMethod = originalInv ? originalInv.method : '-';
 
             const originalPartner = originalInv ? originalInv.partner : '-';
+
+            // الحساب المختار حالياً (قد يكون مختلف عن الأصلي)
+
+            const finalPartner = partner;
 
             transactions.push({
 
@@ -1186,7 +1189,7 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                         );
                     }
                 }
-                const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'الرئيسي';
+                const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
                 const availStock = effVariant 
                     ? ((effVariant.warehouseStocks && effVariant.warehouseStocks[activeWH] !== undefined) ? (parseFloat(effVariant.warehouseStocks[activeWH]) || 0) : (parseFloat(effVariant.stock) || 0)) 
                     : ((p.warehouseStocks && p.warehouseStocks[activeWH] !== undefined) ? (parseFloat(p.warehouseStocks[activeWH]) || 0) : (parseFloat(p.stock) || 0));
@@ -1226,23 +1229,23 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                 p.warehouseStocks[activeWH] = Math.max(0, (parseFloat(p.warehouseStocks[activeWH]) || 0) - baseQty);
 
                 // تحديث رصيد التشكيلة (المقاس واللون) في مصفوفة الصنف عند مرتجع الشراء
-                if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+                if (p.variants && Array.isArray(p.variants)) {
                     const sSize = String(item.selectedSize || item.size || '').trim();
                     const sColor = String(item.selectedColor || item.color || '').trim();
-                    let matchedVar = (typeof window.findProductVariant === 'function')
-                        ? window.findProductVariant(p, sSize, sColor)
-                        : p.variants.find(v => (!sSize || String(v.size || '').trim().toLowerCase() === sSize.toLowerCase()) && (!sColor || String(v.color || '').trim().toLowerCase() === sColor.toLowerCase()));
-                    
-                    if (!matchedVar && p.variants.length > 0) {
-                        matchedVar = p.variants[0];
+                    if (sSize || sColor) {
+                        const matchedVar = p.variants.find(v => 
+                            (String(v.size || '').trim() === sSize) && 
+                            (String(v.color || '').trim() === sColor)
+                        ) || p.variants.find(v => 
+                            (!sSize || String(v.size || '').trim() === sSize) && 
+                            (!sColor || String(v.color || '').trim() === sColor)
+                        );
+                        if (matchedVar) {
+                            matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
+                            if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
+                            matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
+                        }
                     }
-                    if (matchedVar) {
-                        matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
-                        if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
-                        matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                    }
-                    // مزامنة رصيد الصنف الأساسي مع مجموع تشكيلاته
-                    p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                 }
             }
 
@@ -1257,6 +1260,10 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
             const originalMethod = originalInv ? originalInv.method : '-';
 
             const originalPartner = originalInv ? originalInv.partner : '-';
+
+            // الحساب المختار حالياً
+
+            const finalPartner = partner;
 
             transactions.push({
 

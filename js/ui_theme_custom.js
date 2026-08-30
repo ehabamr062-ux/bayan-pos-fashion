@@ -106,8 +106,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 "نظام مخازن وحسابات متكامل",
                 "تقارير أرباح وخسائر دقيقة",
                 "دعم فني وتحديثات مستمرة",
-                "أرشفة سحابية وحماية بيانات",
-                "<span style='color: #22c55e; font-weight: bold;'>✨ ميزة الذكاء الاصطناعي 🤖</span>"
+                "أرشفة وحماية بيانات"
             ];
             let extraItems = [];
 
@@ -119,7 +118,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 extraItems = ["✔ عدد فواتير غير محدود", "✔ دعم فني متميز"];
             } else if (planName === 'الباقة السنوية') {
                 icon = "🚀";
-                extraItems = ["✔ نسخ احتياطي سحابي تلقائي", "✔ دعم فني VIP وأولوية قصوى"];
+                extraItems = ["✔ نسخ احتياطي محلي تلقائي وآمن", "✔ دعم فني VIP وأولوية قصوى"];
             } else if (planName === 'الباقة مدى الحياة') {
                 icon = "👑";
                 extraItems = ["✔ امتلاك البرنامج للأبد", "✔ دعم فني شامل مدى الحياة"];
@@ -264,257 +263,10 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             }
         }
 
-        // تجديد الاشتراك للمتجر من بوابة المطور
-        async function renewStoreSubscription(phone) {
-            if (!confirm(`هل تريد تجديد الاشتراك للمتجر (${phone}) لمدة 30 يوم إضافية؟`)) return;
-            try {
-                // 1. جلب التاريخ المتاح فى السيرفر
-                const { data, error: fetchError } = await supabaseClient
-                    .from(PRIMARY_TABLE)
-                    .select('expiry_date')
-                    .eq('phone', phone)
-                    .single();
-
-                if (fetchError) throw fetchError;
-
-                let currentExpiry = new Date(data.expiry_date);
-                // إذا كان الاشتراك منتهى بالفعل، نبدأ التجديد من تاريخ اليوم
-                if (currentExpiry < new Date()) currentExpiry = new Date();
-
-                const newExpiry = new Date(currentExpiry);
-                newExpiry.setDate(newExpiry.getDate() + 30);
-
-                const { error } = await supabaseClient
-                    .from(PRIMARY_TABLE)
-                    .update({ 
-                        expiry_date: newExpiry.toISOString(),
-                        status: 'active'
-                    })
-                    .eq('phone', phone);
-
-                if (error) throw error;
-                showToast("✅ تم تجديد الاشتراك بنجاح (30 يوم إضافي).");
-                updateRemoteIndex();
-            } catch (err) {
-                alert("❌ فشل عملية التجديد: " + err.message);
-            }
-        }
-
-        // تحديث شريط التنبيه القديم بصورة صامتة
-        function updateTrialUINotification(days) {
-            let banner = document.getElementById('trialStatusBanner');
-            if (banner) {
-                banner.innerHTML = `🎁 نسخة تجريبية: باقي ${days} يوم على انتهاء التجربة. للتفعيل اتصل بـ 01099195060`;
-            }
-        }
-
-        async function handleCloudRegistration() {
-            const name = document.getElementById('regShopName').value.trim();
-            const phone = document.getElementById('regShopPhone').value.trim();
-
-            if (!name || !phone) return alert("❌ يرجى إدخال الاسم ورقم الهاتف للمتابعة.");
-            if (phone.length < 10) return alert("❌ يرجى إدخال رقم هاتف صحيح (10 أو 11 رقم).");
-
-            showToast("⏳ جاري إنشاء هويتك السحابية...", "info");
-
-            const hwid = await getUniqueHWID();
-            const success = await startFreeTrial(phone, name, hwid);
-            if (success) {
-                document.getElementById('cloudRegistrationModal').style.display = 'none';
-                // تحديث البيانات في إعدادات المؤسسة بالمرة
-                if (document.getElementById('shopName')) document.getElementById('shopName').value = name;
-                if (document.getElementById('shopPhone1')) document.getElementById('shopPhone1').value = phone;
-                saveData(); // حفظ محلي
-                location.reload(); // إعادة تحميل للتفعيل الشامل
-            }
-        }
-
-        // تم إزالة شاشة التعطيل (Kill Switch)
-        function showKillScreen(msg) {
-            console.log("Kill screen ignored: " + msg);
-        }
-
-        async function startFreeTrial(phone, name, hwid) {
-            const expiryDate = new Date();
-            expiryDate.setDate(expiryDate.getDate() + 30); // 30 يوم تجربة مجانية
-
-            showToast("🎉 تم تفعيل النسخة التجريبية (30 يوم) بنجاح!", "success");
-            setStore('bayan_user_phone', phone);
-            if (window.LicenseService) {
-                await window.LicenseService.saveLicenseLocally('باقة نسخة المجانية', expiryDate.toISOString());
-            }
-            return true;
-        }
-
-        // جلب الإعلانات العامة من المطور عمران
-        async function fetchAdminAnnouncements() {
-            if (!supabaseClient) return;
-            try {
-                const { data } = await supabaseClient
-                    .from('announcements')
-                    .select('message')
-                    .eq('is_active', true)
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-
-                if (data && data[0]) {
-                    const bar = document.getElementById('admin-announcement-bar');
-                    const marquee = document.getElementById('admin-marquee');
-                    if (bar && marquee) {
-                        bar.style.display = 'block';
-                        marquee.innerText = data[0].message;
-                    }
-                }
-            } catch (err) { console.warn("تعذر جلب إعلانات السحابة."); }
-        }
-
-        // --- وظائف لوحة التحكم السحابية (Cloud Panel Functions) ---
-
-        function saveCloudSettings() {
-            const url = document.getElementById('supabase_url_input').value.trim();
-            const key = document.getElementById('supabase_key_input').value.trim();
-
-            if(!url || !key) return alert("برجاء إدخال الرابط والمفتاح أولاً!");
-
-            setStore('supabase_url', url);
-            setStore('supabase_key', key);
-
-            alert("تم حفظ إعدادات السحابة بنجاح! سيتم إعادة تشغيل الربط الآن ✅");
-            location.reload(); 
-        }
-
+        // تم تنظيف بوابة السحابة للعمل محلياً بالكامل 100%
         async function checkDevAccess() {
-            // الدخول مباشر لبوابة المطور بدون كلمة سر
             switchSection('dev-dashboard-section');
             showToast("مرحباً بك.. بوابة التحكم مفتوحة.");
-            updateRemoteIndex(); 
-        }
-
-        async function updateRemoteIndex() {
-            if (!supabaseClient) {
-                alert("❌ لم يتم تهيئة Supabase. تأكد من إعدادات الربط أولاً.");
-                return;
-            }
-
-            try {
-                showToast("⏳ جاري جلب قاعدة بيانات المشتركين...");
-                const { data, error } = await supabaseClient
-                    .from(PRIMARY_TABLE)
-                    .select('*')
-                    .order('created_at', { ascending: false });
-
-                if (error) throw error;
-
-                const tbody = document.getElementById('devStoresTableBody');
-                const badge = document.getElementById('storeCountBadge');
-                tbody.innerHTML = '';
-                if (badge) badge.innerText = data.length;
-
-                if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:50px;">لا توجد متاجر مسجلة حالياً.</td></tr>';
-                    return;
-                }
-
-data.forEach(store => {
-                    const statusColor = store.status === 'blocked' ? '#f87171' : (store.status === 'expired' ? '#fbbf24' : '#4ade80');
-                    const statusText = store.status === 'blocked' ? 'محظور 🛑' : (store.status === 'expired' ? 'منتهي ⏳' : 'نشط ✅');
-
-                    const tr = document.createElement('tr');
-                    tr.style.background = "rgba(255,255,255,0.03)";
-                    tr.style.marginBottom = "8px";
-
-                    tr.innerHTML = `
-                        <td style="padding:15px; border-radius: 12px 0 0 12px;">
-                            <div style="font-weight:bold; color:#fff; font-size:1.1rem;">${store.store_name || 'بدون اسم'}</div>
-                            <div style="color:#38bdf8; font-family:monospace;">📱 ${store.phone}</div>
-                            <div style="color:#64748b; font-family:monospace; font-size: 0.7rem; opacity: 0.8;">🆔 HWID: ${store.hwid || '---'}</div>
-                            <div style="color:var(--accent-gold); font-size: 0.75rem; font-weight:bold;">📅 انتهاء: ${new Date(store.expiry_date).toLocaleDateString('ar-EG')}</div>
-                        </td>
-                        <td style="padding:15px; font-size:0.85rem; color:#94a3b8;">
-                            📄 فواتير: ${store.bill_count || 0} | 📦 أصناف: ${store.product_count || 0}<br>
-                            ⭐ الباقة: ${store.plan || 'باقة تجريبية'}<br>
-                            📅 آخر نشاط: ${new Date(store.last_active || store.created_at).toLocaleDateString('ar-EG')}
-                        </td>
-                        <td style="padding:15px; text-align:center;">
-                            <span style="background-color: ${statusColor}22; color: ${statusColor}; padding: 6px 12px; border-radius: 50px; font-size: 0.8rem; font-weight: bold; border: 1px solid ${statusColor}44;">
-                                ${statusText}
-                            </span>
-                        </td>
-                        <td style="padding:15px; text-align:center; border-radius: 0 12px 12px 0;">
-                            <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; max-width:200px;">
-                                <button onclick="updateStoreStatus('${store.phone}', 'active')" style="background:#059669; color:white; border:none; width:35px; height:35px; border-radius:10px; cursor:pointer;" title="تفعيل">✅</button>
-                                <button onclick="updateStoreStatus('${store.phone}', 'blocked')" style="background:#b91c1c; color:white; border:none; width:35px; height:35px; border-radius:10px; cursor:pointer;" title="حظر">🛑</button>
-                                <button onclick="renewStoreSubscription('${store.phone}')" style="background:var(--accent-gold); color:#1a1a1a; border:none; width:35px; height:35px; border-radius:10px; cursor:pointer; font-weight:bold;" title="تجديد شهر (+30 يوم)">🔄</button>
-                                <button onclick="showAdminNoteModal('${store.phone}')" style="background:#6366f1; color:white; border:none; width:35px; height:35px; border-radius:10px; cursor:pointer;" title="رسالة إدارية">✍️</button>
-                            </div>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-                showToast("✅ تم التزامن مع السحابة بنجاح.");
-            } catch (err) {
-                console.error("Fetch Error:", err);
-                alert("❌ فشل تحديث البيانات: " + err.message);
-            }
-        }
-
-        async function updateStoreStatus(phone, newStatus) {
-            if (!confirm(`تأكيد تغيير حالة المتجر (${phone}) إلى [${newStatus}]؟`)) return;
-            try {
-                const { error } = await supabaseClient
-                    .from(PRIMARY_TABLE)
-                    .update({ status: newStatus })
-                    .eq('phone', phone);
-                if (error) throw error;
-                showToast("✅ تم تحديث الحالة سحابياً.");
-                updateRemoteIndex();
-            } catch (err) {
-                alert("❌ فشل التحديث: " + err.message);
-            }
-        }
-
-        async function showAdminNoteModal(phone) {
-            const note = await showCustomPrompt("✍️ أدخل الرسالة الإدارية التي ستظهر للمستخدم عند الدخول:");
-            if (note === null) return;
-            try {
-                const { error } = await supabaseClient
-                    .from(PRIMARY_TABLE)
-                    .update({ admin_note: note })
-                    .eq('phone', phone);
-                if (error) throw error;
-                showToast("🚀 تم إرسال الملاحظة بنجاح.");
-            } catch (err) {
-                alert("❌ فشل الإرسال: " + err.message);
-            }
-        }
-
-        // دالة "تبليغ المطور" - معطلة ومحذوفة للتوافق مع العمل محلياً بالكامل
-        async function silentDevPing(phone, name) {
-            // معطلة محلياً 100%
-        }
-
-        async function registerOnCloud() {
-            const shopName = document.getElementById('shopName')?.value.trim();
-            const shopPhone = document.getElementById('shopPhone1')?.value.trim();
-
-            if(!shopName || !shopPhone) {
-                return alert("❌ برجاء إدخال (اسم المحل) و (الموبايل الأساسي) في تبويب بيانات المؤسسة أولاً!");
-            }
-
-            try {
-                showToast("جاري التفعيل المحلي... ⏳", "info");
-
-                const hwid = await getUniqueHWID();
-                const success = await startFreeTrial(shopPhone, shopName, hwid);
-                if (success) {
-                    showToast("🎉 تم التفعيل محلياً بنجاح!", "success");
-                    return true;
-                }
-            } catch (e) {
-                console.error("❌ خطأ في التفعيل المحلي:", e);
-                alert("❌ فشل التفعيل: " + e.message);
-            }
-            return false;
         }
 
         // دالة نسخ النصوص للحافظة
@@ -1375,3 +1127,62 @@ data.forEach(store => {
             if (show) editor.classList.remove('hidden');
             else editor.classList.add('hidden');
         }
+
+        // --- وظائف لوحة التحكم وإدارة النظام المحلي ---
+        window.checkDevAccess = async function() {
+            if (typeof switchSection === 'function') switchSection('dev-dashboard-section');
+            if (typeof showToast === 'function') showToast("مرحباً بك.. بوابة التحكم مفتوحة.");
+        };
+
+        window.updateRemoteIndex = async function() {
+            if (typeof showToast === 'function') showToast("ℹ️ النظام يعمل في الوضع المحلي المستقل بالكامل 💻", "info");
+        };
+
+        window.registerOnCloud = async function() {
+            const shopName = document.getElementById('shopName')?.value?.trim();
+            const shopPhone = document.getElementById('shopPhone1')?.value?.trim() || document.getElementById('shopPhone')?.value?.trim();
+
+            if(!shopName || !shopPhone) {
+                return alert("❌ برجاء إدخال (اسم المحل) و (الموبايل الأساسي) في تبويب بيانات المؤسسة أولاً!");
+            }
+
+            try {
+                if (typeof showToast === 'function') showToast("جاري التفعيل المحلي... ⏳", "info");
+
+                const hwid = typeof getUniqueHWID === 'function' ? await getUniqueHWID() : 'BNC-LOCAL';
+                if (typeof startFreeTrial === 'function') {
+                    const success = await startFreeTrial(shopPhone, shopName, hwid);
+                    if (success) {
+                        if (typeof showToast === 'function') showToast("🎉 تم التفعيل محلياً بنجاح!", "success");
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.error("❌ خطأ في التفعيل المحلي:", e);
+                alert("❌ فشل التفعيل: " + e.message);
+            }
+            return false;
+        };
+
+        window.handleCloudRegistration = async function() {
+            const name = document.getElementById('regShopName')?.value?.trim();
+            const phone = document.getElementById('regShopPhone')?.value?.trim();
+
+            if (!name || !phone) return alert("❌ يرجى إدخال الاسم ورقم الهاتف للمتابعة.");
+            if (phone.length < 10) return alert("❌ يرجى إدخال رقم هاتف صحيح (10 أو 11 رقم).");
+
+            if (typeof showToast === 'function') showToast("⏳ جاري التفعيل المحلي الشامل...", "info");
+
+            const hwid = typeof getUniqueHWID === 'function' ? await getUniqueHWID() : 'BNC-LOCAL';
+            if (typeof startFreeTrial === 'function') {
+                const success = await startFreeTrial(phone, name, hwid);
+                if (success) {
+                    const regModal = document.getElementById('cloudRegistrationModal');
+                    if (regModal) regModal.style.display = 'none';
+                    if (document.getElementById('shopName')) document.getElementById('shopName').value = name;
+                    if (document.getElementById('shopPhone1')) document.getElementById('shopPhone1').value = phone;
+                    if (typeof saveData === 'function') saveData();
+                    location.reload();
+                }
+            }
+        };

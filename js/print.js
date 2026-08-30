@@ -171,26 +171,19 @@ function printInvoice(invoiceData) {
             ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit)
             : (item.unit || 'قطعة');
             
-        // تفاصيل المقاس واللون للملابس والفاشون (طباعة واضحة جداً باللون الأسود الداكن لطابعات الريسيت والحراري)
-        const sVal = escapePrintHtml(item.size || item.selectedSize || '');
-        const cVal = escapePrintHtml(item.color || item.selectedColor || '');
-        let fashionDetails = '';
-        if (sVal && cVal) {
-            fashionDetails = `<div style="margin-top:2px; font-size:0.9em; font-weight:bold; color:#000;">[مقاس: ${sVal} | لون: ${cVal}]</div>`;
-        } else if (sVal) {
-            fashionDetails = `<div style="margin-top:2px; font-size:0.9em; font-weight:bold; color:#000;">[مقاس: ${sVal}]</div>`;
-        } else if (cVal) {
-            fashionDetails = `<div style="margin-top:2px; font-size:0.9em; font-weight:bold; color:#000;">[لون: ${cVal}]</div>`;
-        }
+        // تفاصيل المقاس واللون للملابس والفاشون
+        const sizeTag = (item.size || item.selectedSize) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#1e293b; background:#f1f5f9; padding:1px 4px; border-radius:4px; font-weight:bold;">مقاس: ${escapePrintHtml(item.size || item.selectedSize)}</span>` : '';
+        const colorTag = (item.color || item.selectedColor) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#1e293b; background:#f1f5f9; padding:1px 4px; border-radius:4px; font-weight:bold;">لون: ${escapePrintHtml(item.color || item.selectedColor)}</span>` : '';
+        const fashionDetails = (sizeTag || colorTag) ? `<div style="margin-top:2px; font-size:0.85em;">${sizeTag} ${colorTag}</div>` : '';
 
         return `<tr>
             <td style="text-align:right; padding:3px 5px; border:1px solid #000;">
-                <div style="font-weight:900; font-size:1em; color:#000;">${escapePrintHtml(item.name || item.product || '')}</div>
+                <div style="font-weight:900;">${escapePrintHtml(item.name || item.product || '')}</div>
                 ${fashionDetails}
             </td>
-            <td style="text-align:center; padding:3px 4px; border:1px solid #000; font-weight:bold; color:#000;">${qty} ${escapePrintHtml(unitName)}</td>
-            <td style="text-align:center; padding:3px 4px; border:1px solid #000; font-weight:bold; color:#000;">${price.toFixed(2)}</td>
-            <td style="text-align:center; padding:3px 4px; border:1px solid #000; font-weight:900; color:#000;">${lineTotal}</td>
+            <td style="text-align:center; padding:3px 4px; border:1px solid #000;">${qty} ${escapePrintHtml(unitName)}</td>
+            <td style="text-align:center; padding:3px 4px; border:1px solid #000;">${price.toFixed(2)}</td>
+            <td style="text-align:center; padding:3px 4px; border:1px solid #000;">${lineTotal}</td>
         </tr>`;
     }).join('');
 
@@ -204,19 +197,12 @@ function printInvoice(invoiceData) {
             : (item.unit || 'قطعة');
             
         // تفاصيل المقاس واللون للملابس والفاشون
-        const sVal = escapePrintHtml(item.size || item.selectedSize || '');
-        const cVal = escapePrintHtml(item.color || item.selectedColor || '');
-        let fashionDetails = '';
-        if (sVal && cVal) {
-            fashionDetails = `<div style="font-size:0.85em; font-weight:bold; color:#000;">[${sVal} - ${cVal}]</div>`;
-        } else if (sVal) {
-            fashionDetails = `<div style="font-size:0.85em; font-weight:bold; color:#000;">[${sVal}]</div>`;
-        } else if (cVal) {
-            fashionDetails = `<div style="font-size:0.85em; font-weight:bold; color:#000;">[${cVal}]</div>`;
-        }
+        const sizeTag = (item.size || item.selectedSize) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#334155; font-weight:bold;">[${escapePrintHtml(item.size || item.selectedSize)}]</span>` : '';
+        const colorTag = (item.color || item.selectedColor) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#334155; font-weight:bold;">(${escapePrintHtml(item.color || item.selectedColor)})</span>` : '';
+        const fashionDetails = (sizeTag || colorTag) ? `<div style="font-size:0.85em; color:#475569;">${sizeTag} ${colorTag}</div>` : '';
 
         return `<tr>
-            <td style="text-align:right; padding:2px 4px; border-bottom:1px solid #000; font-weight:900; color:#000;">
+            <td style="text-align:right; padding:2px 4px; border-bottom:1px solid #ccc; font-weight:900;">
                 <div>${escapePrintHtml(item.name || item.product || '')}</div>
                 ${fashionDetails}
             </td>
@@ -559,68 +545,6 @@ function openFreeEditor(invoiceData) {
             updatePrintEditorPreview();
         }
     };
-}
-
-function generateOfflineInvoiceQR(text, size = 110) {
-    try {
-        if (typeof QRCode !== 'undefined' && text) {
-            const tempDiv = document.createElement('div');
-            tempDiv.style.position = 'fixed';
-            tempDiv.style.left = '-9999px';
-            tempDiv.style.top = '-9999px';
-            tempDiv.style.width = size + 'px';
-            tempDiv.style.height = size + 'px';
-            document.body.appendChild(tempDiv);
-            
-            // تنظيف النص وضمان حجم بيانات مناسب وسريع القراءة
-            const cleanText = String(text).trim();
-            const safeText = cleanText.length > 200 ? cleanText.substring(0, 200) : cleanText;
-
-            const correctLvl = (typeof QRCode !== 'undefined' && QRCode.CorrectLevel && QRCode.CorrectLevel.L !== undefined) 
-                ? QRCode.CorrectLevel.L 
-                : 1;
-
-            new QRCode(tempDiv, {
-                text: safeText,
-                width: size,
-                height: size,
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: correctLvl
-            });
-            
-            let resultHtml = '';
-            const canvas = tempDiv.querySelector('canvas');
-            const img = tempDiv.querySelector('img');
-            const svg = tempDiv.querySelector('svg');
-
-            if (canvas) {
-                try {
-                    const dataUrl = canvas.toDataURL('image/png');
-                    if (dataUrl && dataUrl.length > 100) {
-                        resultHtml = `<img src="${dataUrl}" style="width:${size}px; height:${size}px; display:block; margin:0 auto;" />`;
-                    }
-                } catch (err) {
-                    console.warn("Canvas toDataURL:", err);
-                }
-            }
-
-            if (!resultHtml && img && img.src && img.src.startsWith('data:')) {
-                resultHtml = `<img src="${img.src}" style="width:${size}px; height:${size}px; display:block; margin:0 auto;" />`;
-            } else if (!resultHtml && svg) {
-                svg.setAttribute('style', `width:${size}px; height:${size}px; display:block; margin:0 auto;`);
-                resultHtml = svg.outerHTML;
-            }
-
-            tempDiv.remove();
-            if (resultHtml) return resultHtml;
-        }
-    } catch (e) {
-        console.warn("Offline QR generation fallback:", e);
-    }
-    
-    // في حال تعذر التوليد، نرجع بديل محلي خالص بدون طلب شبكة
-    return `<div style="width:${size}px; height:${size}px; margin:0 auto; display:flex; align-items:center; justify-content:center; border:1px dashed #cbd5e1; border-radius:6px; font-size:10px; color:#64748b; font-weight:bold;">QR Code</div>`;
 }
 
 // ============================================================

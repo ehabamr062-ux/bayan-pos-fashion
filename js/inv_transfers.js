@@ -290,37 +290,66 @@
         }
 
         window.renderTransferTable = function() {
-
             const tbody = document.getElementById('transferTableBody');
-
             const emptyState = document.getElementById('transferEmptyState');
-
             if (!tbody) return;
 
             tbody.innerHTML = '';
-
             let totalVal = 0;
-
             let itemsCount = transferItemsBatch.length;
 
             if (itemsCount === 0) {
-
                 if (emptyState) emptyState.style.display = 'block';
-
             } else {
-
                 if (emptyState) emptyState.style.display = 'none';
-
             }
 
+            const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+            const wFrom = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || activeWH).trim();
+
             transferItemsBatch.forEach((item, index) => {
+                // تحديث الرصيد الفعلي للصنف والتشكيلة في المخزن المحول منه فوراً
+                const p = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB.find(prod => prod.id === item.id || prod.name === item.name) : null;
+                if (p) {
+                    const factor = parseFloat(item.unitFactor) || 1;
+                    if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+                        const sSize = String(item.size || item.selectedSize || '').trim();
+                        const sColor = String(item.color || item.selectedColor || '').trim();
+                        const matchedVar = p.variants.find(v => 
+                            (String(v.size || '').trim() === sSize) && 
+                            (String(v.color || '').trim() === sColor)
+                        ) || p.variants.find(v => 
+                            (!sSize || String(v.size || '').trim() === sSize) && 
+                            (!sColor || String(v.color || '').trim() === sColor)
+                        );
+                        if (matchedVar) {
+                            let srcStock = 0;
+                            if (matchedVar.warehouseStocks && typeof matchedVar.warehouseStocks === 'object' && matchedVar.warehouseStocks[wFrom] !== undefined) {
+                                srcStock = parseFloat(matchedVar.warehouseStocks[wFrom]) || 0;
+                            } else if (wFrom === 'المخزن الرئيسي' || !matchedVar.warehouseStocks) {
+                                srcStock = parseFloat(matchedVar.stock) || 0;
+                            }
+                            item.stock = srcStock / factor;
+                            item.sourceStock = item.stock;
+                        }
+                    } else {
+                        let srcStock = 0;
+                        if (typeof getWarehouseStock === 'function') {
+                            srcStock = getWarehouseStock(p.name, wFrom);
+                        } else if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[wFrom] !== undefined) {
+                            srcStock = parseFloat(p.warehouseStocks[wFrom]) || 0;
+                        } else if (wFrom === 'المخزن الرئيسي' || !p.warehouseStocks) {
+                            srcStock = parseFloat(p.stock) || 0;
+                        }
+                        item.stock = srcStock / factor;
+                        item.sourceStock = item.stock;
+                    }
+                }
 
                 const itemTotal = (item.qty * item.price);
-
                 totalVal += itemTotal;
 
                 const tr = document.createElement('tr');
-
                 tr.style.borderBottom = '1px solid #e2e8f0';
 
                 const { sizeElement, colorElement } = (typeof renderVariantSelectElements === 'function')
@@ -579,9 +608,10 @@
 
                     const div = document.createElement('div');
 
-                    div.className = 'search-item';
+                    div.className = 'transfer-search-card';
+                    div.style.cssText = 'padding: 8px 12px; margin-bottom: 6px; border-radius: 12px; border: 1.5px solid #e2e8f0; background: #ffffff; cursor: pointer; transition: all 0.2s ease; display: flex; justify-content: space-between; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.02); box-sizing: border-box; width: 100%; overflow: hidden;';
 
-                    const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي');
+                    const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
                     let currentWhStock = 0;
                     if (typeof getWarehouseStock === 'function') {
                         currentWhStock = getWarehouseStock(p.name, fromWh);
@@ -595,24 +625,30 @@
                     const stockColor = currentWhStock <= 0 ? '#ef4444' : (currentWhStock <= 5 ? '#f59e0b' : '#10b981');
 
                     div.innerHTML = `
-                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-                            <div style="flex:1.5; min-width:180px; text-align:right;">
-                                <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b; margin-bottom: 2px;">${p.name}</div>
-                                <div style="font-size:0.75rem; color:#64748b;">
-                                    <span>📦 كود: <b style="color:#0284c7;">${p.code || p.id}</b></span>
-                                    <span style="margin: 0 5px; color:#cbd5e1;">|</span>
-                                    <span>🏷️ باركود: <b>${p.barcode || '---'}</b></span>
+                        <div style="flex: 1; min-width: 0; text-align: right; overflow: hidden;">
+                            <div style="font-weight: 900; font-size: 0.98rem; color: #0f172a; margin-bottom: 3px; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                <span style="color: #0284c7; font-size: 1.05rem; flex-shrink: 0;">🏷️</span>
+                                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${p.name}</span>
+                            </div>
+                            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; overflow: hidden;">
+                                <span style="background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 5px; font-size: 0.73rem; font-weight: 700; border: 1px solid #e2e8f0; white-space: nowrap; flex-shrink: 0;">
+                                    كود: <b style="color: #0284c7; font-family: monospace;">${p.code || p.id}</b>
+                                </span>
+                                <span style="background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 5px; font-size: 0.73rem; font-weight: 700; border: 1px solid #e2e8f0; white-space: nowrap; flex-shrink: 0;">
+                                    باركود: <b style="color: #334155; font-family: monospace;">${p.barcode || '---'}</b>
+                                </span>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+                            <div style="text-align: center; background: ${currentWhStock > 0 ? '#ecfdf5' : '#fef2f2'}; border: 1.5px solid ${currentWhStock > 0 ? '#a7f3d0' : '#fecaca'}; padding: 4px 8px; border-radius: 8px; min-width: 78px; flex-shrink: 0;">
+                                <div style="font-size: 0.65rem; color: ${currentWhStock > 0 ? '#047857' : '#b91c1c'}; font-weight: 800; white-space: nowrap;">رصيد (${fromWh})</div>
+                                <div style="font-weight: 900; font-size: 0.92rem; color: ${stockColor}; line-height: 1.2; white-space: nowrap;">
+                                    ${currentWhStock} <span style="font-size: 0.65rem;">${p.unit || 'قطعة'}</span>
                                 </div>
                             </div>
-                            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                                <div style="text-align:center; background:#f8fafc; padding:4px 10px; border-radius:8px; border:1px solid #e2e8f0;">
-                                    <div style="font-size:0.68rem; color:#64748b; font-weight:700;">🏢 رصيد (${fromWh})</div>
-                                    <div style="font-weight:900; font-size:0.92rem; color:${stockColor};">${currentWhStock} <span style="font-size:0.65rem;">${p.unit || 'قطعة'}</span></div>
-                                </div>
-                                <div style="text-align:center; background:rgba(2, 132, 199, 0.08); padding:4px 12px; border-radius:8px; border:1.5px solid rgba(2, 132, 199, 0.25);">
-                                    <div style="font-size:0.68rem; color:#0369a1; font-weight:800;">💰 سعر قطاعي</div>
-                                    <div style="font-weight:900; font-size:0.95rem; color:#0284c7;">${retailPrice.toFixed(2)} ج.م</div>
-                                </div>
+                            <div style="text-align: center; background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 4px 10px; border-radius: 8px; min-width: 82px; flex-shrink: 0; box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);">
+                                <div style="font-size: 0.65rem; color: #e0f2fe; font-weight: 800; white-space: nowrap;">سعر قطاعي</div>
+                                <div style="font-weight: 900; font-size: 0.92rem; line-height: 1.2; white-space: nowrap;">${retailPrice.toFixed(2)} ج.م</div>
                             </div>
                         </div>
                     `;
@@ -627,9 +663,19 @@
 
                     };
 
-                    div.onmouseover = () => div.style.background = '#f8fafc';
+                    div.onmouseenter = () => {
+                        div.style.background = '#f0f9ff';
+                        div.style.borderColor = '#0284c7';
+                        div.style.transform = 'translateX(-3px)';
+                        div.style.boxShadow = '0 4px 14px rgba(2, 132, 199, 0.15)';
+                    };
 
-                    div.onmouseout = () => div.style.background = '';
+                    div.onmouseleave = () => {
+                        div.style.background = '#ffffff';
+                        div.style.borderColor = '#e2e8f0';
+                        div.style.transform = 'none';
+                        div.style.boxShadow = '0 2px 6px rgba(0,0,0,0.02)';
+                    };
 
                     resultsDiv.appendChild(div);
 
@@ -720,7 +766,7 @@
                         let matchingVariant = null;
                         let match = productsDB.find(p => {
                             if (p.variants && Array.isArray(p.variants)) {
-                                const vFound = p.variants.find(v => String(v.barcode || '').trim() === query);
+                                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === query);
                                 if (vFound) {
                                     matchingVariant = vFound;
                                     return true;
@@ -739,9 +785,14 @@
                                 existing.qty = (parseFloat(existing.qty) || 0) + 1;
                             } else {
                                 const vCost = parseFloat(matchingVariant.cost) || parseFloat(match.cost) || 0;
-                                const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي');
-                                let currentWhStock = (typeof getWarehouseStock === 'function') ? getWarehouseStock(match.name, fromWh) : (parseFloat(match.stock) || 0);
-                                if (matchingVariant.stock !== undefined) currentWhStock = parseFloat(matchingVariant.stock) || 0;
+                                const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
+                                if (matchingVariant) {
+                                    if (matchingVariant.warehouseStocks && matchingVariant.warehouseStocks[fromWh] !== undefined) {
+                                        currentWhStock = parseFloat(matchingVariant.warehouseStocks[fromWh]) || 0;
+                                    } else if (matchingVariant.stock !== undefined) {
+                                        currentWhStock = parseFloat(matchingVariant.stock) || 0;
+                                    }
+                                }
 
                                 window.transferItemsBatch.push({
                                     id: match.id,
@@ -1073,30 +1124,29 @@
                                 const factor = parseFloat(item.unitFactor) || 1;
                                 const baseQty = (parseFloat(item.qty) || 0) * factor;
 
-                                // تحديث رصيد المخزنين في الذاكرة الحية فوراً
+                                // خصم الرصيد من المخزن المصدر فوراً ووضعه في حالة الانتظار (In-Transit)
                                 const p = productsDB.find(prod => prod.name === item.name || prod.id === item.id);
                                 if (p) {
                                     if (!p.warehouseStocks) p.warehouseStocks = {};
                                     p.warehouseStocks[wFrom] = Math.max(0, (parseFloat(p.warehouseStocks[wFrom]) || 0) - baseQty);
-                                    p.warehouseStocks[wTo] = (parseFloat(p.warehouseStocks[wTo]) || 0) + baseQty;
 
-                                    // تحديث رصيد التشكيلة (المقاس واللون) في المخزنين المنقول منه وإليه
+                                    // خصم رصيد التشكيلة (المقاس واللون) من المخزن المصدر
                                     if (p.variants && Array.isArray(p.variants)) {
                                         const sSize = String(item.size || item.selectedSize || '').trim();
                                         const sColor = String(item.color || item.selectedColor || '').trim();
                                         if (sSize || sColor) {
                                             const matchedVar = p.variants.find(v => 
+                                                (String(v.size || '').trim() === sSize) && 
+                                                (String(v.color || '').trim() === sColor)
+                                            ) || p.variants.find(v => 
                                                 (!sSize || String(v.size || '').trim() === sSize) && 
                                                 (!sColor || String(v.color || '').trim() === sColor)
                                             );
                                             if (matchedVar) {
                                                 if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                                                 matchedVar.warehouseStocks[wFrom] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[wFrom]) || 0) - baseQty);
-                                                matchedVar.warehouseStocks[wTo] = (parseFloat(matchedVar.warehouseStocks[wTo]) || 0) + baseQty;
                                             }
                                         }
-                                        // مزامنة رصيد الصنف الأساسي مع مجموع التشكيلات
-                                        p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                                     }
                                 }
 
@@ -1110,6 +1160,9 @@
                                     dateISO: dt.iso,
                                     timeISO: dt.time,
                                     type: 'تحويل مخزني 🚚',
+                                    transferStatus: 'pending',
+                                    receivedBy: null,
+                                    receivedAt: null,
                                     product: item.name,
                                     size: sSize,
                                     color: sColor,
@@ -1117,6 +1170,7 @@
                                     selectedColor: sColor,
                                     qty: item.qty,
                                     unit: item.unitName,
+                                    unitFactor: factor,
                                     price: item.price,
                                     total: item.qty * item.price,
                                     paidAmount: (idx === 0) ? totalTransferValue : 0,
@@ -1156,6 +1210,7 @@
                             if (typeof updateDashboard === 'function') updateDashboard();
                             if (typeof updateInventoryStats === 'function') updateInventoryStats();
                             if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
+                            if (typeof updateNotifications === 'function') updateNotifications();
                         }
                     } catch (err) {
                         console.error("Error processing batch transfer:", err);
@@ -1231,48 +1286,145 @@
                 // إذا لم يتم النقر داخل القائمة، قم بإغلاقها
 
                 if (!menu.contains(event.target)) {
-
                     menu.classList.add('hidden');
-
                 }
-
             }
-
         });
 
-        function deleteSelectedAccount() {
+        // =========================================================================
+        // 🚚 قبول واستلام أو رفض أذونات التحويل من ساحة الانتظار / الإشعارات
+        // =========================================================================
+        window.acceptTransferFromNotify = async function(invId) {
+            if (!invId) return;
+            const transItems = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+                ? transactions.filter(t => t.invoiceId === invId && t.type && t.type.includes('تحويل'))
+                : [];
 
-            if (!checkPermission('accounts_delete')) return;
-
-            if (!selectedAccountID) return alert("يرجى تحديد حساب أولاً");
-
-            const idx = accounts.findIndex(a => a.id === selectedAccountID);
-
-            if (idx !== -1) {
-                const targetAcc = accounts[idx];
-                const bal = Math.abs((parseFloat(targetAcc.debit) || 0) - (parseFloat(targetAcc.credit) || 0));
-                if (bal > 0.01) {
-                    if (typeof showToast === 'function') showToast(`⚠️ لا يمكن حذف الحساب "${targetAcc.name}" لأنه يحتوي على رصيد قائم (${bal.toFixed(2)} ج.م)! يرجى تسوية الحساب أولاً.`, "warning");
-                    else alert(`لا يمكن حذف الحساب "${targetAcc.name}" لأنه يحتوي على رصيد قائم!`);
-                    return;
-                }
-
-                if (!confirm(`هل أنت متأكد من نقل الحساب "${targetAcc.name}" إلى سلة المحذوفات؟`)) return;
-
-                if (typeof trashManager !== 'undefined' && trashManager.moveToTrash) {
-                    trashManager.moveToTrash(targetAcc, 'account', `حساب: ${targetAcc.name}`);
-                } else {
-                    addToTrash('account', targetAcc, `حساب: ${targetAcc.name}`);
-                }
-
-                accounts.splice(idx, 1);
-
-                saveData();
-
-                selectedAccountID = null;
-
-                renderAccountsTable();
-
+            if (transItems.length === 0) {
+                if (typeof showToast === 'function') showToast('⚠️ إذن التحويل غير موجود', 'error');
+                return;
             }
 
-        }
+            const receiverUser = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) ? currentUser.name : 'أمين المخزن';
+            const nowFull = new Date().toLocaleString('ar-EG');
+
+            transItems.forEach(item => {
+                item.transferStatus = 'received';
+                item.receivedBy = receiverUser;
+                item.receivedAt = nowFull;
+
+                // إضافة الكمية رسمياً لرصيد المخزن المستلم
+                const factor = parseFloat(item.unitFactor) || 1;
+                const baseQty = (parseFloat(item.qty) || 0) * factor;
+                const wTo = item.warehouse;
+
+                const p = productsDB.find(prod => prod.name === item.product || prod.id === item.id);
+                if (p) {
+                    if (!p.warehouseStocks) p.warehouseStocks = {};
+                    p.warehouseStocks[wTo] = (parseFloat(p.warehouseStocks[wTo]) || 0) + baseQty;
+
+                    if (p.variants && Array.isArray(p.variants)) {
+                        const sSize = String(item.size || item.selectedSize || '').trim();
+                        const sColor = String(item.color || item.selectedColor || '').trim();
+                        if (sSize || sColor) {
+                            const matchedVar = p.variants.find(v => 
+                                (String(v.size || '').trim() === sSize) && 
+                                (String(v.color || '').trim() === sColor)
+                            ) || p.variants.find(v => 
+                                (!sSize || String(v.size || '').trim() === sSize) && 
+                                (!sColor || String(v.color || '').trim() === sColor)
+                            );
+                            if (matchedVar) {
+                                if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
+                                matchedVar.warehouseStocks[wTo] = (parseFloat(matchedVar.warehouseStocks[wTo]) || 0) + baseQty;
+                            }
+                        }
+                    }
+                }
+            });
+
+            await saveData();
+            if (typeof invalidateStockCache === 'function') invalidateStockCache();
+
+            // إشعار السيرفر المحلي
+            if (window.BayanNetworkHub && window.BayanNetworkHub.serverUrl) {
+                try {
+                    fetch(`${window.BayanNetworkHub.serverUrl}/api/transfers/accept`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ transferId: invId, receiverName: receiverUser })
+                    }).catch(() => {});
+                } catch(e) {}
+            }
+
+            if (typeof showToast === 'function') {
+                showToast(`🎉 تم تأكيد استلام إذن التحويل #${invId} وإضافة البضاعة لرصيد المخزن بنجاح!`, 'success');
+            }
+
+            if (typeof updateNotifications === 'function') updateNotifications();
+            if (typeof showNotificationsModal === 'function') {
+                showNotificationsModal('transfers');
+            }
+        };
+
+        window.rejectTransferFromNotify = async function(invId) {
+            if (!invId) return;
+            const transItems = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+                ? transactions.filter(t => t.invoiceId === invId && t.type && t.type.includes('تحويل'))
+                : [];
+
+            if (transItems.length === 0) {
+                if (typeof showToast === 'function') showToast('⚠️ إذن التحويل غير موجود', 'error');
+                return;
+            }
+
+            const rejectorUser = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) ? currentUser.name : 'أمين المخزن';
+            const nowFull = new Date().toLocaleString('ar-EG');
+
+            // استرجاع البضاعة للمخزن المصدر
+            transItems.forEach(item => {
+                item.transferStatus = 'rejected';
+                item.rejectedBy = rejectorUser;
+                item.rejectedAt = nowFull;
+
+                const factor = parseFloat(item.unitFactor) || 1;
+                const baseQty = (parseFloat(item.qty) || 0) * factor;
+                const wFrom = item.sourceWarehouse;
+
+                const p = productsDB.find(prod => prod.name === item.product || prod.id === item.id);
+                if (p) {
+                    if (!p.warehouseStocks) p.warehouseStocks = {};
+                    p.warehouseStocks[wFrom] = (parseFloat(p.warehouseStocks[wFrom]) || 0) + baseQty;
+
+                    if (p.variants && Array.isArray(p.variants)) {
+                        const sSize = String(item.size || item.selectedSize || '').trim();
+                        const sColor = String(item.color || item.selectedColor || '').trim();
+                        if (sSize || sColor) {
+                            const matchedVar = p.variants.find(v => 
+                                (String(v.size || '').trim() === sSize) && 
+                                (String(v.color || '').trim() === sColor)
+                            ) || p.variants.find(v => 
+                                (!sSize || String(v.size || '').trim() === sSize) && 
+                                (!sColor || String(v.color || '').trim() === sColor)
+                            );
+                            if (matchedVar) {
+                                if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
+                                matchedVar.warehouseStocks[wFrom] = (parseFloat(matchedVar.warehouseStocks[wFrom]) || 0) + baseQty;
+                            }
+                        }
+                    }
+                }
+            });
+
+            await saveData();
+            if (typeof invalidateStockCache === 'function') invalidateStockCache();
+
+            if (typeof showToast === 'function') {
+                showToast(`⚠️ تم رفض إذن التحويل #${invId} وإرجاع البضاعة للمخزن المصدر.`, 'warning');
+            }
+
+            if (typeof updateNotifications === 'function') updateNotifications();
+            if (typeof showNotificationsModal === 'function') {
+                showNotificationsModal('transfers');
+            }
+        };

@@ -295,10 +295,6 @@ async function updateQuickPrices() {
 
     await db.products.put(p);
 
-    if (typeof syncProductsToSupabase === 'function' && typeof supabaseClient !== 'undefined' && supabaseClient) {
-        try { await syncProductsToSupabase(); } catch(e) { console.warn("Cloud sync deferred", e); }
-    }
-
     showToast("✅ تم تحديث الأسعار والمزامنة بنجاح", "success");
     closeQuickEditFloating();
     renderInventoryTable();
@@ -827,39 +823,80 @@ function downloadProductTemplate() {
     const XLSXLib = (typeof getXLSXLibrary === 'function' ? getXLSXLibrary() : (typeof XLSX !== 'undefined' ? XLSX : null));
 
     const data = [
-        ["كود الصنف", "كود داخلي", "اسم الصنف", "الباربود", "سعر البيع", "سعر الجملة", "سعر الشراء", "الكمية الحالية", "الوحدة", "المكان", "الفئة", "حد الطلب"]
+        ["كود الصنف", "كود داخلي", "اسم الصنف (الموديل)", "المقاس", "اللون", "باركود المقاس/القطعة", "سعر البيع", "سعر الجملة", "سعر الشراء", "الكمية", "الوحدة", "المكان/الرف", "الفئة/القسم", "حد الطلب"]
     ];
 
     if (productsDB.length > 0) {
         productsDB.forEach(p => {
-            data.push([
-                p.sysCode || p.id || "",
-                p.code || "",
-                p.name || "",
-                p.barcode || "",
-                p.price || 0,
-                p.wholesale || 0,
-                p.cost || 0,
-                p.stock || 0,
-                p.unit || "قطعة",
-                p.shelf || "",
-                p.category || "عام",
-                p.minStock || 0
-            ]);
+            if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+                p.variants.forEach(v => {
+                    data.push([
+                        p.sysCode || p.id || "",
+                        p.code || "",
+                        p.name || "",
+                        v.size || "",
+                        v.color || "",
+                        v.barcode || p.barcode || "",
+                        v.price !== undefined ? v.price : (p.price || 0),
+                        v.wholesale !== undefined ? v.wholesale : (p.wholesale || 0),
+                        v.cost !== undefined ? v.cost : (p.cost || 0),
+                        v.stock !== undefined ? v.stock : 0,
+                        p.unit || "قطعة",
+                        p.shelf || "",
+                        p.category || "عام",
+                        p.minStock || 0
+                    ]);
+                });
+            } else {
+                data.push([
+                    p.sysCode || p.id || "",
+                    p.code || "",
+                    p.name || "",
+                    "",
+                    "",
+                    p.barcode || "",
+                    p.price || 0,
+                    p.wholesale || 0,
+                    p.cost || 0,
+                    p.stock || 0,
+                    p.unit || "قطعة",
+                    p.shelf || "",
+                    p.category || "عام",
+                    p.minStock || 0
+                ]);
+            }
         });
     } else {
-        data.push(["تلقائي", "101", "مثال: صنف جديد 1", "123456789", "100", "90", "80", "50", "قطعة", "رف أ1", "عام", "5"]);
+        data.push(["تلقائي", "MOD-101", "قميص كاجوال رجالي", "M", "أبيض", "20260101", "350", "280", "200", "15", "قطعة", "رف أ1", "ملابس رجالي", "5"]);
+        data.push(["تلقائي", "MOD-101", "قميص كاجوال رجالي", "L", "أبيض", "20260102", "350", "280", "200", "20", "قطعة", "رف أ1", "ملابس رجالي", "5"]);
+        data.push(["تلقائي", "MOD-101", "قميص كاجوال رجالي", "XL", "أسود", "20260103", "350", "280", "200", "10", "قطعة", "رف أ1", "ملابس رجالي", "5"]);
+        data.push(["تلقائي", "MOD-102", "بنطلون جينز كلاسيك", "32", "أزرق", "20260201", "450", "380", "300", "25", "قطعة", "رف ب2", "ملابس رجالي", "5"]);
     }
 
     if (XLSXLib && XLSXLib.utils) {
         const ws = XLSXLib.utils.aoa_to_sheet(data);
         const wb = XLSXLib.utils.book_new();
-        XLSXLib.utils.book_append_sheet(wb, ws, "المنتجات");
-        ws['!cols'] = [ {wch: 15}, {wch: 12}, {wch: 25}, {wch: 15}, {wch: 10}, {wch: 10}, {wch: 10}, {wch: 10}, {wch: 10}, {wch: 12}, {wch: 12}, {wch: 10} ];
-        XLSXLib.writeFile(wb, "نموذج_مخزن_بيان_المتكامل.xlsx");
-        if (typeof showToast === 'function') showToast("✅ تم استخراج النموذج بنجاح", "success");
+        XLSXLib.utils.book_append_sheet(wb, ws, "المنتجات_والأزياء");
+        ws['!cols'] = [
+            { wch: 14 }, // كود الصنف
+            { wch: 14 }, // كود داخلي
+            { wch: 28 }, // اسم الصنف
+            { wch: 10 }, // المقاس
+            { wch: 12 }, // اللون
+            { wch: 20 }, // باركود القطعة
+            { wch: 11 }, // سعر البيع
+            { wch: 11 }, // سعر الجملة
+            { wch: 11 }, // سعر الشراء
+            { wch: 10 }, // الكمية
+            { wch: 10 }, // الوحدة
+            { wch: 12 }, // المكان
+            { wch: 15 }, // الفئة
+            { wch: 10 }  // حد الطلب
+        ];
+        XLSXLib.writeFile(wb, "نموذج_أصناف_ومقاسات_بيان_فاشون.xlsx");
+        if (typeof showToast === 'function') showToast("✅ تم استخراج نموذج فاشون بنجاح", "success");
     } else if (typeof downloadAOAAsExcelCSV === 'function') {
-        downloadAOAAsExcelCSV(data, "نموذج_مخزن_بيان_المتكامل");
+        downloadAOAAsExcelCSV(data, "نموذج_أصناف_ومقاسات_بيان_فاشون");
     }
 }
 
@@ -893,27 +930,34 @@ async function importProductsFromExcel(event) {
             const sysCodeIdx = findCol(['كود الصنف', 'sys', 'system']);
             const intCodeIdx = findCol(['كود داخلي', 'داخلي', 'internal']);
             const nameIdx = (() => {
-                const nameKeys = ['اسم الصنف', 'اسم', 'item name', 'name'];
+                const nameKeys = ['اسم الصنف', 'اسم الصنف (الموديل)', 'الموديل', 'اسم', 'item name', 'name'];
                 let idx = headers.findIndex(h => nameKeys.some(k => h === k.toLowerCase()));
                 if (idx !== -1) return idx;
-                return headers.findIndex(h => !h.includes('كود') && !h.includes('code') && ['اسم', 'item', 'name', 'صنف'].some(k => h.includes(k)));
+                return headers.findIndex(h => !h.includes('كود') && !h.includes('code') && ['اسم', 'item', 'name', 'صنف', 'موديل'].some(k => h.includes(k)));
             })();
-            const barIdx = findCol(['باربود', 'barcode']);
+            const sizeIdx = findCol(['المقاس', 'مقاس', 'size']);
+            const colorIdx = findCol(['اللون', 'لون', 'color']);
+            const barIdx = findCol(['باركود المقاس/القطعة', 'باركود', 'باربود', 'barcode']);
             const priceIdx = findCol(['سعر البيع', 'بيع', 'retail', 'price']);
-            const wholesaleIdx = findCol(['جملة', 'wholesale']);
-            const costIdx = findCol(['تكلفة', 'شراء', 'cost']);
-            const qtyIdx = findCol(['كمية', 'رصيد', 'stock', 'qty']);
-            const unitIdx = findCol(['وحدة', 'unit']);
-            const shelfIdx = findCol(['مكان', 'رف', 'shelf']);
-            const catIdx = findCol(['فئة', 'تصنيف', 'قسم', 'category']);
+            const wholesaleIdx = findCol(['سعر الجملة', 'جملة', 'wholesale']);
+            const costIdx = findCol(['سعر الشراء', 'تكلفة', 'شراء', 'cost']);
+            const qtyIdx = findCol(['الكمية الحالية', 'الكمية', 'كمية', 'رصيد', 'stock', 'qty']);
+            const unitIdx = findCol(['الوحدة', 'وحدة', 'unit']);
+            const shelfIdx = findCol(['المكان/الرف', 'مكان', 'رف', 'shelf']);
+            const catIdx = findCol(['الفئة/القسم', 'فئة', 'تصنيف', 'قسم', 'category']);
             const minStockIdx = findCol(['حد الطلب', 'min']);
 
             if (nameIdx === -1) throw new Error("لم نتمكن من العثور على عمود 'اسم الصنف' في الملف!");
+
+            const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
+                ? currentUser.warehouseName
+                : 'المخزن الرئيسي';
 
             const rows = jsonData.slice(1);
             let added = 0;
             let updated = 0;
             let skippedEmpty = 0;
+            let variantsProcessed = 0;
             let totalScanned = rows.length;
 
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -929,11 +973,13 @@ async function importProductsFromExcel(event) {
 
                     const sysCode = sysCodeIdx !== -1 ? String(row[sysCodeIdx] || "").trim() : "";
                     const intCode = intCodeIdx !== -1 ? String(row[intCodeIdx] || "").trim() : "";
-                    const barcode = barIdx !== -1 ? String(row[barIdx] || "").trim() : "";
+                    const rawBarcode = barIdx !== -1 ? String(row[barIdx] || "").trim() : "";
+                    const vSize = sizeIdx !== -1 ? String(row[sizeIdx] || "").trim() : "";
+                    const vColor = colorIdx !== -1 ? String(row[colorIdx] || "").trim() : "";
                     const price = parseFloat(row[priceIdx]) || 0;
                     const wholesale = wholesaleIdx !== -1 ? (parseFloat(row[wholesaleIdx]) || price) : price;
                     const cost = parseFloat(row[costIdx]) || 0;
-                    const stock = parseFloat(row[qtyIdx]) || 0;
+                    const rowStock = parseFloat(row[qtyIdx]) || 0;
                     const unit = unitIdx !== -1 ? String(row[unitIdx] || "قطعة").trim() : "قطعة";
                     const shelf = shelfIdx !== -1 ? String(row[shelfIdx] || "").trim() : "";
                     const category = catIdx !== -1 ? String(row[catIdx] || "عام").trim() : "عام";
@@ -941,33 +987,98 @@ async function importProductsFromExcel(event) {
 
                     let existing = productsDB.find(p => 
                         (sysCode && sysCode !== "تلقائي" && (p.sysCode === sysCode || String(p.id) === sysCode)) ||
-                        (barcode && p.barcode === barcode && barcode !== "-") ||
                         (name.toLowerCase() === p.name.toLowerCase())
                     );
 
-                    if (existing) {
-                        if (intCode) existing.code = intCode;
-                        if (barcode && barcode !== "-") existing.barcode = barcode;
-                        existing.price = price || existing.price;
-                        existing.wholesale = wholesale || existing.wholesale;
-                        existing.cost = cost || existing.cost;
-                        existing.stock = stock;
-                        existing.unit = unit || existing.unit;
-                        existing.shelf = shelf || existing.shelf;
-                        existing.category = category || existing.category;
-                        existing.minStock = minStock || existing.minStock;
-                        updated++;
-                    } else {
+                    let targetProduct = existing;
+                    let isNewProduct = false;
+
+                    if (!targetProduct) {
                         const newId = Date.now() + i;
-                        const newProduct = {
+                        targetProduct = {
                             id: newId,
                             sysCode: (sysCode && sysCode !== "تلقائي") ? sysCode : String(newId),
                             code: intCode,
-                            name, barcode, price, wholesale, cost, stock, unit, shelf, category, minStock,
+                            name,
+                            barcode: rawBarcode,
+                            price, wholesale, cost,
+                            stock: 0,
+                            unit, shelf, category, minStock,
+                            variants: [],
+                            warehouseStocks: { [activeWH]: 0 },
                             units: [{ unitName: unit, factor: 1, cost, price, wholesale, isDefaultSale: true, isDefaultPurchase: true }]
                         };
-                        productsDB.push(newProduct);
+                        productsDB.push(targetProduct);
+                        isNewProduct = true;
                         added++;
+                    } else {
+                        if (intCode) targetProduct.code = intCode;
+                        if (price) targetProduct.price = price;
+                        if (wholesale) targetProduct.wholesale = wholesale;
+                        if (cost) targetProduct.cost = cost;
+                        if (unit) targetProduct.unit = unit;
+                        if (shelf) targetProduct.shelf = shelf;
+                        if (category) targetProduct.category = category;
+                        if (minStock) targetProduct.minStock = minStock;
+                        if (!isNewProduct) updated++;
+                    }
+
+                    // معالجة مصفوفة المقاسات والألوان (Fashion Variants Matrix)
+                    if (vSize || vColor || (rawBarcode && (sizeIdx !== -1 || colorIdx !== -1))) {
+                        if (!targetProduct.variants || !Array.isArray(targetProduct.variants)) {
+                            targetProduct.variants = [];
+                        }
+
+                        let effVarBarcode = rawBarcode;
+                        if (!effVarBarcode) {
+                            if (typeof generateVariantBarcode === 'function') {
+                                effVarBarcode = generateVariantBarcode(vSize, vColor, targetProduct.variants.length + 1);
+                            } else {
+                                effVarBarcode = `20${String(Date.now()).slice(-6)}${targetProduct.variants.length + 1}`;
+                            }
+                        }
+
+                        let matchedVar = targetProduct.variants.find(v => 
+                            (effVarBarcode && v.barcode === effVarBarcode) ||
+                            (v.size === vSize && v.color === vColor)
+                        );
+
+                        if (matchedVar) {
+                            matchedVar.size = vSize || matchedVar.size;
+                            matchedVar.color = vColor || matchedVar.color;
+                            matchedVar.barcode = effVarBarcode;
+                            matchedVar.price = price || matchedVar.price || targetProduct.price;
+                            matchedVar.wholesale = wholesale || matchedVar.wholesale || targetProduct.wholesale;
+                            matchedVar.cost = cost || matchedVar.cost || targetProduct.cost;
+                            
+                            if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
+                            matchedVar.warehouseStocks[activeWH] = rowStock;
+                            matchedVar.stock = Object.values(matchedVar.warehouseStocks).reduce((s, q) => s + (parseFloat(q) || 0), 0);
+                        } else {
+                            targetProduct.variants.push({
+                                size: vSize,
+                                color: vColor,
+                                barcode: effVarBarcode,
+                                price: price || targetProduct.price,
+                                wholesale: wholesale || targetProduct.wholesale,
+                                cost: cost || targetProduct.cost,
+                                stock: rowStock,
+                                warehouseStocks: { [activeWH]: rowStock }
+                            });
+                        }
+                        variantsProcessed++;
+
+                        // إعادة حساب إجمالي رصيد الصنف من كافة التشكيلات
+                        const totalVarStock = targetProduct.variants.reduce((s, v) => s + (parseFloat(v.stock) || 0), 0);
+                        targetProduct.stock = totalVarStock;
+                        if (!targetProduct.warehouseStocks) targetProduct.warehouseStocks = {};
+                        targetProduct.warehouseStocks[activeWH] = targetProduct.variants.reduce((s, v) => s + (parseFloat(v.warehouseStocks?.[activeWH]) || 0), 0);
+                    } else {
+                        // صنف بدون مقاسات أو ألوان
+                        if (rawBarcode && rawBarcode !== "-") targetProduct.barcode = rawBarcode;
+                        targetProduct.stock = rowStock;
+                        if (!targetProduct.warehouseStocks) targetProduct.warehouseStocks = {};
+                        targetProduct.warehouseStocks[activeWH] = rowStock;
                     }
 
                     if (category && window.inventoryCategories && !window.inventoryCategories.includes(category)) {
@@ -980,16 +1091,19 @@ async function importProductsFromExcel(event) {
             }
 
             if (typeof saveData === 'function') await saveData();
+            if (typeof invalidateStockCache === 'function') invalidateStockCache();
 
             renderInventoryTable();
             if (typeof updateDatalists === 'function') updateDatalists();
             if (typeof renderProductsGrid === 'function') renderProductsGrid();
 
-            let summaryMsg = `✅ اكتملت العملية:\n`;
-            summaryMsg += `🔹 إجمالي الأسطر: ${totalScanned}\n`;
-            summaryMsg += `🔹 تم التحديث: ${updated}\n`;
-            summaryMsg += `🔹 تم الإضافة: ${added}\n`;
-            if (skippedEmpty > 0) summaryMsg += `🔹 تم تجاهله (بدون اسم): ${skippedEmpty}`;
+            let summaryMsg = `✅ اكتملت عملية استيراد الإكسيل بنجاح:\n`;
+            summaryMsg += `🔹 إجمالي الأسطر المقروءة: ${totalScanned}\n`;
+            summaryMsg += `🔹 أصناف جديدة أضيفت: ${added}\n`;
+            summaryMsg += `🔹 أصناف تم تحديثها: ${updated}\n`;
+            if (variantsProcessed > 0) summaryMsg += `🔹 تشكيلات (مقاسات وألوان) تم تجميعها: ${variantsProcessed}\n`;
+            if (skippedEmpty > 0) summaryMsg += `🔹 أسطر فارغة تم تجاهلها: ${skippedEmpty}\n`;
+            summaryMsg += `\n🏢 تم إسناد الأرصدة إلى: [${activeWH}]`;
 
             alert(summaryMsg);
             event.target.value = ""; 

@@ -409,7 +409,7 @@ async function handlePurchaseSearchEnter(query, event, forceAdd = false) {
     let matchingVariant = null;
     let pMatch = productsDB.find(p => {
         if (p.variants && Array.isArray(p.variants)) {
-            const vFound = p.variants.find(v => String(v.barcode || '').trim() === cleanQuery);
+            const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
             if (vFound) {
                 matchingVariant = vFound;
                 return true;
@@ -1377,17 +1377,8 @@ function calculatePurchaseTotals(sub) {
 
     if (document.getElementById('purchaseTotal')) document.getElementById('purchaseTotal').innerText = purchaseTotalVal.toFixed(2);
 
-    const purMethod = (typeof getSelectedPaymentMethod === 'function') ? getSelectedPaymentMethod('purchase-section') : 'نقدي';
-    const isExplicitCreditPur = (typeof window.isTransactionCredit === 'function') ? window.isTransactionCredit(purMethod, 0, 0, 0) : false;
-    const partnerName = document.getElementById('supplierName') ? document.getElementById('supplierName').value.trim() : '';
-    const isCashSupp = (typeof window.isGenericCashPartner === 'function') ? window.isGenericCashPartner(partnerName) : true;
-
-    const purPaidInput = document.getElementById('purchasePaid');
-    if (purPaidInput && (!isExplicitCreditPur && isCashSupp)) {
-        purPaidInput.value = purchaseTotalVal > 0 ? purchaseTotalVal.toFixed(2) : '';
-    }
-
     // تحديث الرصيد السابق والمطلوب النهائي للمورد / الشريك
+    const partnerName = document.getElementById('supplierName') ? document.getElementById('supplierName').value.trim() : '';
     let rawBal = 0;
     if (typeof getAccountBalance === 'function' && partnerName) {
         rawBal = getAccountBalance(partnerName);
@@ -1503,7 +1494,7 @@ async function savePurchase(force = false, accountChecked = false) {
 
         const selectedMethod = (typeof getSelectedPaymentMethod === 'function') ? getSelectedPaymentMethod('purchase-section') : 'نقدي';
         const purchasePaidInput = document.getElementById('purchasePaid');
-        let paidAmount = parseFloat(purchasePaidInput ? purchasePaidInput.value : 0) || 0;
+        const paidAmount = parseFloat(purchasePaidInput ? purchasePaidInput.value : 0) || 0;
 
         const subTotalInit = purchaseCart.reduce((a, b) => a + (b.price * b.qty), 0);
         const discValInit = parseFloat(document.getElementById('purchaseDiscount')?.value) || 0;
@@ -1514,22 +1505,12 @@ async function savePurchase(force = false, accountChecked = false) {
         const taxAmountInit = (taxTypeInit === 'perc') ? (subTotalInit * taxValInit / 100) : taxValInit;
         const finalTotalInit = subTotalInit - discAmountInit + taxAmountInit;
 
-        const isExplicitCredit = (typeof window.isTransactionCredit === 'function')
-            ? window.isTransactionCredit(selectedMethod, 0, 0, 0)
+        const isCredit = (typeof window.isTransactionCredit === 'function')
+            ? window.isTransactionCredit(selectedMethod, finalTotalInit, paidAmount, finalTotalInit - paidAmount)
             : false;
-        const isCashSupp = (typeof window.isGenericCashPartner === 'function') ? window.isGenericCashPartner(supplier) : true;
-
-        if (!isExplicitCredit && isCashSupp) {
-            paidAmount = finalTotalInit;
-            if (purchasePaidInput) {
-                purchasePaidInput.value = finalTotalInit.toFixed(2);
-            }
-        }
-
-        const isCreditFinal = isExplicitCredit || (!isCashSupp && ((finalTotalInit - paidAmount) > 0.001));
 
         if (!accountChecked && typeof window.ensurePartnerAccountExists === 'function') {
-            const ok = await window.ensurePartnerAccountExists(supplier, 'مورد', isCreditFinal, () => {
+            const ok = await window.ensurePartnerAccountExists(supplier, 'مورد', isCredit, () => {
                 window.isSavingTransaction = false;
                 savePurchase(force, true);
             });
@@ -1648,16 +1629,21 @@ async function savePurchase(force = false, accountChecked = false) {
                 if (p.variants && Array.isArray(p.variants)) {
                     const sSize = String(item.selectedSize || item.size || '').trim();
                     const sColor = String(item.selectedColor || item.color || '').trim();
-                    const matchedVar = (typeof window.findProductVariant === 'function')
-                        ? window.findProductVariant(p, sSize, sColor)
-                        : p.variants.find(v => (!sSize || String(v.size || '').trim().toLowerCase() === sSize.toLowerCase()) && (!sColor || String(v.color || '').trim().toLowerCase() === sColor.toLowerCase()));
-                    
-                    if (matchedVar) {
-                        matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
-                        if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
-                        matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
-                        if (parseFloat(item.salePrice) > 0) {
-                            matchedVar.price = parseFloat(item.salePrice);
+                    if (sSize || sColor) {
+                        const matchedVar = p.variants.find(v => 
+                            (String(v.size || '').trim() === sSize) && 
+                            (String(v.color || '').trim() === sColor)
+                        ) || p.variants.find(v => 
+                            (!sSize || String(v.size || '').trim() === sSize) && 
+                            (!sColor || String(v.color || '').trim() === sColor)
+                        );
+                        if (matchedVar) {
+                            matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
+                            if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
+                            matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
+                            if (parseFloat(item.salePrice) > 0) {
+                                matchedVar.price = parseFloat(item.salePrice);
+                            }
                         }
                     } else if (parseFloat(item.salePrice) > 0) {
                         // إذا تم تعديل السعر للصنف العام بدون تحديد مقاس، نحدث السعر لكل التشكيلات التي كانت تحمل السعر الافتراضي
@@ -1665,8 +1651,6 @@ async function savePurchase(force = false, accountChecked = false) {
                             v.price = parseFloat(item.salePrice);
                         });
                     }
-                    // مزامنة رصيد الصنف الأساسي مع مجموع تشكيلاته
-                    p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                 }
 
                 // 4. تحديث أسعار البيع النهائية (القطاعي والجملة) بدقة لكل وحدة
