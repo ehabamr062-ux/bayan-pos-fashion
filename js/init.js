@@ -16,8 +16,8 @@ loadData().then(async () => {
     if (currentUser) {
         console.log(`👤 أهلاً بك مجدداً: ${currentUser.name}`);
         if (typeof updateNotifications === 'function') updateNotifications();
-    } else {
-        if (typeof initLogin === 'function') initLogin();
+    } else if (typeof initLogin === 'function') {
+        initLogin();
     }
 
     // 2. تحميل الخلفية في الخلفية بشكل غير معطل للواجهة
@@ -35,7 +35,7 @@ loadData().then(async () => {
     // 4. صمام الأمان الفولاذي: إنشاء نسخة احتياطية تلقائية وفورية في الخلفية عند الترقية لإصدار جديد
     try {
         const lastVer = getStore('bayan_last_run_version');
-        const curVer = window.appVersion || '1.0.0';
+        const curVer = window.appVersion || '1.0.2';
         if (lastVer && lastVer !== curVer) {
             console.log(`🛡️ [Safety Shield] Version upgrade detected (${lastVer} ➔ ${curVer}). Creating automatic background backup...`);
             if (typeof window.executeAutoBackupToFile === 'function') {
@@ -44,8 +44,12 @@ loadData().then(async () => {
                 }).catch(err => console.warn('Post-upgrade backup notice:', err));
             }
         }
-        setStore('bayan_last_run_version', curVer);
     } catch (e) { }
+
+    // 5. تشغيل مزامنة الشبكة المحلية والتابلت
+    if (window.BayanNetworkHub && typeof window.BayanNetworkHub.init === 'function') {
+        window.BayanNetworkHub.init().catch(e => console.warn('[NetworkHub] Init error:', e));
+    }
 
     console.log("🚀 نظام بَيَان المتكامل جاهز للعمل بنجاح!");
 });

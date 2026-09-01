@@ -1124,8 +1124,16 @@
 
                 onConfirm: async () => {
 
-                    // جلب كافة بنود الفاتورة بالكامل
-                    const invItems = transactions.filter(x => (String(x.invoiceId) === String(invId) || String(x.id) === String(invId)) && typeRegex.test(x.type || ''));
+                    // جلب كافة بنود الفاتورة بالكامل بدقة برقم الفاتورة فقط لمنع ظهور أي صنف غريب
+                    const invItems = transactions.filter(x => {
+                        const hasInvId = x.invoiceId != null && x.invoiceId !== '';
+                        if (hasInvId) {
+                            if (String(x.invoiceId) !== String(invId)) return false;
+                        } else {
+                            if (String(x.id) !== String(invId)) return false;
+                        }
+                        return typeRegex.test(x.type || '');
+                    });
                     const head = invItems.find(x => x.isInvoiceHead) || invItems[0] || t;
 
                     // استخراج أدق البيانات الأصلية للفاتورة
@@ -1624,7 +1632,11 @@
             // إذا لم تكن editingOriginalItems محملة، نحاول جلب السجلات القديمة من transactions
             const oldItems = (typeof editingOriginalItems !== 'undefined' && editingOriginalItems && editingOriginalItems.length > 0) ? 
                 editingOriginalItems : 
-                (typeof transactions !== 'undefined' && Array.isArray(transactions) ? transactions.filter(t => (String(t.invoiceId) === String(invId) || String(t.id) === String(invId))) : []);
+                (typeof transactions !== 'undefined' && Array.isArray(transactions) ? transactions.filter(t => {
+                    const hasInvId = t.invoiceId != null && t.invoiceId !== '';
+                    if (hasInvId) return String(t.invoiceId) === String(invId);
+                    return String(t.id) === String(invId);
+                }) : []);
 
             const defaultWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
 
@@ -1712,9 +1724,13 @@
 
             });
 
-            // 2. حذف السجلات القديمة من الذاكرة
+            // 2. حذف السجلات القديمة من الذاكرة بدقة بدون حذف سجلات أخرى تحمل نفس الـ id التلقائي
             if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
-                transactions = transactions.filter(t => !((String(t.invoiceId) === String(invId) || String(t.id) === String(invId)) && (!cleanType || (t.type && t.type.includes(cleanType)))));
+                transactions = transactions.filter(t => {
+                    const hasInvId = t.invoiceId != null && t.invoiceId !== '';
+                    const isMatch = hasInvId ? (String(t.invoiceId) === String(invId)) : (String(t.id) === String(invId));
+                    return !(isMatch && (!cleanType || (t.type && t.type.includes(cleanType))));
+                });
             }
 
             // 3. مسح كاش أرصدة المخازن فوراً

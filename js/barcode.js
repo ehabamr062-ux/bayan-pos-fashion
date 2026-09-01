@@ -593,8 +593,9 @@ const BayanBarcode = (function () {
 
             if (existing) {
                 existing.qty = (parseFloat(existing.qty) || 0) + 1;
-            } else {
-                const vCost = variant ? (parseFloat(variant.cost) || parseFloat(product.cost) || 0) : (parseFloat(product.cost) || 0);
+                const effPrice = (typeof window.getEffectiveTransferPrice === 'function')
+                    ? window.getEffectiveTransferPrice(product, variant)
+                    : (variant ? (parseFloat(variant.cost) || parseFloat(product.cost) || 0) : (parseFloat(product.cost) || 0));
                 const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
                 let currentWhStock = (typeof getWarehouseStock === 'function') ? getWarehouseStock(product.name, fromWh) : (parseFloat(product.stock) || 0);
                 if (variant) {
@@ -615,7 +616,7 @@ const BayanBarcode = (function () {
                     color: vColor,
                     stock: currentWhStock,
                     qty: 1,
-                    price: vCost
+                    price: effPrice
                 });
             }
 

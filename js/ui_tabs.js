@@ -127,9 +127,6 @@
                 }
             } catch(e) {}
 
-            // تحميل خلفية المحل المخصصة (Wallpaper)
-            try { loadWallpaper(); } catch(e) {}
-
             // تهيئة أعمدة المخازن
             try {
                 if (typeof applyInventoryColumnVisibility === 'function') {

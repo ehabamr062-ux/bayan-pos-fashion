@@ -1,6 +1,62 @@
 // ============================================================
 //  التحويلات بين المخازن والفروع (Warehouse Transfers Engine)
 // ============================================================
+        window.getTransferPriceType = function() {
+            let tType = null;
+            if (typeof getStore === 'function') {
+                tType = getStore('transferPriceType');
+            }
+            if (!tType) {
+                try {
+                    const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || localStorage.getItem('pos_settings') || '{}');
+                    tType = settingsObj.transferPriceType;
+                } catch(e) {}
+            }
+            if (!tType) {
+                tType = localStorage.getItem('transferPriceType');
+            }
+            return tType || 'cost';
+        };
+
+        window.getTransferPriceLabel = function() {
+            const priceType = window.getTransferPriceType();
+            if (priceType === 'retail') return 'سعر التحويل (قطاعي)';
+            if (priceType === 'wholesale') return 'سعر التحويل (جملة)';
+            return 'سعر التحويل (التكلفة)';
+        };
+
+        window.getEffectiveTransferPrice = function(product, variant = null, unit = null) {
+            if (!product) return 0;
+            const priceType = window.getTransferPriceType();
+            const factor = (unit && unit.factor) ? parseFloat(unit.factor) : 1;
+
+            let price = 0;
+            if (variant) {
+                if (priceType === 'retail') {
+                    price = parseFloat(variant.price) || parseFloat(product.price) || 0;
+                } else if (priceType === 'wholesale') {
+                    price = parseFloat(variant.wholesale) || parseFloat(variant.wholesalePrice) || parseFloat(product.wholesale) || parseFloat(product.wholesalePrice) || parseFloat(variant.price) || parseFloat(product.price) || 0;
+                } else {
+                    // cost (افتراضي)
+                    price = parseFloat(variant.cost) || parseFloat(product.cost) || 0;
+                }
+            } else {
+                if (priceType === 'retail') {
+                    price = (unit && unit.price !== undefined && parseFloat(unit.price) > 0) ? parseFloat(unit.price) : (parseFloat(product.price) || 0);
+                } else if (priceType === 'wholesale') {
+                    price = (unit && unit.wholesale !== undefined && parseFloat(unit.wholesale) > 0) ? parseFloat(unit.wholesale) : (parseFloat(product.wholesale) || parseFloat(product.wholesalePrice) || parseFloat(product.price) || 0);
+                } else {
+                    // cost (افتراضي)
+                    price = (unit && unit.cost !== undefined && parseFloat(unit.cost) > 0) ? parseFloat(unit.cost) : (parseFloat(product.cost) || 0);
+                }
+            }
+
+            if (unit && factor > 1 && priceType !== 'cost' && (!unit.price || unit.price === product.price)) {
+                price = price * factor;
+            }
+            return parseFloat(price) || 0;
+        };
+
         window.openTransferModal = function(isEdit = false) {
 
             if (!isEdit) transferItemsBatch = [];
@@ -36,87 +92,51 @@
             const totalValue = productsDB.reduce((acc, p) => acc + ((parseFloat(p.stock) || 0) * (parseFloat(p.cost) || 0)), 0);
 
             const stockCountElem = document.getElementById('allWhStockCount');
-
             const stockValueElem = document.getElementById('allWhStockValue');
 
             if (stockCountElem) stockCountElem.innerText = `${totalStock.toLocaleString()} قطعة`;
-
             if (stockValueElem) stockValueElem.innerText = `${totalValue.toLocaleString()} ج.م`;
 
             document.getElementById('transferModal').classList.remove('hidden');
 
-            // 1. جمع الأصناف المختارة بعلامة الصح ✅
-
+            // 1. جمع الأصناف فقط إذا تم تحديد مربعات صح (Checkbox) صريحة في جدول المخزن
             const checkedBoxes = document.querySelectorAll('.inv-row-check:checked');
-
-            checkedBoxes.forEach(chk => {
-
-                const tr = chk.closest('tr');
-
-                const pId = tr.getAttribute('data-id');
-
-                const product = productsDB.find(p => p.id == pId);
-
-                if (product && !transferItemsBatch.some(item => item.id == product.id)) {
-
-                    transferItemsBatch.push({ 
-
-                        id: product.id, 
-
-                        name: product.name, 
-
-                        stock: product.stock, 
-
-                        qty: 1,
-
-                        price: parseFloat(product.cost) || 0 // القيمة الافتراضية هي التكلفة
-
-                    });
-
-                }
-
-            });
-
-            // 2. إذا لم يكن هناك "صح" نأخذ الصنف "المظلل بالذهبي" حالياً
-
-            if (transferItemsBatch.length === 0 && selectedInventoryId) {
-
-                const product = productsDB.find(p => p.id == selectedInventoryId);
-
-                if (product) {
-
-                    transferItemsBatch.push({ 
-
-                        id: product.id, 
-
-                        name: product.name, 
-
-                        stock: product.stock, 
-
-                        qty: 1,
-
-                        price: parseFloat(product.cost) || 0
-
-                    });
-
-                }
-
+            if (!isEdit && checkedBoxes.length > 0) {
+                checkedBoxes.forEach(chk => {
+                    const tr = chk.closest('tr');
+                    const pId = tr ? tr.getAttribute('data-id') : null;
+                    const product = pId ? productsDB.find(p => p.id == pId) : null;
+                    if (product && !transferItemsBatch.some(item => item.id == product.id)) {
+                        transferItemsBatch.push({ 
+                            id: product.id, 
+                            name: product.name, 
+                            stock: product.stock, 
+                            qty: 1, 
+                            price: window.getEffectiveTransferPrice(product)
+                        });
+                    }
+                });
             }
 
-            // 3. تصفير مربع البحث عند الفتح
-
+            // 2. تصفير مربع البحث وحقول الهيدر بالكامل
             const pSearch = document.getElementById('transferProductSearch');
-
             if (pSearch) pSearch.value = '';
 
-            document.getElementById('transferSearchResults').innerHTML = '';
+            const searchResults = document.getElementById('transferSearchResults');
+            if (searchResults) {
+                searchResults.innerHTML = '';
+                searchResults.classList.add('hidden');
+            }
 
-            document.getElementById('transferSearchResults').classList.add('hidden');
-
+            if (document.getElementById('transferSize')) document.getElementById('transferSize').value = '';
+            if (document.getElementById('transferColor')) document.getElementById('transferColor').value = '';
+            if (document.getElementById('transferQty')) document.getElementById('transferQty').value = '1';
+            if (document.getElementById('transferPrice')) document.getElementById('transferPrice').value = '';
             selectedTransferProductId = null;
+            currentTransferHeaderUnit = null;
+            window._pendingTransferVariant = null;
 
-            // 4. تعبئة قائمة المخازن
-
+            // 3. تعبئة قائمة المخازن
             const wFrom = document.getElementById('transferFrom');
 
             if (wFrom) {
@@ -154,21 +174,33 @@
         }
 
         window.closeTransferModal = function() {
-
             document.getElementById('transferModal').classList.add('hidden');
 
-            // إعادة ضبط وضع التعديل إذا كان نشطاً
-
+            // إعادة ضبط وضع التعديل وتفريغ القائمة بالكامل
             isEditMode = false;
-
             editingInvoiceId = null;
-
             editingOriginalDate = null;
-
             editingInvoiceType = null;
-
             transferItemsBatch = [];
+            window.transferItemsBatch = [];
 
+            const pSearch = document.getElementById('transferProductSearch');
+            if (pSearch) pSearch.value = '';
+            const searchResults = document.getElementById('transferSearchResults');
+            if (searchResults) {
+                searchResults.innerHTML = '';
+                searchResults.classList.add('hidden');
+            }
+            if (document.getElementById('transferSize')) document.getElementById('transferSize').value = '';
+            if (document.getElementById('transferColor')) document.getElementById('transferColor').value = '';
+            if (document.getElementById('transferQty')) document.getElementById('transferQty').value = '1';
+            if (document.getElementById('transferPrice')) document.getElementById('transferPrice').value = '';
+            if (document.getElementById('transferNotes')) document.getElementById('transferNotes').value = '';
+            selectedTransferProductId = null;
+            currentTransferHeaderUnit = null;
+            window._pendingTransferVariant = null;
+
+            renderTransferTable();
         }
 
         let currentTransferHeaderUnit = null;
@@ -205,7 +237,7 @@
 
             if (priceInput) {
 
-                priceInput.value = (parseFloat(unit.cost) || parseFloat(product.cost) || 0).toFixed(2);
+                priceInput.value = window.getEffectiveTransferPrice(product, null, unit).toFixed(2);
 
             }
 
@@ -293,6 +325,12 @@
             const tbody = document.getElementById('transferTableBody');
             const emptyState = document.getElementById('transferEmptyState');
             if (!tbody) return;
+
+            // تحديث اسم عمود السعر في جدول التحويل حسب الإعدادات
+            const thPrice = document.querySelector('.col-tr-price');
+            if (thPrice && typeof window.getTransferPriceLabel === 'function') {
+                thPrice.innerText = window.getTransferPriceLabel();
+            }
 
             tbody.innerHTML = '';
             let totalVal = 0;
@@ -444,16 +482,30 @@
             const footerMsg   = document.getElementById('printFooterMsg')?.value || 'شكراً لزيارتكم!';
 
             let itemsHtml = transferItemsBatch.map((item, idx) => {
-                const sSize = item.size || item.selectedSize || '-';
-                const sColor = item.color || item.selectedColor || '-';
+                const pInfo = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB.find(p => p.id === item.id || p.name === item.name) : null;
+                const variants = (pInfo && pInfo.variants && Array.isArray(pInfo.variants)) ? pInfo.variants : [];
+
+                let sSize = item.size || item.selectedSize || '';
+                let sColor = item.color || item.selectedColor || '';
+
+                if ((!sSize || sSize === '-') && variants.length === 1) {
+                    sSize = variants[0].size || '';
+                }
+                if ((!sColor || sColor === '-') && variants.length === 1) {
+                    sColor = variants[0].color || '';
+                }
+
+                const displaySize = (sSize && sSize !== '-') ? sSize : 'عام';
+                const displayColor = (sColor && sColor !== '-') ? sColor : 'عام';
+
                 return `
                 <tr>
                     <td style="padding: 6px 8px; border: 1px solid #000;">${idx + 1}</td>
                     <td style="text-align:right; padding: 6px 10px; border: 1px solid #000; font-weight:bold;">
                         ${item.name}
                     </td>
-                    <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#047857;">${sSize}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#1d4ed8;">${sColor}</td>
+                    <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#047857;">${displaySize}</td>
+                    <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#1d4ed8;">${displayColor}</td>
                     <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${item.qty} ${item.unitName || ''}</td>
                     <td style="padding: 6px 8px; border: 1px solid #000;">${(parseFloat(item.price) || 0).toFixed(2)}</td>
                     <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)).toFixed(2)}</td>
@@ -503,7 +555,7 @@
 
                                 <th style="padding: 8px; border: 1px solid #000;">الكمية</th>
 
-                                <th style="padding: 8px; border: 1px solid #000;">سعر التحويل</th>
+                                <th style="padding: 8px; border: 1px solid #000;">${typeof window.getTransferPriceLabel === 'function' ? window.getTransferPriceLabel() : 'سعر التحويل'}</th>
 
                                 <th style="padding: 8px; border: 1px solid #000;">الإجمالي</th>
 
@@ -557,11 +609,21 @@
         }
 
         window.updateTransferItem = function(index, key, val) {
+            const item = transferItemsBatch[index];
+            if (!item) return;
 
-            transferItemsBatch[index][key] = parseFloat(val) || 0;
+            const numVal = parseFloat(val) || 0;
+            if (key === 'qty') {
+                const avail = parseFloat(item.stock) || 0;
+                if (numVal > avail) {
+                    if (typeof showToast === 'function') {
+                        showToast(`⚠️ تنبيه: الكمية المطلوبة (${numVal}) تتجاوز الرصيد المتاح (${avail}) في المخزن المصدر!`, 'warning', 4000);
+                    }
+                }
+            }
 
+            item[key] = numVal;
             renderTransferTable();
-
         }
 
         window.handleTransferProductSearch = function(query) {
@@ -621,34 +683,44 @@
                         currentWhStock = parseFloat(p.stock) || 0;
                     }
 
-                    const retailPrice = parseFloat(p.price) || 0;
+                    const displayPrice = (typeof window.getEffectiveTransferPrice === 'function')
+                        ? window.getEffectiveTransferPrice(p)
+                        : (parseFloat(p.price) || 0);
+
+                    const priceBadgeLabel = (typeof window.getTransferPriceLabel === 'function')
+                        ? window.getTransferPriceLabel().replace('سعر التحويل ', '').replace(/[()]/g, '')
+                        : 'سعر التحويل';
+
                     const stockColor = currentWhStock <= 0 ? '#ef4444' : (currentWhStock <= 5 ? '#f59e0b' : '#10b981');
 
+                    div.className = 'transfer-search-card';
+                    div.style.cssText = 'padding: 10px 14px; margin-bottom: 8px; border-radius: 14px; border: 1.5px solid #e2e8f0; background: #ffffff; cursor: pointer; transition: all 0.2s ease; display: flex; justify-content: space-between; align-items: center; gap: 14px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); box-sizing: border-box; width: 100%;';
+
                     div.innerHTML = `
-                        <div style="flex: 1; min-width: 0; text-align: right; overflow: hidden;">
-                            <div style="font-weight: 900; font-size: 0.98rem; color: #0f172a; margin-bottom: 3px; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                <span style="color: #0284c7; font-size: 1.05rem; flex-shrink: 0;">🏷️</span>
-                                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${p.name}</span>
+                        <div style="flex: 1; min-width: 180px; text-align: right;">
+                            <div style="font-weight: 900; font-size: 1.02rem; color: #0f172a; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; line-height: 1.3;">
+                                <span style="color: #0284c7; font-size: 1.1rem; flex-shrink: 0;">🏷️</span>
+                                <span style="color: #0f172a;">${p.name}</span>
                             </div>
-                            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; overflow: hidden;">
-                                <span style="background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 5px; font-size: 0.73rem; font-weight: 700; border: 1px solid #e2e8f0; white-space: nowrap; flex-shrink: 0;">
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                <span style="background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800; border: 1px solid #e2e8f0;">
                                     كود: <b style="color: #0284c7; font-family: monospace;">${p.code || p.id}</b>
                                 </span>
-                                <span style="background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 5px; font-size: 0.73rem; font-weight: 700; border: 1px solid #e2e8f0; white-space: nowrap; flex-shrink: 0;">
+                                <span style="background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800; border: 1px solid #e2e8f0;">
                                     باركود: <b style="color: #334155; font-family: monospace;">${p.barcode || '---'}</b>
                                 </span>
                             </div>
                         </div>
-                        <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-                            <div style="text-align: center; background: ${currentWhStock > 0 ? '#ecfdf5' : '#fef2f2'}; border: 1.5px solid ${currentWhStock > 0 ? '#a7f3d0' : '#fecaca'}; padding: 4px 8px; border-radius: 8px; min-width: 78px; flex-shrink: 0;">
-                                <div style="font-size: 0.65rem; color: ${currentWhStock > 0 ? '#047857' : '#b91c1c'}; font-weight: 800; white-space: nowrap;">رصيد (${fromWh})</div>
-                                <div style="font-weight: 900; font-size: 0.92rem; color: ${stockColor}; line-height: 1.2; white-space: nowrap;">
-                                    ${currentWhStock} <span style="font-size: 0.65rem;">${p.unit || 'قطعة'}</span>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+                            <div style="text-align: center; background: ${currentWhStock > 0 ? '#ecfdf5' : '#fef2f2'}; border: 1.5px solid ${currentWhStock > 0 ? '#a7f3d0' : '#fecaca'}; padding: 6px 10px; border-radius: 10px; min-width: 85px;">
+                                <div style="font-size: 0.68rem; color: ${currentWhStock > 0 ? '#047857' : '#b91c1c'}; font-weight: 800; white-space: nowrap;">رصيد (${fromWh})</div>
+                                <div style="font-weight: 900; font-size: 0.96rem; color: ${stockColor}; line-height: 1.2; white-space: nowrap;">
+                                    ${currentWhStock} <span style="font-size: 0.68rem;">${p.unit || 'قطعة'}</span>
                                 </div>
                             </div>
-                            <div style="text-align: center; background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 4px 10px; border-radius: 8px; min-width: 82px; flex-shrink: 0; box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);">
-                                <div style="font-size: 0.65rem; color: #e0f2fe; font-weight: 800; white-space: nowrap;">سعر قطاعي</div>
-                                <div style="font-weight: 900; font-size: 0.92rem; line-height: 1.2; white-space: nowrap;">${retailPrice.toFixed(2)} ج.م</div>
+                            <div style="text-align: center; background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 6px 12px; border-radius: 10px; min-width: 90px; box-shadow: 0 3px 8px rgba(2, 132, 199, 0.25);">
+                                <div style="font-size: 0.68rem; color: #e0f2fe; font-weight: 800; white-space: nowrap;">${priceBadgeLabel}</div>
+                                <div style="font-weight: 900; font-size: 0.96rem; line-height: 1.2; white-space: nowrap;">${displayPrice.toFixed(2)} ج.م</div>
                             </div>
                         </div>
                     `;
@@ -780,20 +852,33 @@
                             if (!window.transferItemsBatch) window.transferItemsBatch = [];
                             const vSize = matchingVariant.size || '';
                             const vColor = matchingVariant.color || '';
+                            const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
+                            
+                            let currentWhStock = 0;
+                            if (matchingVariant.warehouseStocks && matchingVariant.warehouseStocks[fromWh] !== undefined) {
+                                currentWhStock = parseFloat(matchingVariant.warehouseStocks[fromWh]) || 0;
+                            } else if (fromWh === 'المخزن الرئيسي' || !matchingVariant.warehouseStocks) {
+                                currentWhStock = parseFloat(matchingVariant.stock) || 0;
+                            }
+
+                            // التحقق الفوري من الرصيد قبل الإضافة
                             const existing = window.transferItemsBatch.find(it => it.id === match.id && ((it.size || it.selectedSize || '') === vSize) && ((it.color || it.selectedColor || '') === vColor));
+                            const currentBatchQty = existing ? (parseFloat(existing.qty) || 0) : 0;
+
+                            if (currentWhStock <= 0 || (currentBatchQty + 1) > currentWhStock) {
+                                if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(false);
+                                if (typeof showToast === 'function') {
+                                    showToast(`🚫 لا يمكن الإضافة: رصيد [${match.name} - مقاس: ${vSize || '-'} لون: ${vColor || '-'}] في (${fromWh}) هو (${currentWhStock}) فقط!`, 'error', 4500);
+                                }
+                                resultsDiv.classList.add('hidden');
+                                e.target.value = '';
+                                return;
+                            }
+
                             if (existing) {
                                 existing.qty = (parseFloat(existing.qty) || 0) + 1;
                             } else {
-                                const vCost = parseFloat(matchingVariant.cost) || parseFloat(match.cost) || 0;
-                                const fromWh = document.getElementById('transferFrom') ? document.getElementById('transferFrom').value : (typeof getStore === 'function' ? getStore('activeWarehouse') : 'المخزن الرئيسي') || 'المخزن الرئيسي';
-                                if (matchingVariant) {
-                                    if (matchingVariant.warehouseStocks && matchingVariant.warehouseStocks[fromWh] !== undefined) {
-                                        currentWhStock = parseFloat(matchingVariant.warehouseStocks[fromWh]) || 0;
-                                    } else if (matchingVariant.stock !== undefined) {
-                                        currentWhStock = parseFloat(matchingVariant.stock) || 0;
-                                    }
-                                }
-
+                                const vPrice = window.getEffectiveTransferPrice(match, matchingVariant);
                                 window.transferItemsBatch.push({
                                     id: match.id,
                                     name: match.name,
@@ -803,8 +888,9 @@
                                     size: vSize,
                                     color: vColor,
                                     stock: currentWhStock,
+                                    sourceStock: currentWhStock,
                                     qty: 1,
-                                    price: vCost
+                                    price: vPrice
                                 });
                             }
                             renderTransferTable();
@@ -879,76 +965,111 @@
         });
 
         window.addManualTransferItem = function() {
-
             const pId = selectedTransferProductId;
-
             const qty = parseFloat(document.getElementById('transferQty').value) || 1;
-
             const price = parseFloat(document.getElementById('transferPrice').value) || 0;
-
             const size = document.getElementById('transferSize') ? document.getElementById('transferSize').value.trim() : '';
-
             const color = document.getElementById('transferColor') ? document.getElementById('transferColor').value.trim() : '';
 
             if (!pId) return showToast("⚠️ يرجى اختيار صنف أولاً", "warning");
 
             const product = productsDB.find(p => p.id == pId);
+            if (!product) return;
 
-            if (product) {
+            const wFrom = (document.getElementById('transferFrom')?.value || 'المخزن الرئيسي').trim();
+            const factor = currentTransferHeaderUnit ? parseFloat(currentTransferHeaderUnit.factor) : 1;
+            const requiredBaseQty = qty * factor;
 
-                // منع التكرار لنفس الوحدة والمقاس واللون
-                const unitName = currentTransferHeaderUnit ? currentTransferHeaderUnit.unitName : (product.unit || 'قطعة');
+            // 1. فحص الرصيد الفعلي للمقاس/اللون في المخزن المصدر قبل الإضافة
+            let availStock = 0;
+            let effVariant = null;
 
-                if (transferItemsBatch.some(item => item.id == pId && item.unitName == unitName && (item.size || '') == size && (item.color || '') == color)) {
-
-                    return showToast("📋 هذا الصنف بنفس المقاس واللون والوحدة موجود بالفعل في القائمة", "info");
-
+            if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+                if (size || color) {
+                    effVariant = product.variants.find(v => 
+                        (!size || String(v.size || '').trim() === size) && 
+                        (!color || String(v.color || '').trim() === color)
+                    );
+                } else if (product.variants.length === 1) {
+                    effVariant = product.variants[0];
                 }
-
-                transferItemsBatch.push({
-
-                    id: product.id,
-
-                    name: product.name,
-
-                    size: size,
-
-                    color: color,
-
-                    stock: product.stock,
-
-                    qty: qty,
-
-                    price: price,
-
-                    unitName: unitName,
-
-                    unitFactor: currentTransferHeaderUnit ? parseFloat(currentTransferHeaderUnit.factor) : 1
-
-                });
-
-                renderTransferTable();
-
-                // تصفير البحث والمدخلات بعد الإضافة
-                document.getElementById('transferProductSearch').value = '';
-
-                if (document.getElementById('transferSize')) document.getElementById('transferSize').value = '';
-
-                if (document.getElementById('transferColor')) document.getElementById('transferColor').value = '';
-
-                document.getElementById('transferQty').value = '1';
-
-                document.getElementById('transferPrice').value = '0.00';
-
-                selectedTransferProductId = null;
-
-                currentTransferHeaderUnit = null;
-
-                document.getElementById('transferProductSearch').focus();
-
             }
 
-        }
+            if (effVariant) {
+                if (effVariant.warehouseStocks && effVariant.warehouseStocks[wFrom] !== undefined) {
+                    availStock = parseFloat(effVariant.warehouseStocks[wFrom]) || 0;
+                } else if (wFrom === 'المخزن الرئيسي' || !effVariant.warehouseStocks) {
+                    availStock = parseFloat(effVariant.stock) || 0;
+                }
+            } else {
+                if (product.warehouseStocks && product.warehouseStocks[wFrom] !== undefined) {
+                    availStock = parseFloat(product.warehouseStocks[wFrom]) || 0;
+                } else if (typeof getWarehouseStock === 'function') {
+                    availStock = getWarehouseStock(product.name, wFrom);
+                } else {
+                    availStock = parseFloat(product.stock) || 0;
+                }
+            }
+
+            const availInUnit = (availStock / factor);
+
+            // منع الإضافة فوراً إذا كان الرصيد صفر أو أقل من المطلوب
+            if (availStock <= 0 || requiredBaseQty > availStock) {
+                const varInfo = effVariant ? ` [مقاس: ${size || '-'} لون: ${color || '-'}]` : '';
+                if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(false);
+                return showToast(`🚫 لا يمكن الإضافة: رصيد (${product.name}${varInfo}) في [${wFrom}] هو (${availInUnit.toFixed(2).replace(/\.00$/, '')}) فقط!`, 'error', 5000);
+            }
+
+            // منع التكرار لنفس الوحدة والمقاس واللون
+            const unitName = currentTransferHeaderUnit ? currentTransferHeaderUnit.unitName : (product.unit || 'قطعة');
+
+            const existing = transferItemsBatch.find(item => item.id == pId && item.unitName == unitName && (item.size || '') == size && (item.color || '') == color);
+            if (existing) {
+                if ((existing.qty + qty) * factor > availStock) {
+                    return showToast(`🚫 لا يمكن زيادة الكمية: إجمالي المطلوب سيتجاوز الرصيد المتاح (${availInUnit.toFixed(2).replace(/\.00$/, '')}) في [${wFrom}]`, 'error');
+                }
+                existing.qty += qty;
+                renderTransferTable();
+                showToast(`✅ تم تحديث كمية (${product.name}) إلى ${existing.qty}`, 'success');
+
+                document.getElementById('transferProductSearch').value = '';
+                if (document.getElementById('transferSize')) document.getElementById('transferSize').value = '';
+                if (document.getElementById('transferColor')) document.getElementById('transferColor').value = '';
+                document.getElementById('transferQty').value = '1';
+                document.getElementById('transferPrice').value = '0.00';
+                selectedTransferProductId = null;
+                currentTransferHeaderUnit = null;
+                document.getElementById('transferProductSearch').focus();
+                return;
+            }
+
+            transferItemsBatch.push({
+                id: product.id,
+                name: product.name,
+                size: size,
+                color: color,
+                stock: availInUnit,
+                sourceStock: availInUnit,
+                qty: qty,
+                price: price,
+                unitName: unitName,
+                unitFactor: factor
+            });
+
+            renderTransferTable();
+
+            // تصفير البحث والمدخلات بعد الإضافة
+            document.getElementById('transferProductSearch').value = '';
+            if (document.getElementById('transferSize')) document.getElementById('transferSize').value = '';
+            if (document.getElementById('transferColor')) document.getElementById('transferColor').value = '';
+            document.getElementById('transferQty').value = '1';
+            document.getElementById('transferPrice').value = '0.00';
+            selectedTransferProductId = null;
+            currentTransferHeaderUnit = null;
+            document.getElementById('transferProductSearch').focus();
+            if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(true);
+            showToast(`✅ تمت إضافة (${product.name}) لقائمة التحويل`, 'success');
+        };
 
         window.filterStmtAccounts = function() {
             const input = document.getElementById('stmtAccountSelector');
@@ -1200,7 +1321,33 @@
                             showToast(`✅ تم بنجاح تحويل ( ${processedCount} ) أصناف من [${wFrom}] إلى [${wTo}]`, "success");
 
                             transferItemsBatch = [];
+                            window.transferItemsBatch = [];
                             renderTransferTable();
+
+                            // تفريغ وتصفير حقول الإدخال والبحث بالكامل لضمان فتح شاشة نظيفة وفارغة في المرة القادمة
+                            const pSearch = document.getElementById('transferProductSearch');
+                            if (pSearch) pSearch.value = '';
+                            const searchResults = document.getElementById('transferSearchResults');
+                            if (searchResults) {
+                                searchResults.innerHTML = '';
+                                searchResults.classList.add('hidden');
+                            }
+                            if (document.getElementById('transferSize')) document.getElementById('transferSize').value = '';
+                            if (document.getElementById('transferColor')) document.getElementById('transferColor').value = '';
+                            if (document.getElementById('transferQty')) document.getElementById('transferQty').value = '1';
+                            if (document.getElementById('transferPrice')) document.getElementById('transferPrice').value = '';
+                            if (document.getElementById('transferNotes')) document.getElementById('transferNotes').value = '';
+                            selectedTransferProductId = null;
+                            currentTransferHeaderUnit = null;
+                            window._pendingTransferVariant = null;
+
+                            // إلغاء تحديد الأصناف في جدول المخزن الرئيسي حتى لا تظهر تلقائياً
+                            document.querySelectorAll('.inv-row-check:checked').forEach(c => { c.checked = false; });
+                            if (window.selectedInventoryIds) window.selectedInventoryIds.clear();
+                            if (typeof selectedInventoryId !== 'undefined') selectedInventoryId = null;
+                            if (typeof window.selectedInventoryId !== 'undefined') window.selectedInventoryId = null;
+                            document.querySelectorAll('#inventoryTableBody tr.selected, #inventoryTableBody tr.active-row').forEach(r => r.classList.remove('selected', 'active-row'));
+
                             document.getElementById('transferModal').classList.add('hidden');
 
                             // تحديث كافة الجداول والتقارير المرتبطة
@@ -1292,6 +1439,136 @@
         });
 
         // =========================================================================
+        // 🚚 تنبيه فوري واستلام أذونات التحويل الواردة (Live Incoming Transfer Alerts)
+        // =========================================================================
+        function getAlertedTransfers() {
+            try {
+                const raw = (typeof getStore === 'function' ? getStore('bayan_alerted_transfers') : localStorage.getItem('bayan_alerted_transfers'));
+                return raw ? JSON.parse(raw) : [];
+            } catch(e) { return []; }
+        }
+
+        function markTransferAlerted(id) {
+            try {
+                const list = getAlertedTransfers();
+                if (!list.includes(id)) {
+                    list.push(id);
+                    const str = JSON.stringify(list);
+                    if (typeof setStore === 'function') setStore('bayan_alerted_transfers', str);
+                    else localStorage.setItem('bayan_alerted_transfers', str);
+                }
+            } catch(e) {}
+        }
+
+        window.checkIncomingTransfersAlert = function() {
+            if (typeof transactions === 'undefined' || !Array.isArray(transactions)) return;
+            if (document.getElementById('incomingTransferApprovalModal')) return; // لا تكرار للنافذة إذا كانت مفتوحة
+
+            const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+
+            const pendingForThisWH = transactions.filter(t => 
+                t.type && t.type.includes('تحويل') && 
+                t.transferStatus === 'pending' && 
+                (t.warehouse === activeWH || t.toWarehouse === activeWH)
+            );
+
+            const alertedList = getAlertedTransfers();
+            const grouped = {};
+            pendingForThisWH.forEach(t => {
+                const invId = t.invoiceId || 'TR-UNKNOWN';
+                if (!grouped[invId]) grouped[invId] = { id: invId, sourceWarehouse: t.sourceWarehouse, warehouse: t.warehouse, items: [] };
+                grouped[invId].items.push(t);
+            });
+
+            Object.values(grouped).forEach(tr => {
+                if (!alertedList.includes(tr.id)) {
+                    markTransferAlerted(tr.id);
+                    if (typeof BayanBarcode !== 'undefined' && BayanBarcode.playBeep) BayanBarcode.playBeep(true);
+                    if (typeof showToast === 'function') {
+                        showToast(`🚚 إذن تحويل وارد جديد #${tr.id} من [${tr.sourceWarehouse}]!`, 'info', 6000);
+                    }
+                    window.showIncomingTransferApprovalModal(tr.id);
+                }
+            });
+
+            if (typeof updateNotifications === 'function') updateNotifications();
+        };
+
+        window.showIncomingTransferApprovalModal = function(invId) {
+            if (!invId) return;
+            const transItems = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+                ? transactions.filter(t => t.invoiceId === invId && t.type && t.type.includes('تحويل') && t.transferStatus === 'pending')
+                : [];
+
+            if (transItems.length === 0) return;
+
+            const first = transItems[0];
+            const modalId = 'incomingTransferApprovalModal';
+            let modal = document.getElementById(modalId);
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'confirm-modal-overlay';
+                modal.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.65); z-index:999999999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px);';
+                document.body.appendChild(modal);
+            }
+
+            const itemsHtml = transItems.map((it, idx) => `
+                <tr style="border-bottom:1px solid #e2e8f0; ${idx % 2 === 1 ? 'background:#f8fafc;' : ''}">
+                    <td style="padding:10px 14px; font-weight:bold; color:#0f172a; text-align:right;">${it.product}</td>
+                    <td style="padding:10px; text-align:center; color:#047857; font-weight:800;">${(it.selectedSize || it.size) && (it.selectedSize || it.size) !== '-' ? (it.selectedSize || it.size) : 'عام'}</td>
+                    <td style="padding:10px; text-align:center; color:#1d4ed8; font-weight:800;">${(it.selectedColor || it.color) && (it.selectedColor || it.color) !== '-' ? (it.selectedColor || it.color) : 'عام'}</td>
+                    <td style="padding:10px; text-align:center; font-weight:900; color:#047857; font-size:1.1rem;">${it.qty} <span style="font-size:0.75rem; color:#64748b;">${it.unit || 'قطعة'}</span></td>
+                </tr>
+            `).join('');
+
+            const totalQty = transItems.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0);
+
+            modal.innerHTML = `
+                <div style="background:#ffffff; padding:28px 24px; border-radius:24px; width:560px; max-width:94%; text-align:center; box-shadow:0 25px 60px rgba(0,0,0,0.35); border:2.5px solid #059669; direction:rtl; font-family:inherit; position:relative;">
+                    <button onclick="document.getElementById('${modalId}').remove()" style="position:absolute; top:16px; left:16px; background:#f1f5f9; border:none; color:#64748b; width:32px; height:32px; border-radius:50%; font-size:1.2rem; cursor:pointer; font-weight:bold;">&times;</button>
+                    <div style="font-size:2.8rem; margin-bottom:6px;">🚚✨</div>
+                    <h3 style="margin:0 0 6px 0; color:#064e3b; font-size:1.35rem; font-weight:900;">
+                        إذن تحويل بضاعة وارد جديد #${invId}
+                    </h3>
+                    <p style="color:#64748b; font-size:0.92rem; margin-bottom:15px;">
+                        تم إرسال بضاعة من <b style="color:#2563eb;">[${first.sourceWarehouse || 'المخزن الرئيسي'}]</b> إلى مخزنك <b style="color:#047857;">[${first.warehouse}]</b>:
+                    </p>
+
+                    <div style="max-height:220px; overflow-y:auto; border:1.5px solid #cbd5e1; border-radius:14px; margin-bottom:15px;" class="fast-scrollbar">
+                        <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                            <thead style="background:#f1f5f9; color:#334155; position:sticky; top:0; z-index:1;">
+                                <tr>
+                                    <th style="padding:8px 14px; text-align:right;">الصنف</th>
+                                    <th style="padding:8px; text-align:center;">المقاس</th>
+                                    <th style="padding:8px; text-align:center;">اللون</th>
+                                    <th style="padding:8px; text-align:center;">الكمية</th>
+                                </tr>
+                            </thead>
+                            <tbody>${itemsHtml}</tbody>
+                        </table>
+                    </div>
+
+                    <div style="background:#ecfdf5; border:1px solid #a7f3d0; padding:10px 16px; border-radius:12px; margin-bottom:18px; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:bold; color:#065f46; font-size:0.9rem;">📦 إجمالي القطع الواردة:</span>
+                        <span style="font-weight:900; color:#047857; font-size:1.15rem;">${totalQty} قطعة</span>
+                    </div>
+
+                    <div style="display:flex; gap:12px; justify-content:center;">
+                        <button onclick="document.getElementById('${modalId}').remove(); window.rejectTransferFromNotify('${invId}');" 
+                            style="flex:1; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; padding:12px; border-radius:12px; font-weight:bold; font-size:0.95rem; cursor:pointer; transition:0.2s;">
+                            ❌ رفض التحويل
+                        </button>
+                        <button onclick="document.getElementById('${modalId}').remove(); window.acceptTransferFromNotify('${invId}');" 
+                            style="flex:2; background:linear-gradient(135deg, #059669, #047857); color:#ffffff; border:none; padding:12px; border-radius:12px; font-weight:900; font-size:1.05rem; cursor:pointer; box-shadow:0 4px 12px rgba(4,120,87,0.3); transition:0.2s;">
+                            ✅ تأكيد واستلام البضاعة بالمخزن
+                        </button>
+                    </div>
+                </div>
+            `;
+        };
+
+        // =========================================================================
         // 🚚 قبول واستلام أو رفض أذونات التحويل من ساحة الانتظار / الإشعارات
         // =========================================================================
         window.acceptTransferFromNotify = async function(invId) {
@@ -1360,8 +1637,9 @@
             if (typeof showToast === 'function') {
                 showToast(`🎉 تم تأكيد استلام إذن التحويل #${invId} وإضافة البضاعة لرصيد المخزن بنجاح!`, 'success');
             }
-
             if (typeof updateNotifications === 'function') updateNotifications();
+            if (typeof renderInventoryTable === 'function') renderInventoryTable();
+            if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
             if (typeof showNotificationsModal === 'function') {
                 showNotificationsModal('transfers');
             }
@@ -1422,8 +1700,9 @@
             if (typeof showToast === 'function') {
                 showToast(`⚠️ تم رفض إذن التحويل #${invId} وإرجاع البضاعة للمخزن المصدر.`, 'warning');
             }
-
             if (typeof updateNotifications === 'function') updateNotifications();
+            if (typeof renderInventoryTable === 'function') renderInventoryTable();
+            if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
             if (typeof showNotificationsModal === 'function') {
                 showNotificationsModal('transfers');
             }

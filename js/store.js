@@ -6,9 +6,12 @@
 
 window.AppStore = {};
 window.bayanDB = null;
+let isAppStoreInitialized = false;
 
 // دالة التهيئة الأولية (تستدعى مرة واحدة عند بدء التطبيق)
 async function initAppStore() {
+    if (isAppStoreInitialized && window.bayanDB) return;
+    isAppStoreInitialized = true;
     console.log("🔄 جاري تهيئة نظام Store...");
     
     // ضمان وجود الداتابيز أو إنشائها وتوحيد المرجع مع window.db
@@ -49,7 +52,7 @@ async function initAppStore() {
 
             // عملية التهجير (Migration) من localStorage إلى IndexedDB لمرة واحدة
             if (Object.keys(localStorage).length > 0) {
-                console.log("📦 يتم الآن نقل البيانات من localStorage إلى IndexedDB...");
+                console.log("📦 يتم الآن مزامنة البيانات بين localStorage و IndexedDB...");
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     const value = localStorage.getItem(key);
@@ -58,13 +61,6 @@ async function initAppStore() {
                     
                     // حفظها في IndexedDB
                     await window.bayanDB.settings.put({ id: key, value: value });
-                    hasMigrated = true;
-                }
-                
-                // تنظيف localStorage بعد التهجير لتوفير المساحة
-                if (hasMigrated) {
-                    localStorage.clear();
-                    console.log("✅ تم تفريغ localStorage بنجاح.");
                 }
             }
 
@@ -79,15 +75,27 @@ async function initAppStore() {
 
 // دالة قراءة (متزامنة)
 function getStore(key) {
-    return window.AppStore.hasOwnProperty(key) ? window.AppStore[key] : null;
+    if (window.AppStore && window.AppStore.hasOwnProperty(key) && window.AppStore[key] !== null && window.AppStore[key] !== undefined) {
+        return window.AppStore[key];
+    }
+    try {
+        const val = localStorage.getItem(key);
+        if (val !== null && val !== undefined) {
+            if (!window.AppStore) window.AppStore = {};
+            window.AppStore[key] = val;
+            return val;
+        }
+    } catch(e) {}
+    return null;
 }
 
-// دالة كتابة (تحفظ في الذاكرة فوراً وفي IndexedDB في الخلفية)
+// دالة كتابة (تحفظ في الذاكرة فوراً وفي IndexedDB و localStorage)
 function setStore(key, value) {
-    // 1. التحديث اللحظي في الذاكرة لضمان سرعة الواجهة
+    if (!window.AppStore) window.AppStore = {};
     window.AppStore[key] = value;
-    
-    // 2. الحفظ غير المتزامن في القاعدة
+    try {
+        localStorage.setItem(key, String(value));
+    } catch(e) {}
     if (window.bayanDB) {
         window.bayanDB.settings.put({ id: key, value: String(value) }).catch(err => {
             console.error(`❌ خطأ في حفظ الإعداد [${key}]:`, err);

@@ -1013,7 +1013,13 @@ function showUnitSelectionModal(product, context = 'sales') {
 
         let displayPrice = 0;
 
-        if (context === 'sales' || context === 'sales-header' || context === 'sales-return') {
+        if (context === 'transfer') {
+            if (typeof window.getEffectiveTransferPrice === 'function') {
+                displayPrice = window.getEffectiveTransferPrice(product, null, unit);
+            } else {
+                displayPrice = parseFloat(unit.cost) || 0;
+            }
+        } else if (context === 'sales' || context === 'sales-header' || context === 'sales-return') {
 
             if (priceLevel === 'wholesale') {
 
@@ -1886,10 +1892,17 @@ function calculateTotals(subTotalParam) {
     if (document.getElementById('totalAmount')) document.getElementById('totalAmount').innerText = currentTotal.toFixed(2);
 
     // حساب إجمالي المديونية المتراكمة (الرصيد السابق + الفاتورة - المدفوع)
-
     const prevBal = parseFloat(document.getElementById('prevBalanceDisplay').innerText) || 0;
-
     const tenderedInput = document.getElementById('tenderedAmount');
+    const curMethod = getSelectedPaymentMethod('sales-section');
+    const custName = document.getElementById('customerName') ? document.getElementById('customerName').value.trim() : '';
+    const isGenericCust = !custName || (typeof window.isGenericCashPartner === 'function' && window.isGenericCashPartner(custName));
+    const isExplicitCred = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(curMethod, 0, 0, 0) : (curMethod === 'آجل' || curMethod.includes('آجل') || curMethod.includes('اجل'));
+
+    // إذا كانت المعاملة نقدية والعميل نقدي، يتم تحديث المدفوع ليكون مساوياً للإجمالي الجديد تلقائياً
+    if (!isExplicitCred && isGenericCust && tenderedInput) {
+        tenderedInput.value = currentTotal.toFixed(2);
+    }
 
     const tendered = parseFloat(tenderedInput ? tenderedInput.value : 0) || 0;
 
@@ -2093,24 +2106,28 @@ async function saveBill(force = false, accountChecked = false) {
         }
 
         // --- 🛑 شرط محاسبي: الآجل لازم عميل مسجل ---
-
         const selectedMethod = getSelectedPaymentMethod('sales-section');
-
         const customerName = document.getElementById('customerName').value.trim();
+        const isGenericCustomer = !customerName || (typeof window.isGenericCashPartner === 'function' && window.isGenericCashPartner(customerName));
+        const isExplicitCreditMethod = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل'));
 
         const tenderedInput = document.getElementById('tenderedAmount');
         let tendered = (tenderedInput && tenderedInput.value !== '') ? (parseFloat(tenderedInput.value) || 0) : 0;
 
-        const isExplicitCreditMethod = window.isTransactionCredit(selectedMethod, 0, 0, 0);
-
-        if (!isExplicitCreditMethod && tendered <= 0 && (!tenderedInput || tenderedInput.value === '')) {
+        // إذا كانت الفاتورة نقدية والعميل نقدي، أو خانة المدفوع فارغة، فالمدفوع = إجمالي الفاتورة تلقائياً
+        if (!isExplicitCreditMethod && isGenericCustomer) {
+            tendered = currentTotal;
+            if (tenderedInput) {
+                tenderedInput.value = currentTotal.toFixed(2);
+            }
+        } else if (!isExplicitCreditMethod && tendered <= 0 && (!tenderedInput || tenderedInput.value === '')) {
             tendered = currentTotal;
             if (tenderedInput) {
                 tenderedInput.value = currentTotal.toFixed(2);
             }
         }
 
-        const isCredit = isExplicitCreditMethod || ((currentTotal - tendered) > 0.001);
+        const isCredit = isExplicitCreditMethod || (!isGenericCustomer && ((currentTotal - tendered) > 0.001));
 
         if (customerName && !window.isGenericCashPartner(customerName) && typeof checkAccountFrozenAndAlert === 'function') {
             if (checkAccountFrozenAndAlert(customerName)) {

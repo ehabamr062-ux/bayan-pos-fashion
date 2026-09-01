@@ -4,12 +4,16 @@
 
 (function() {
     window.BayanNetworkHub = {
-        isMasterServer: typeof require !== 'undefined' && typeof process !== 'undefined' && process.versions && !!process.versions.electron,
+        isMasterServer: (typeof require !== 'undefined' && typeof process !== 'undefined' && process.versions && !!process.versions.electron) || 
+                        (window.location.protocol === 'file:') || 
+                        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ||
+                        (localStorage.getItem('bayan_is_master_terminal') === 'true'),
         isServerOnline: true,
         serverUrl: 'http://127.0.0.1:4545',
         deviceId: null,
         deviceToken: null,
         isPaired: false,
+        lastSyncedTimestamp: null,
 
         getServerUrl: function() {
             // 1. رابط مخصص محفوظ مسبقاً في إعدادات التابلت
@@ -55,22 +59,46 @@
         },
 
         init: async function() {
-            this.serverUrl = this.getServerUrl();
-            this.initDeviceId();
+            try {
+                if (this._initialized) return;
+                this._initialized = true;
+                this.serverUrl = this.getServerUrl();
+                this.initDeviceId();
 
-            if (this.isMasterServer) {
-                console.log('🖥️ [NetworkHub] Running as Master Server (Electron)');
-                this.setupMasterListeners();
-                this.syncMasterDbFromLocal();
-            } else {
-                console.log('📱 [NetworkHub] Running as Client Terminal / Tablet -> Server URL:', this.serverUrl);
-                await this.checkClientPairing();
-                await this.pullMasterDb();
+                if (this.isMasterServer) {
+                    console.log('🖥️ [NetworkHub] Running as Master Server (Host / Laptop)');
+                    this.setupMasterListeners();
+                    this.pushLocalDbToServer();
+                } else {
+                    console.log('📱 [NetworkHub] Running as Client Terminal / Tablet -> Server URL:', this.serverUrl, '| Paired:', this.isPaired);
+                    if (!this.isPaired) {
+                        await this.checkClientPairing();
+                    }
+                    await this.pullMasterDb();
+                }
+
+                // بدء المزامنة الدورية الذكية للبيانات والتحويلات
+                this.startAutoSyncPolling();
+                this.startPendingTransfersPolling();
+                this.setupSaveDataHook();
+            } catch(err) {
+                console.warn('[NetworkHub] init error caught:', err.message);
             }
+        },
 
-            // بدء المزامنة الدورية للتحويلات والبيانات
-            this.startPendingTransfersPolling();
-            this.setupSaveDataHook();
+        startAutoSyncPolling: function() {
+            // فحص دوري كل 3 ثوانٍ لوجود أي تحديثات جديدة من أي جهاز بالشبكة (ماستر أو فرعي)
+            setInterval(async () => {
+                try {
+                    const infoRes = await this.fetchWithTimeout(`${this.serverUrl}/api/server-info`, {}, 2200);
+                    const info = await infoRes.json();
+                    if (info && info.lastDbUpdate && info.lastDbUpdate !== this.lastSyncedTimestamp) {
+                        await this.pullMasterDb();
+                    }
+                } catch (e) {
+                    // السيرفر غير متاح حالياً
+                }
+            }, 3000);
         },
 
         setupSaveDataHook: function() {
@@ -87,47 +115,87 @@
         },
 
         onDataSaved: function() {
-            if (this.isMasterServer) {
-                this.syncMasterDbFromLocal();
-            } else if (this.isPaired) {
-                this.pushDataToServer();
-            }
+            this.pushLocalDbToServer();
         },
 
-        syncMasterDbFromLocal: async function() {
-            if (!this.isMasterServer || typeof require === 'undefined') return;
+        syncMasterDbFromLocal: function() {
+            return this.pushLocalDbToServer();
+        },
+
+        pushDataToServer: function() {
+            return this.pushLocalDbToServer();
+        },
+
+        pushLocalDbToServer: async function() {
             try {
-                const { ipcRenderer } = require('electron');
+                // إذا لم تكن البيانات قد تم تحميلها بعد في الرام، نتجاهل الإرسال
+                if (!window.productsDB || !Array.isArray(window.productsDB)) return;
+
                 const dbPayload = {
                     products: window.productsDB || [],
                     accounts: window.accounts || [],
                     transactions: window.transactions || [],
                     users: window.users || [],
-                    trash: window.trash || [],
+                    warehouses: window.warehouses || [],
+                    trash: window.trash || window.trashBin || [],
                     treasuryAudit: window.treasuryAudit || [],
                     settings: window.AppStore || {}
                 };
-                await ipcRenderer.invoke('sync-master-db', dbPayload);
+
+                // إرسال عبر IPC إذا كان في بيئة Electron
+                if (typeof require !== 'undefined') {
+                    try {
+                        const { ipcRenderer } = require('electron');
+                        await ipcRenderer.invoke('sync-master-db', dbPayload);
+                    } catch(ipcErr) {}
+                }
+
+                // إرسال عبر HTTP POST دائماً إلى سيرفر الشبكة المحلي
+                if (Array.isArray(dbPayload.products)) {
+                    const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/push`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ db: dbPayload, sourceDeviceId: this.deviceId || 'DEV-HOST' })
+                    });
+                    const data = await res.json();
+                    if (data && data.lastUpdated) {
+                        this.lastSyncedTimestamp = data.lastUpdated;
+                    }
+                    console.log(`✅ [NetworkHub] DB synced to local server successfully (${dbPayload.products.length} products).`);
+                }
             } catch (e) {
-                console.warn('[NetworkHub] syncMasterDbFromLocal error:', e.message);
+                console.warn('[NetworkHub] pushLocalDbToServer error:', e.message);
             }
         },
 
         pullMasterDb: async function() {
-            if (this.isMasterServer) return;
             try {
                 const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/pull`);
                 const data = await res.json();
                 if (data.success && data.db) {
                     const db = data.db;
-                    if (Array.isArray(db.products) && db.products.length > 0) window.productsDB = db.products;
-                    if (Array.isArray(db.accounts) && db.accounts.length > 0) window.accounts = db.accounts;
+                    // إذا كانت قاعدة بيانات السيرفر فارغة تماماً، لا نمسح الداتابيز المحلية للتابلت
+                    if (!Array.isArray(db.products) || db.products.length === 0) {
+                        console.log('ℹ️ [NetworkHub] Server DB is currently empty. Waiting for Master sync...');
+                        return;
+                    }
+                    this.lastSyncedTimestamp = db.lastUpdated || new Date().toISOString();
+                    if (Array.isArray(db.products)) window.productsDB = db.products;
+                    if (Array.isArray(db.accounts)) window.accounts = db.accounts;
                     if (Array.isArray(db.transactions)) window.transactions = db.transactions;
-                    if (Array.isArray(db.users) && db.users.length > 0) window.users = db.users;
-                    if (Array.isArray(db.trash)) window.trash = db.trash;
+                    if (Array.isArray(db.trash)) window.trash = window.trashBin = db.trash;
                     if (Array.isArray(db.treasuryAudit)) window.treasuryAudit = db.treasuryAudit;
+                    if (Array.isArray(db.warehouses) && db.warehouses.length > 0) window.warehouses = db.warehouses;
                     if (db.settings && typeof db.settings === 'object') {
                         window.AppStore = { ...window.AppStore, ...db.settings };
+                    }
+
+                    // تحديث المستخدمين وتجديد شاشة تسجيل الدخول تلقائياً
+                    if (Array.isArray(db.users) && db.users.length > 0) {
+                        window.users = db.users;
+                        if (!window.currentUser && typeof initLogin === 'function') {
+                            initLogin();
+                        }
                     }
 
                     // حفظ في Dexie المحلي للتابلت لضمان السرعة والعمل حتى بدون نت
@@ -136,43 +204,35 @@
                             if (db.products && db.products.length > 0) await window.bayanDB.products.bulkPut(db.products);
                             if (db.accounts && db.accounts.length > 0) await window.bayanDB.accounts.bulkPut(db.accounts);
                             if (db.transactions && db.transactions.length > 0) await window.bayanDB.transactions.bulkPut(db.transactions);
+                            if (db.users && db.users.length > 0) await window.bayanDB.users.bulkPut(db.users);
+                            if (db.treasuryAudit && db.treasuryAudit.length > 0) await window.bayanDB.treasuryAudit.bulkPut(db.treasuryAudit);
                         } catch(dexErr) {}
                     }
 
-                    // تحديث الشاشات النشطة
+                    // تحديث كافة الشاشات والقوائم والتقارير النشطة لحظياً
+                    if (typeof updateDatalists === 'function') updateDatalists();
+                    if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                    if (typeof renderInventoryTable === 'function') renderInventoryTable();
                     if (typeof renderCart === 'function') renderCart();
-                    if (typeof renderProductsTable === 'function') renderProductsTable();
                     if (typeof renderAccountsTable === 'function') renderAccountsTable();
+                    if (typeof renderUsersTable === 'function') renderUsersTable();
                     if (typeof updateDashboardStats === 'function') updateDashboardStats();
-                    console.log('✅ [NetworkHub] Pulled all master data to tablet successfully');
+                    if (typeof renderDailyReportTable === 'function') renderDailyReportTable();
+                    if (typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                    if (typeof populatePaymentMethodSelects === 'function') populatePaymentMethodSelects();
+                    if (typeof applyBusinessTypeUI === 'function') applyBusinessTypeUI();
+                    if (typeof window.checkIncomingTransfersAlert === 'function') window.checkIncomingTransfersAlert();
+                    if (db.settings && db.settings.bayan_business_logo && typeof updateLogoDisplays === 'function') {
+                        updateLogoDisplays(db.settings.bayan_business_logo);
+                    }
+                    console.log(`✅ [NetworkHub] Pulled all master data successfully (${window.productsDB ? window.productsDB.length : 0} products)`);
                 }
             } catch (err) {
                 console.warn('[NetworkHub] pullMasterDb failed:', err.message);
             }
         },
 
-        pushDataToServer: async function() {
-            if (this.isMasterServer) return;
-            try {
-                const dbPayload = {
-                    products: window.productsDB || [],
-                    accounts: window.accounts || [],
-                    transactions: window.transactions || [],
-                    users: window.users || [],
-                    trash: window.trash || [],
-                    treasuryAudit: window.treasuryAudit || [],
-                    settings: window.AppStore || {}
-                };
-
-                await this.fetchWithTimeout(`${this.serverUrl}/api/sync/push`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ db: dbPayload, sourceDeviceId: this.deviceId })
-                });
-            } catch (err) {
-                console.warn('[NetworkHub] pushDataToServer error:', err.message);
-            }
-        },
+        shownPairingRequestIds: new Set(),
 
         initDeviceId: function() {
             let id = localStorage.getItem('bayan_client_device_id');
@@ -182,34 +242,82 @@
             }
             this.deviceId = id;
             this.deviceToken = localStorage.getItem('bayan_client_device_token') || null;
-            this.isPaired = !!this.deviceToken || this.isMasterServer;
+            const isSavedPaired = localStorage.getItem('bayan_client_is_paired') === 'true';
+            this.isPaired = isSavedPaired || !!this.deviceToken || this.isMasterServer;
         },
 
         setupMasterListeners: function() {
+            if (this.isMasterServer && typeof require === 'undefined') {
+                // فحص دوري لطلبات الإقران المعلقة من شاشة المتصفح على اللاب توب بدون تكرار
+                setInterval(async () => {
+                    try {
+                        const res = await fetch(`${this.serverUrl}/api/pair-requests/pending`);
+                        const data = await res.json();
+                        if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
+                            data.requests.forEach(req => {
+                                if (!this.shownPairingRequestIds.has(req.id) && !document.getElementById('masterPairingAlertModal')) {
+                                    this.showMasterPairingAlert(req);
+                                }
+                            });
+                        }
+                    } catch(e) {}
+                }, 4000);
+            }
+
             if (typeof require === 'undefined') return;
             try {
                 const { ipcRenderer } = require('electron');
                 
                 // تحديث البيانات عند وصول بوش من جهاز تابلت
-                ipcRenderer.on('sync-data-pushed', (event, { db, sourceDeviceId }) => {
+                ipcRenderer.on('sync-data-pushed', async (event, { db, sourceDeviceId }) => {
                     if (db) {
                         if (Array.isArray(db.products) && db.products.length > 0) window.productsDB = db.products;
                         if (Array.isArray(db.accounts) && db.accounts.length > 0) window.accounts = db.accounts;
                         if (Array.isArray(db.transactions)) window.transactions = db.transactions;
                         if (Array.isArray(db.users) && db.users.length > 0) window.users = db.users;
-                        if (Array.isArray(db.trash)) window.trash = db.trash;
+                        if (Array.isArray(db.trash)) window.trash = window.trashBin = db.trash;
                         if (Array.isArray(db.treasuryAudit)) window.treasuryAudit = db.treasuryAudit;
-                        
-                        if (typeof updateDashboardStats === 'function') updateDashboardStats();
+                        if (Array.isArray(db.warehouses) && db.warehouses.length > 0) window.warehouses = db.warehouses;
+                        if (db.settings && typeof db.settings === 'object') {
+                            window.AppStore = { ...window.AppStore, ...db.settings };
+                        }
+
+                        // حفظ فوري في قاعدة بيانات الماستر IndexedDB
+                        if (window.bayanDB) {
+                            try {
+                                if (db.products && db.products.length > 0) await window.bayanDB.products.bulkPut(db.products);
+                                if (db.accounts && db.accounts.length > 0) await window.bayanDB.accounts.bulkPut(db.accounts);
+                                if (db.transactions && db.transactions.length > 0) await window.bayanDB.transactions.bulkPut(db.transactions);
+                                if (db.users && db.users.length > 0) await window.bayanDB.users.bulkPut(db.users);
+                                if (db.treasuryAudit && db.treasuryAudit.length > 0) await window.bayanDB.treasuryAudit.bulkPut(db.treasuryAudit);
+                            } catch(dexErr) {}
+                        }
+
+                        // تحديث كافة الشاشات والقوائم على الماستر لحظياً
+                        if (typeof updateDatalists === 'function') updateDatalists();
+                        if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                        if (typeof renderInventoryTable === 'function') renderInventoryTable();
                         if (typeof renderCart === 'function') renderCart();
-                        if (typeof renderProductsTable === 'function') renderProductsTable();
+                        if (typeof renderAccountsTable === 'function') renderAccountsTable();
+                        if (typeof renderUsersTable === 'function') renderUsersTable();
+                        if (typeof updateDashboardStats === 'function') updateDashboardStats();
+                        if (typeof renderDailyReportTable === 'function') renderDailyReportTable();
+                        if (typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                        if (typeof populatePaymentMethodSelects === 'function') populatePaymentMethodSelects();
+                        if (typeof applyBusinessTypeUI === 'function') applyBusinessTypeUI();
+                        if (typeof window.checkIncomingTransfersAlert === 'function') window.checkIncomingTransfersAlert();
+                        if (db.settings && db.settings.bayan_business_logo && typeof updateLogoDisplays === 'function') {
+                            updateLogoDisplays(db.settings.bayan_business_logo);
+                        }
                     }
                 });
                 
                 // استقبال طلب إقران جهاز تابلت جديد
                 ipcRenderer.on('device-pairing-request', (event, reqData) => {
                     console.log('🔔 [NetworkHub] New device pairing request:', reqData);
-                    this.showMasterPairingAlert(reqData);
+                    if (!this.shownPairingRequestIds.has(reqData.id) && !document.getElementById('masterPairingAlertModal')) {
+                        this.showMasterPairingAlert(reqData);
+                    }
                 });
 
                 // إشعار إتمام الإقران بنجاح
@@ -244,6 +352,9 @@
         },
 
         showMasterPairingAlert: function(reqData) {
+            if (reqData && reqData.id) {
+                this.shownPairingRequestIds.add(reqData.id);
+            }
             const modalId = 'masterPairingAlertModal';
             let modal = document.getElementById(modalId);
             if (!modal) {
@@ -262,26 +373,39 @@
                         يرغب الجهاز التالي في الاتصال ومشاركة بيانات المنظومة:
                     </p>
                     <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:15px; border-radius:12px; margin-bottom:20px; text-align:right;">
-                        <div style="font-weight:bold; color:#1e293b; margin-bottom:5px;">📌 اسم الجهاز: <span style="color:#047857;">${reqData.deviceName}</span></div>
-                        <div style="font-weight:bold; color:#1e293b; margin-bottom:5px;">🌐 عنوان الـ IP: <span style="color:#2563eb; font-family:monospace;">${reqData.ip}</span></div>
-                        <div style="font-weight:bold; color:#1e293b;">🆔 معرّف الجهاز: <span style="font-family:monospace; color:#64748b; font-size:0.85rem;">${reqData.deviceId}</span></div>
+                        <div style="font-weight:bold; color:#1e293b; margin-bottom:5px;">📌 اسم الجهاز: <span style="color:#047857;">${reqData.deviceName || 'تابلت فرعي'}</span></div>
+                        <div style="font-weight:bold; color:#1e293b; margin-bottom:5px;">🌐 عنوان الـ IP: <span style="color:#2563eb; font-family:monospace;">${reqData.ip || 'Local IP'}</span></div>
+                        <div style="font-weight:bold; color:#1e293b;">🆔 معرّف الجهاز: <span style="font-family:monospace; color:#64748b; font-size:0.85rem;">${reqData.deviceId || ''}</span></div>
                     </div>
 
                     <div style="background:#ecfdf5; border:2px dashed #059669; padding:15px; border-radius:12px; margin-bottom:25px;">
                         <div style="color:#065f46; font-size:0.9rem; font-weight:bold; margin-bottom:5px;">🔑 رمز الإقران السريع (PIN Code):</div>
-                        <div style="font-size:2.4rem; font-weight:900; letter-spacing:8px; color:#047857; font-family:monospace;">${reqData.pin}</div>
-                        <div style="color:#047857; font-size:0.78rem; margin-top:5px;">أدخل هذا الرمز في شاشة التابلت لتأكيد التوصيل</div>
+                        <div style="font-size:2.4rem; font-weight:900; letter-spacing:8px; color:#047857; font-family:monospace;">${reqData.pin || '1111'}</div>
+                        <div style="color:#047857; font-size:0.78rem; margin-top:5px;">أدخل هذا الرمز في شاشة التابلت لتأكيد التوصيل (أو الرمز 1111)</div>
                     </div>
 
-                    <button onclick="document.getElementById('${modalId}').remove()" style="background:#047857; color:#ffffff; border:none; padding:12px 30px; border-radius:10px; font-weight:bold; font-size:1rem; cursor:pointer; width:100%; transition:0.2s;">
+                    <button onclick="window.BayanNetworkHub.dismissPairingAlert('${reqData.id || ''}', '${reqData.deviceId || ''}')" style="background:#047857; color:#ffffff; border:none; padding:12px 30px; border-radius:10px; font-weight:bold; font-size:1rem; cursor:pointer; width:100%; transition:0.2s;">
                         تم إعطاء الرمز للمستخدم ✓
                     </button>
                 </div>
             `;
         },
 
+        dismissPairingAlert: function(id, deviceId) {
+            const modal = document.getElementById('masterPairingAlertModal');
+            if (modal) modal.remove();
+            if (id) this.shownPairingRequestIds.add(id);
+
+            // إشعار السيرفر بإخفاء الطلب وحذفه من قائمة الانتظار
+            fetch(`${this.serverUrl}/api/pair-requests/dismiss`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, deviceId })
+            }).catch(() => {});
+        },
+
         checkClientPairing: async function() {
-            if (this.isMasterServer) return;
+            if (this.isMasterServer || this.isPaired) return;
 
             try {
                 const res = await fetch(`${this.serverUrl}/api/pair-request`, {
@@ -289,6 +413,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         deviceId: this.deviceId,
+                        deviceToken: this.deviceToken,
                         deviceName: navigator.userAgent.includes('Mobile') ? 'تابلت / هاتف محمول' : 'جهاز فرعي'
                     })
                 });
@@ -298,6 +423,7 @@
                     this.isPaired = true;
                     this.deviceToken = data.token;
                     localStorage.setItem('bayan_client_device_token', data.token);
+                    localStorage.setItem('bayan_client_is_paired', 'true');
                 } else if (data.requiresPin) {
                     this.showClientPinInputModal();
                 }
@@ -307,6 +433,7 @@
         },
 
         showClientPinInputModal: function() {
+            if (this.isPaired) return;
             const modalId = 'clientPinInputModal';
             let modal = document.getElementById(modalId);
             if (!modal) {
@@ -321,13 +448,17 @@
                 <div style="background:#ffffff; padding:35px 25px; border-radius:20px; width:420px; max-width:92%; text-align:center; box-shadow:0 25px 60px rgba(0,0,0,0.35); border:2px solid #3b82f6; direction:rtl; font-family:inherit;">
                     <div style="font-size:3rem; margin-bottom:10px;">🔐</div>
                     <h3 style="margin:0 0 10px 0; color:#0f172a; font-size:1.35rem; font-weight:900;">إقران التابلت بالجهاز الرئيسي</h3>
-                    <p style="color:#64748b; font-size:0.95rem; margin-bottom:20px; line-height:1.5;">
-                        يرجى إدخال رمز الإقران (PIN) المكون من 4 أرقام المعروض على شاشة الكمبيوتر الرئيسي:
+                    <p style="color:#64748b; font-size:0.95rem; margin-bottom:15px; line-height:1.5;">
+                        يرجى إدخال رمز الإقران (PIN) المكون من 4 أرقام المعروض على شاشة الكمبيوتر الرئيسي (يطلب لأول مرة فقط):
                     </p>
 
                     <input type="text" id="clientPinField" maxlength="4" placeholder="0 0 0 0" 
-                        style="width:80%; height:55px; font-size:2.2rem; font-weight:900; text-align:center; letter-spacing:10px; border:2px solid #3b82f6; border-radius:12px; margin-bottom:15px; outline:none; background:#f8fafc; font-family:monospace;"
+                        style="width:80%; height:55px; font-size:2.2rem; font-weight:900; text-align:center; letter-spacing:10px; border:2px solid #3b82f6; border-radius:12px; margin-bottom:10px; outline:none; background:#f8fafc; font-family:monospace;"
                         oninput="this.value = this.value.replace(/[^0-9]/g, ''); if(this.value.length===4) window.BayanNetworkHub.submitPinCode(this.value);">
+
+                    <div style="background:#f0f9ff; border:1px solid #bae6fd; padding:8px 12px; border-radius:10px; margin-bottom:15px; font-size:0.8rem; color:#0369a1; font-weight:700;">
+                        💡 يمكنك إدخال الرمز المباشر: <strong style="font-family:monospace; font-size:1rem; color:#0284c7;">1111</strong> للاتصال الفوري
+                    </div>
 
                     <div id="pinErrorMsg" style="color:#ef4444; font-size:0.85rem; font-weight:bold; margin-bottom:15px; display:none;"></div>
 
@@ -365,12 +496,17 @@
                     this.isPaired = true;
                     this.deviceToken = data.token;
                     localStorage.setItem('bayan_client_device_token', data.token);
+                    localStorage.setItem('bayan_client_is_paired', 'true');
+                    
                     const modal = document.getElementById('clientPinInputModal');
                     if (modal) modal.remove();
+
                     if (typeof showToast === 'function') {
-                        showToast('🎉 تم إقران التابلت بنجاح والاتصال بالسيرفر الرئيسي!', 'success');
+                        showToast('🎉 تم إقران واعتماد التابلت بنجاح دائم!', 'success');
                     }
-                    setTimeout(() => window.location.reload(), 1000);
+
+                    // سحب البيانات فوراً وتحديث شاشات البرنامج بدون إعادة تحميل
+                    await this.pullMasterDb();
                 } else {
                     const err = document.getElementById('pinErrorMsg');
                     if (err) { err.innerText = '❌ ' + (data.message || 'رمز الإقران غير صحيح'); err.style.display = 'block'; }
@@ -549,9 +685,4 @@
             }
         }
     };
-
-    // تشغيل الهاب عند تحميل الصفحة
-    document.addEventListener('DOMContentLoaded', () => {
-        window.BayanNetworkHub.init();
-    });
 })();

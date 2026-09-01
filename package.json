@@ -1,0 +1,65 @@
+{
+  "name": "bayan-pos-fashion",
+  "version": "1.0.2",
+  "description": "Bayan POS Fashion System",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.diamondvision.bayanpos",
+    "productName": "Bayan POS",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "media/logo.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bayan POS"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ehabamr062-ux",
+        "repo": "Bayan-Pos-System",
+        "releaseType": "release"
+      }
+    ],
+    "asar": true
+  },
+  "author": "Diamond Vision",
+  "license": "ISC",
+  "dependencies": {
+    "electron-updater": "^6.2.1"
+  },
+  "devDependencies": {
+    "bytenode": "^1.6.0",
+    "electron": "^30.5.1",
+    "electron-builder": "^24.13.3",
+    "fs-extra": "^11.3.5",
+    "javascript-obfuscator": "^5.4.3",
+    "png-to-ico": "^3.0.1"
+  }
+}

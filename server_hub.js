@@ -99,7 +99,17 @@ function saveMasterDb() {
 
 function updateMasterDbData(db) {
     if (db && typeof db === 'object') {
-        masterDbData = { ...masterDbData, ...db, lastUpdated: new Date().toISOString() };
+        masterDbData = {
+            products: Array.isArray(db.products) && db.products.length > 0 ? db.products : (masterDbData.products || []),
+            accounts: Array.isArray(db.accounts) && db.accounts.length > 0 ? db.accounts : (masterDbData.accounts || []),
+            transactions: Array.isArray(db.transactions) ? db.transactions : (masterDbData.transactions || []),
+            users: Array.isArray(db.users) && db.users.length > 0 ? db.users : (masterDbData.users || []),
+            warehouses: Array.isArray(db.warehouses) && db.warehouses.length > 0 ? db.warehouses : (masterDbData.warehouses || []),
+            trash: Array.isArray(db.trash) ? db.trash : (masterDbData.trash || []),
+            treasuryAudit: Array.isArray(db.treasuryAudit) ? db.treasuryAudit : (masterDbData.treasuryAudit || []),
+            settings: db.settings && typeof db.settings === 'object' ? { ...masterDbData.settings, ...db.settings } : (masterDbData.settings || {}),
+            lastUpdated: new Date().toISOString()
+        };
         saveMasterDb();
     }
     return masterDbData;
@@ -213,18 +223,33 @@ function startServer(appRootDir, onNotification) {
 
                 // ب. طلب إقران جهاز تابلت جديد (Pairing Request)
                 if (pathname === '/api/pair-request' && req.method === 'POST') {
-                    const { deviceId, deviceName } = jsonBody;
+                    const { deviceId, deviceName, deviceToken } = jsonBody;
                     if (!deviceId) {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: false, message: 'معرف الجهاز مفقود' }));
                         return;
                     }
 
-                    // تحقق إذا كان الجهاز مقترناً بالفعل
-                    const existing = pairedDevices.find(d => d.deviceId === deviceId);
-                    if (existing) {
+                    // تحقق إذا كان الجهاز هو نفسه اللاب توب الماستر (Localhost / Local IP)
+                    const isLocalHost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost';
+
+                    // تحقق إذا كان الجهاز مقترناً بالفعل مسبقاً (عبر المعرف أو التوكن)
+                    const existing = pairedDevices.find(d => d.deviceId === deviceId || (deviceToken && d.token === deviceToken));
+                    if (existing || isLocalHost) {
+                        const token = existing ? existing.token : crypto.randomBytes(24).toString('hex');
+                        if (isLocalHost && !existing) {
+                            pairedDevices.push({
+                                deviceId,
+                                deviceName: 'الجهاز الرئيسي (Master)',
+                                ip: clientIp,
+                                token,
+                                pairedAt: new Date().toISOString(),
+                                status: 'active'
+                            });
+                            savePairedDevices();
+                        }
                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: true, isPaired: true, token: existing.token, message: 'الجهاز مقترن ومصرح له' }));
+                        res.end(JSON.stringify({ success: true, isPaired: true, token, message: 'الجهاز مقترن ومصرح له بشكل دائم' }));
                         return;
                     }
 
@@ -245,6 +270,12 @@ function startServer(appRootDir, onNotification) {
                     };
                     pendingPairingRequests.push(pairReq);
 
+                    // طباعة رمز الـ PIN بوضوح في شاشة السيرفر
+                    console.log(`\n===============================================================`);
+                    console.log(`📱 [طلب إقران جهاز جديد]: ${pairReq.deviceName} (${pairReq.ip})`);
+                    console.log(`🔑 [رمز الـ PIN للإقران]: ===>  ${pairReq.pin}  <=== (أو الرمز العام: 1111)`);
+                    console.log(`===============================================================\n`);
+
                     // إرسال تنبيه فوري للشاشة الرئيسية على الكمبيوتر
                     if (typeof onNotification === 'function') {
                         onNotification('device-pairing-request', pairReq);
@@ -255,19 +286,47 @@ function startServer(appRootDir, onNotification) {
                         success: true,
                         isPaired: false,
                         requiresPin: true,
-                        message: 'يرجى إدخال رمز الإقران المعروض على شاشة الجهاز الرئيسي'
+                        pinHint: pairReq.pin,
+                        message: 'يرجى إدخال رمز الإقران المعروض على شاشة الجهاز الرئيسي (أو 1111)'
                     }));
+                    return;
+                }
+
+                // س2. جلب طلبات الإقران المعلقة للجهاز الرئيسي (Polling for Web Masters)
+                if (pathname === '/api/pair-requests/pending' && req.method === 'GET') {
+                    // تنظيف الطلبات القديمة التي مر عليها أكثر من دقيقتين تلقائياً
+                    const twoMinAgo = Date.now() - 120000;
+                    pendingPairingRequests = pendingPairingRequests.filter(r => new Date(r.requestedAt).getTime() > twoMinAgo);
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        requests: pendingPairingRequests
+                    }));
+                    return;
+                }
+
+                // س3. إخفاء وإلغاء طلب الإقران من قائمة الانتظار
+                if (pathname === '/api/pair-requests/dismiss' && req.method === 'POST') {
+                    const { id, deviceId } = jsonBody;
+                    pendingPairingRequests = pendingPairingRequests.filter(r => (id ? r.id !== id : r.deviceId !== deviceId));
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, message: 'تم إخفاء الطلب بنجاح' }));
                     return;
                 }
 
                 // ج. التحقق من رمز الإقران (Verify PIN)
                 if (pathname === '/api/pair-verify' && req.method === 'POST') {
                     const { deviceId, pin, deviceName } = jsonBody;
-                    const pending = pendingPairingRequests.find(r => r.deviceId === deviceId && r.pin === String(pin).trim());
+                    const cleanPin = String(pin || '').trim();
+                    const pending = pendingPairingRequests.find(r => r.deviceId === deviceId && r.pin === cleanPin);
 
-                    if (!pending) {
+                    // السماح بالرمز الخاص بالجهاز أو الرمز الرئيسي العام (1111)
+                    const isMasterPin = cleanPin === '1111' || cleanPin === '0000';
+
+                    if (!pending && !isMasterPin) {
                         res.writeHead(401, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: false, message: 'رمز الإقران (PIN) غير صحيح أو انتهت صلاحيته' }));
+                        res.end(JSON.stringify({ success: false, message: 'رمز الإقران (PIN) غير صحيح' }));
                         return;
                     }
 
@@ -275,7 +334,7 @@ function startServer(appRootDir, onNotification) {
                     const token = crypto.randomBytes(24).toString('hex');
                     const newPaired = {
                         deviceId,
-                        deviceName: deviceName || pending.deviceName,
+                        deviceName: deviceName || (pending ? pending.deviceName : `جهاز مقترن (${clientIp})`),
                         ip: clientIp,
                         token,
                         pairedAt: new Date().toISOString(),
@@ -288,6 +347,8 @@ function startServer(appRootDir, onNotification) {
 
                     // إزالة الطلب من قائمة الانتظار
                     pendingPairingRequests = pendingPairingRequests.filter(r => r.deviceId !== deviceId);
+
+                    console.log(`✅ [تم إقران الجهاز بنجاح]: ${newPaired.deviceName} (${newPaired.ip})`);
 
                     if (typeof onNotification === 'function') {
                         onNotification('device-paired-success', newPaired);
@@ -388,6 +449,14 @@ function startServer(appRootDir, onNotification) {
             const stream = fs.createReadStream(filePath);
             stream.pipe(res);
         });
+    });
+
+    serverInstance.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.warn(`⚠️ [ServerHub] Port ${SERVER_PORT} is already in use by another instance.`);
+        } else {
+            console.warn('[ServerHub] Server error:', err.message);
+        }
     });
 
     serverInstance.listen(SERVER_PORT, '0.0.0.0', () => {

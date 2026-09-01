@@ -2,19 +2,7 @@
 //  النسخ الاحتياطي التلقائي واستعادة البيانات (Backup & Restore Engine)
 // ============================================================
 
-async function resetAllData() {
-    const confirm1 = confirm("⚠️ تنبيه خطير جداً:\nسيتم حذف كافة البيانات (المنتجات، الحركات، الحسابات، الإعدادات) بشكل نهائي.\nهل أنت متأكد؟");
-    if (confirm1) {
-        const confirm2 = await showCustomPrompt("⚠️ لتأكيد عملية المسح الشامل، يرجى كتابة (مسح الكل) في المربع أدناه:");
-        if (confirm2 === "مسح الكل") {
-            clearStore();
-            alert("✅ تم مسح كافة البيانات بنجاح. سيتم الآن إعادة تشغيل التطبيق.");
-            location.reload();
-        } else {
-            alert("❌ لم يتم كتابة عبارة التأكيد بشكل صحيح. تم إلغاء الأمر.");
-        }
-    }
-}
+
 
 async function backupData() {
     await window.executeAutoBackupToFile(false, true);
@@ -151,8 +139,7 @@ window.showBackupProgressOverlay = function() {
         overlay.style.cssText = `
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(15, 23, 42, 0.92); 
-            -webkit-
-            z-index: 999999; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 2147483647; display: flex; flex-direction: column; align-items: center; justify-content: center;
             color: white; font-family: 'Cairo', sans-serif; direction: rtl; padding: 20px;
         `;
         
@@ -187,14 +174,33 @@ window.hideBackupProgressOverlay = function() {
 
 window.openBackupFolder = function() {
     try {
-        const { shell } = require('electron');
+        const fs = require('fs');
         const path = require('path');
         const os = require('os');
+        const { shell } = require('electron');
         const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
-        if (shell) shell.openPath(defaultPath);
-        else alert(`📍 مسار مجلد النسخ الاحتياطية هو:\n${defaultPath}`);
+        
+        if (!fs.existsSync(defaultPath)) {
+            fs.mkdirSync(defaultPath, { recursive: true });
+        }
+        
+        if (shell && typeof shell.openPath === 'function') {
+            shell.openPath(defaultPath);
+        } else {
+            const { exec } = require('child_process');
+            exec(`explorer "${defaultPath}"`);
+        }
     } catch(e) {
         console.log("Error opening backup folder:", e);
+        try {
+            const os = require('os');
+            const path = require('path');
+            const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
+            const { exec } = require('child_process');
+            exec(`explorer "${defaultPath}"`);
+        } catch(err2) {
+            alert(`📍 مسار مجلد النسخ الاحتياطية هو:\nAppData/Roaming/Bayan POS/backups`);
+        }
     }
 };
 

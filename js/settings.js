@@ -1118,6 +1118,7 @@ function renderWarehousesTable() {
     tbody.innerHTML = rowsHtml;
 
     updateSettingsWarehouseSelect();
+    initTransferPriceTypeSetting();
     if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
 }
 
@@ -1131,6 +1132,42 @@ function updateSettingsWarehouseSelect() {
     select.innerHTML = warehouses.map(w => `<option value="${w.name}" title="${w.name}" ${currentWH === w.name ? 'selected="selected"' : ''}>${w.name}</option>`).join('');
     select.value = currentWH;
 }
+
+window.initTransferPriceTypeSetting = function() {
+    const sel = document.getElementById('settingsTransferPriceType');
+    if (!sel) return;
+    const current = (typeof window.getTransferPriceType === 'function')
+        ? window.getTransferPriceType()
+        : ((typeof getStore === 'function' ? getStore('transferPriceType') : localStorage.getItem('transferPriceType')) || 'cost');
+    sel.value = current;
+};
+
+window.saveTransferPriceTypeSetting = async function(val) {
+    if (!val) val = 'cost';
+    if (typeof setStore === 'function') {
+        setStore('transferPriceType', val);
+    }
+    localStorage.setItem('transferPriceType', val);
+
+    try {
+        const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || localStorage.getItem('pos_settings') || '{}');
+        settingsObj.transferPriceType = val;
+        if (typeof setStore === 'function') setStore('pos_settings', JSON.stringify(settingsObj));
+        localStorage.setItem('pos_settings', JSON.stringify(settingsObj));
+    } catch(e) {}
+
+    if (typeof saveData === 'function') {
+        await saveData();
+    }
+    const labelMap = {
+        'cost': 'سعر التكلفة (Cost Price)',
+        'retail': 'سعر البيع القطاعي (Retail Price)',
+        'wholesale': 'سعر البيع الجملة (Wholesale Price)'
+    };
+    if (typeof showToast === 'function') {
+        showToast(`✅ تم حفظ سياسة تسعير التحويل: [ ${labelMap[val] || val} ]`, 'success');
+    }
+};
 
 function applyWarehouseSwitchFromSettings() {
     const val = document.getElementById('settingsActiveWarehouseSelect').value;
@@ -1147,6 +1184,8 @@ function applyWarehouseSwitchFromSettings() {
         if (typeof renderInventoryTable === 'function') renderInventoryTable();
         if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
         if (typeof renderPOSCart === 'function') renderPOSCart();
+        if (typeof updateNotifications === 'function') updateNotifications();
+        if (typeof window.checkIncomingTransfersAlert === 'function') window.checkIncomingTransfersAlert();
     }
 }
 
@@ -1160,6 +1199,8 @@ window.filterInventoryByWarehouse = function(whName) {
     }
     if (typeof renderInventoryTable === 'function') renderInventoryTable();
     if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
+    if (typeof updateNotifications === 'function') updateNotifications();
+    if (typeof window.checkIncomingTransfersAlert === 'function') window.checkIncomingTransfersAlert();
     if (typeof showToast === 'function') showToast(`🏬 تم تصفية العرض حسب: ${whName}`, "info");
 };
 

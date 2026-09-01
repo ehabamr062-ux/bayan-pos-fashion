@@ -156,22 +156,16 @@
             }
         }
 
-        // --- دالة توليد الأرقام المتسلسلة ---
+        // --- دالة توليد الأرقام المتسلسلة الآمنة والفائقة السرعة ---
         function getNextSequence(typeKeyword) {
-            // بحث عن جميع الحركات التي تطابق النوع المحدد حصراً
-            const filtered = (typeof transactions !== 'undefined' ? transactions : []).filter(t => {
-                if (!t || !t.type || t.invoiceId == null) return false;
-                const tType = t.type;
-                if (typeKeyword === 'بيع') return tType.includes('بيع') && !tType.includes('مرتجع');
-                if (typeKeyword === 'شراء') return tType.includes('شراء') && !tType.includes('مرتجع');
-                if (typeKeyword === 'مرتجع بيع') return tType.includes('مرتجع بيع') || (tType.includes('مرتجع') && tType.includes('بيع'));
-                if (typeKeyword === 'مرتجع شراء') return tType.includes('مرتجع شراء') || (tType.includes('مرتجع') && tType.includes('شراء'));
-                return tType.includes(typeKeyword);
-            });
-            if (filtered.length === 0) return 1;
-            
-            // إيجاد أعلى رقم فاتورة مستخدم بدلاً من عدّ الأسطر
-            const maxId = Math.max(0, ...filtered.map(t => parseInt(t.invoiceId) || 0));
+            const list = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
+            const maxId = list.reduce((max, t) => {
+                if (!typeKeyword || (t.type && t.type.includes(typeKeyword))) {
+                    const num = parseInt(t.invoiceId, 10);
+                    if (!isNaN(num) && num > max) return num;
+                }
+                return max;
+            }, 0);
             return maxId + 1;
         }
 
@@ -368,12 +362,15 @@
                 const debit = parseFloat(a.debit) || 0;
                 const credit = parseFloat(a.credit) || 0;
                 const balance = debit - credit;
-                return (a.type === 'client' || a.type === 'mixed') && balance > 0 && !window.acknowledgedDebt.includes(a.id);
+                const isRemindActive = (a.remind === true || a.remind === 'true');
+                return (a.type === 'client' || a.type === 'mixed') && balance > 0 && isRemindActive && !window.acknowledgedDebt.includes(a.id);
             });
 
             const delayedAccounts = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
                 const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
                 if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
+                const isRemindActive = (a.remind === true || a.remind === 'true');
+                if (!isRemindActive) return false;
                 if (window.acknowledgedDelayed.includes(a.id)) return false;
 
                 const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
@@ -396,7 +393,7 @@
             const activeTransfersCount = Object.keys(pendingTransferInvoices).length;
 
             const total = lowStockItems.length + expiringItems.length + debtAccounts.length + delayedAccounts.length + activeTransfersCount;
-            const badge = document.getElementById('notificationsBadge') || document.getElementById('bellBadge');
+            const badge = document.getElementById('bellBadge') || document.getElementById('notificationsBadge');
             if (badge) {
                 badge.innerText = total > 99 ? '99+' : total;
                 badge.style.display = total > 0 ? 'flex' : 'none';
@@ -426,6 +423,32 @@
                 showNotificationsModal(returnTab);
             }
             showToast("✅ تم وضع علامة استلام على التنبيه");
+        };
+
+        window.acknowledgeAllNotifications = function(activeTab = 'all') {
+            if (activeTab === 'products' || activeTab === 'all') {
+                const prods = (typeof productsDB !== 'undefined' ? productsDB : []);
+                prods.forEach(p => {
+                    if (!window.acknowledgedLowStock.includes(p.id)) window.acknowledgedLowStock.push(p.id);
+                    if (!window.acknowledgedExpiry.includes(p.id)) window.acknowledgedExpiry.push(p.id);
+                });
+                setStore('acknowledged_low_stock', JSON.stringify(window.acknowledgedLowStock));
+                setStore('acknowledged_expiry', JSON.stringify(window.acknowledgedExpiry));
+            }
+            if (activeTab === 'accounts' || activeTab === 'all') {
+                const accs = (typeof accounts !== 'undefined' ? accounts : []);
+                accs.forEach(a => {
+                    if (!window.acknowledgedDebt.includes(a.id)) window.acknowledgedDebt.push(a.id);
+                    if (!window.acknowledgedDelayed.includes(a.id)) window.acknowledgedDelayed.push(a.id);
+                });
+                setStore('acknowledged_debt', JSON.stringify(window.acknowledgedDebt));
+                setStore('acknowledged_delayed', JSON.stringify(window.acknowledgedDelayed));
+            }
+            updateNotifications();
+            if (typeof showNotificationsModal === 'function') {
+                showNotificationsModal(activeTab === 'all' ? 'products' : activeTab);
+            }
+            showToast("✅ تم وضع علامة مقروء على كافة التنبيهات وتصفير العداد بنجاح!", "success");
         };
 
         window.unacknowledgeNotification = function(type, id) {
@@ -490,11 +513,14 @@
                 const debit = parseFloat(a.debit) || 0;
                 const credit = parseFloat(a.credit) || 0;
                 const balance = debit - credit;
-                return (a.type === 'client' || a.type === 'mixed') && balance > 0;
+                const isRemindActive = (a.remind === true || a.remind === 'true');
+                return (a.type === 'client' || a.type === 'mixed') && balance > 0 && isRemindActive;
             });
             const allDelayed = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
                 const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
                 if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
+                const isRemindActive = (a.remind === true || a.remind === 'true');
+                if (!isRemindActive) return false;
                 const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
                 if (!lastTrans) return true;
                 const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
@@ -969,10 +995,11 @@
             const proceedDelete = async () => {
                 try {
                     // قبل الحذف، ننقلهم للسلة
+                    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
                     for (const id of targetIds) {
                         const item = productsDB.find(p => p.id === id);
                         if (item && typeof trashManager !== 'undefined' && trashManager.moveToTrash) {
-                            await trashManager.moveToTrash(item, 'product', item.name);
+                            await trashManager.moveToTrash(item, 'product', item.name, item.warehouse || activeWH);
                         }
                     }
 
@@ -1364,6 +1391,7 @@
                     activeAlertTimeout = null;
                 }
                 modal.classList.add('hidden');
+                modal.style.display = 'none';
                 try {
                     await onConfirm();
                 } catch(err) {
@@ -1376,6 +1404,7 @@
                     activeAlertTimeout = null;
                 }
                 modal.classList.add('hidden');
+                modal.style.display = 'none';
                 try {
                     await onCancel();
                 } catch(err) {
@@ -1383,8 +1412,8 @@
                 }
             };
 
-
             modal.style.zIndex = '2147483647';
+            modal.style.display = 'flex';
             modal.classList.remove('hidden');
 
             if (timeout && typeof timeout === 'number') {
@@ -1393,6 +1422,20 @@
                 }, timeout);
             }
         }
+        window.showCustomAlert = showCustomAlert;
+
+        function closeCustomAlert() {
+            if (activeAlertTimeout) {
+                clearTimeout(activeAlertTimeout);
+                activeAlertTimeout = null;
+            }
+            const modal = document.getElementById('alertModal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.style.display = 'none';
+            }
+        }
+        window.closeCustomAlert = closeCustomAlert;
 
         function contactDeveloper() {
             let modal = document.getElementById('bayanHelpModal');

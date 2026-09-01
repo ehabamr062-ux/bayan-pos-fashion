@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Production builds & installers (Upload .exe to GitHub Releases)
+dist/
+build/
+
+# OS & Editor temp files
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

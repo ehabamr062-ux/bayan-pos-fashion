@@ -23,12 +23,45 @@ const trashManager = {
     },
 
     /**
+     * استخراج اسم المخزن المرتبط بالعنصر المحذوف
+     */
+    getItemWarehouse(item) {
+        if (item.warehouse && String(item.warehouse).trim() !== '') return item.warehouse;
+        let data = item.originalData;
+        if (typeof data === 'string') {
+            try { data = JSON.parse(data); } catch(e) {}
+        }
+        if (data) {
+            if (Array.isArray(data) && data.length > 0) {
+                const first = data[0];
+                if (first.warehouse) return first.warehouse;
+                if (first.sourceWarehouse) return first.sourceWarehouse;
+            }
+            if (data.warehouse) return data.warehouse;
+            if (data.sourceWarehouse) return data.sourceWarehouse;
+            if (item.type === 'warehouse' || item.type === 'مخزن') return data.name || (data.warehouse && data.warehouse.name) || 'مخزن';
+            if (data.warehouseStocks && typeof data.warehouseStocks === 'object') {
+                const whKeys = Object.keys(data.warehouseStocks).filter(k => parseFloat(data.warehouseStocks[k]) > 0);
+                if (whKeys.length === 1) return whKeys[0];
+                if (whKeys.length > 1) return whKeys.join(' ، ');
+            }
+        }
+        if (item.type === 'product' || item.type === 'inventory') {
+            return (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
+        }
+        if (item.type === 'account') return 'كافة المخازن / عام';
+        return (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
+    },
+
+    /**
      * نقل عنصر إلى سلة المحذوفات
      */
-    async moveToTrash(data, type, label) {
+    async moveToTrash(data, type, label, warehouse = null) {
+        const activeWH = warehouse || (data && data.warehouse) || (data && data.sourceWarehouse) || ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي');
         const trashItem = {
             type: type,
             label: label,
+            warehouse: (type === 'account') ? 'كافة المخازن / عام' : activeWH,
             originalData: data,
             deletedAt: new Date().toISOString(),
             deletedBy: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'نظام آلي'
@@ -51,38 +84,90 @@ const trashManager = {
 
         tbody.innerHTML = '';
         
-        if (window.trashBin.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:30px; color:#94a3b8;">📭 سلة المحذوفات فارغة حالياً</td></tr>`;
+        const badge = document.getElementById('trashCountBadge');
+        if (badge) {
+            const count = (window.trashBin && Array.isArray(window.trashBin)) ? window.trashBin.length : 0;
+            badge.innerText = `${count} عنصر محذوف`;
+            badge.style.display = count > 0 ? 'inline-block' : 'none';
+        }
+
+        if (!window.trashBin || window.trashBin.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:35px; color:#94a3b8; font-weight:700;">📭 سلة المحذوفات فارغة حالياً</td></tr>`;
+            return;
+        }
+
+        const query = (document.getElementById('trashSearchInput')?.value || '').trim().toLowerCase();
+        let list = [...window.trashBin];
+
+        if (query) {
+            list = list.filter(item => {
+                const lbl = String(item.label || '').toLowerCase();
+                const wh = String(this.getItemWarehouse(item) || '').toLowerCase();
+                const tp = String(item.type || '').toLowerCase();
+                const by = String(item.deletedBy || '').toLowerCase();
+                return lbl.includes(query) || wh.includes(query) || tp.includes(query) || by.includes(query);
+            });
+        }
+
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px; color:#94a3b8; font-weight:bold;">🔍 لا توجد نتائج مطابقة لبحثك في السلة</td></tr>`;
             return;
         }
 
         // ترتيب من الأحدث للأقدم
-        const sortedTrash = [...window.trashBin].sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+        const sortedTrash = list.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
 
         sortedTrash.forEach(item => {
             const tr = document.createElement('tr');
+            tr.style.cssText = "border-bottom: 1px solid #f1f5f9; transition: 0.2s;";
+            tr.onmouseover = () => tr.style.background = '#f8fafc';
+            tr.onmouseout = () => tr.style.background = 'transparent';
             
             let typeLabel = '';
             let icon = '';
+            let typeBg = '#f1f5f9';
+            let typeColor = '#475569';
+
             switch(item.type) {
-                case 'product': typeLabel = 'صنف / منتج'; icon = '📦'; break;
-                case 'transaction': typeLabel = 'فاتورة / عملية'; icon = '📄'; break;
-                case 'account': typeLabel = 'حساب / عميل'; icon = '👤'; break;
-                case 'warehouse': case 'مخزن': typeLabel = 'مخزن / فرع'; icon = '🏭'; break;
-                default: typeLabel = 'غير معروف'; icon = '❓';
+                case 'product': case 'inventory': 
+                    typeLabel = 'صنف / منتج'; icon = '📦'; typeBg = '#eff6ff'; typeColor = '#2563eb'; break;
+                case 'transaction': case 'invoice': case 'sale': case 'purchase':
+                    typeLabel = 'فاتورة / عملية'; icon = '📄'; typeBg = '#fdf2f8'; typeColor = '#db2777'; break;
+                case 'account': 
+                    typeLabel = 'حساب / عميل'; icon = '👤'; typeBg = '#f0fdf4'; typeColor = '#16a34a'; break;
+                case 'warehouse': case 'مخزن': 
+                    typeLabel = 'مخزن / فرع'; icon = '🏭'; typeBg = '#fefce8'; typeColor = '#ca8a04'; break;
+                default: 
+                    typeLabel = 'عنصر نظام'; icon = '📁';
             }
 
             const deleteDate = new Date(item.deletedAt).toLocaleString('ar-EG');
+            const itemWarehouse = this.getItemWarehouse(item);
 
             tr.innerHTML = `
-                <td style="padding: 8px 10px; font-weight: bold; color: #1e293b;">${icon} ${typeLabel}</td>
-                <td style="padding: 8px 10px; font-weight: 600;">${item.label || '---'}</td>
-                <td style="padding: 8px 10px; font-weight: 600; color: #475569;">👤 ${item.deletedBy || 'غير معروف'}</td>
-                <td style="padding: 8px 10px; color: #64748b; font-size: 0.78rem;">${deleteDate}</td>
-                <td style="padding: 6px 8px; text-align: center;">
-                    <div style="display: flex; gap: 5px; justify-content: center; align-items: center;">
-                        <button onclick="trashManager.restore(${item.id})" class="action-btn" style="background: #22c55e; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; white-space: nowrap;" title="استعادة">🔄 استعادة</button>
-                        <button onclick="trashManager.permanentDelete(${item.id})" class="action-btn" style="background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; white-space: nowrap;" title="حذف نهائي">🗑️ حذف نهائي</button>
+                <td style="padding: 10px 14px; font-weight: bold;">
+                    <span style="background:${typeBg}; color:${typeColor}; padding:4px 10px; border-radius:8px; font-size:0.8rem; display:inline-flex; align-items:center; gap:4px; font-weight:800;">
+                        ${icon} ${typeLabel}
+                    </span>
+                </td>
+                <td style="padding: 10px 14px; font-weight: 800; color: #0f172a; font-size: 0.92rem;">
+                    ${item.label || '---'}
+                </td>
+                <td style="padding: 10px 14px; text-align: center;">
+                    <span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 3px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 800; display: inline-block;">
+                        🏢 ${itemWarehouse}
+                    </span>
+                </td>
+                <td style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 0.85rem;">
+                    👤 ${item.deletedBy || 'غير معروف'}
+                </td>
+                <td style="padding: 10px 14px; color: #64748b; font-size: 0.8rem; font-weight: 600; direction: ltr; text-align: right;">
+                    🕒 ${deleteDate}
+                </td>
+                <td style="padding: 8px 14px; text-align: center;">
+                    <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+                        <button onclick="trashManager.restore(${item.id})" class="action-btn" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; padding: 6px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 6px rgba(16,185,129,0.3); transition: 0.2s;" title="استعادة إلى النظام">🔄 استعادة</button>
+                        <button onclick="trashManager.permanentDelete(${item.id})" class="action-btn" style="background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; padding: 5px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer; white-space: nowrap; transition: 0.2s;" title="حذف نهائي لا رجعة فيه">🗑️ حذف نهائي</button>
                     </div>
                 </td>
             `;

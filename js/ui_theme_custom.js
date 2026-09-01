@@ -505,9 +505,10 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             if (!isVisible) {
                 menu.classList.remove('hidden');
                 menu.classList.add('visible');
-                // التأكد من تطبيق الحالة النشطة عند الفتح
-                const saved = getStore('bayan_wallpaper');
-                if (saved) updateWallpaperActiveState(saved);
+                // التأكد من تطبيق الحالة النشطة وتحديث المعرض عند الفتح
+                const saved = getStore('bayan_wallpaper') || 'media/wallpapers/mountains.jpg';
+                updateWallpaperActiveState(saved);
+                loadCustomWallpapersToGallery();
             } else {
                 menu.classList.remove('visible');
                 menu.classList.add('hidden');
@@ -522,7 +523,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 body.style.background = '';
                 body.classList.remove('has-wallpaper');
                 setStore('bayan_wallpaper', 'none');
-                removeStore('bayan_wallpaper_type');
+                setStore('bayan_wallpaper_type', 'none');
             } else {
                 if (url.startsWith('linear-gradient') || url.startsWith('radial-gradient')) {
                     body.style.backgroundImage = url;
@@ -557,11 +558,28 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
         }
 
         function updateWallpaperActiveState(url) {
-            document.querySelectorAll('.wp-option').forEach(opt => {
-                opt.classList.remove('active');
-                // التحقق من الخلفية (سواء كانت صورة مدمجة أو Base64)
-                if (opt.style.backgroundImage && opt.style.backgroundImage.includes(url.substring(0, 50))) {
-                    opt.classList.add('active');
+            const cleanUrl = String(url || 'none').trim();
+            const noneBtn = document.getElementById('wp-btn-none');
+            if (noneBtn) {
+                if (cleanUrl === 'none' || !cleanUrl) {
+                    noneBtn.style.borderColor = '#d4af37';
+                    noneBtn.style.background = '#fff8e7';
+                    noneBtn.style.boxShadow = '0 0 0 3px rgba(212, 175, 55, 0.4)';
+                } else {
+                    noneBtn.style.borderColor = '#999';
+                    noneBtn.style.background = '#eee';
+                    noneBtn.style.boxShadow = 'none';
+                }
+            }
+
+            document.querySelectorAll('.wp-item-card').forEach(card => {
+                card.classList.remove('active');
+                const onclickAttr = card.getAttribute('onclick') || '';
+                const bgStyle = card.style.backgroundImage || '';
+                if (cleanUrl !== 'none') {
+                    if (onclickAttr.includes(cleanUrl) || bgStyle.includes(cleanUrl)) {
+                        card.classList.add('active');
+                    }
                 }
             });
         }
@@ -579,9 +597,10 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 }
                 grid.style.display = 'grid';
                 
+                const currentSaved = getStore('bayan_wallpaper');
                 customWps.forEach(wp => {
                     const div = document.createElement('div');
-                    div.className = 'wp-item-card';
+                    div.className = 'wp-item-card' + (currentSaved === wp.name ? ' active' : '');
                     div.style.background = `url('${wp.data}') center/cover`;
                     div.onclick = () => changeWallpaper(wp.name, true);
                     
@@ -629,10 +648,10 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                     const customId = 'custom_' + Date.now();
                     await db.wallpapers.add({ name: customId, data: base64Data });
 
-                    // إضافة للمطهر فوراً باستخدام الـ ID وليس الـ Base64
+                    // إضافة للمظهر فوراً باستخدام الـ ID وليس الـ Base64
                     changeWallpaper(customId, true);
                     
-                    // تحديث قائمة الخلفيات המخصصة
+                    // تحديث قائمة الخلفيات المخصصة
                     await loadCustomWallpapersToGallery();
                     
                     showToast("✅ تم رفع وحفظ الخلفية المخصصة بنجاح", "success");
@@ -645,42 +664,83 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
         }
 
         async function loadWallpaper() {
-            const type = getStore('bayan_wallpaper_type');
+            let type = getStore('bayan_wallpaper_type');
             let saved = getStore('bayan_wallpaper');
 
-            // تحديث معرض الخلفيات المخصصة
-            await loadCustomWallpapersToGallery();
+            // فحص احتياطي مباشر من IndexedDB إذا لم تكن الذاكرة ممتلئة بعد
+            if ((saved === null || saved === undefined) && typeof window.bayanDB !== 'undefined' && window.bayanDB && window.bayanDB.settings) {
+                try {
+                    const row = await window.bayanDB.settings.get('bayan_wallpaper');
+                    if (row && row.value !== undefined) {
+                        saved = row.value;
+                        if (!window.AppStore) window.AppStore = {};
+                        window.AppStore['bayan_wallpaper'] = saved;
+                    }
+                    const rowType = await window.bayanDB.settings.get('bayan_wallpaper_type');
+                    if (rowType && rowType.value !== undefined) {
+                        type = rowType.value;
+                        if (!window.AppStore) window.AppStore = {};
+                        window.AppStore['bayan_wallpaper_type'] = type;
+                    }
+                } catch(e) {}
+            }
 
-            // 🌟 الإلزام التلقائي: إذا لم يكن لدى العميل أي خلفية مختارة (أول مرة يفتح)، نطبق خلفية الطبيعة الجبلية تلقائياً
-            if (!saved || saved === 'none') {
+            // 🌟 الإلزام التلقائي لأول مرة يفتح فيها البرنامج على الإطلاق فقط (First Launch Only):
+            // إذا لم يسبق للمستخدم اختيار أي شيء قط (saved === null أو undefined)
+            if (saved === null || saved === undefined) {
                 saved = 'media/wallpapers/mountains.jpg';
                 setStore('bayan_wallpaper', saved);
                 setStore('bayan_wallpaper_type', 'preset');
             }
 
+            // تحديث معرض الخلفيات المخصصة
+            await loadCustomWallpapersToGallery();
+
+            // 🚫 إذا اختار العميل صراحة "بدون خلفية":
+            if (saved === 'none') {
+                document.body.style.backgroundImage = 'none';
+                document.body.style.background = '';
+                document.body.classList.remove('has-wallpaper');
+                updateWallpaperActiveState('none');
+                return;
+            }
+
+            // 🖼️ إذا كانت خلفية مخصصة رفعها العميل:
             if (type === 'custom' && saved) {
                 try {
                     const custom = await db.wallpapers.where('name').equals(saved).first();
                     if (custom) {
                         document.body.style.backgroundImage = `url('${custom.data}')`;
+                        document.body.style.backgroundSize = 'cover';
+                        document.body.style.backgroundAttachment = 'fixed';
+                        document.body.style.backgroundPosition = 'center';
                         document.body.classList.add('has-wallpaper');
+                        updateWallpaperActiveState(saved);
                         return;
                     } else if (saved.startsWith('data:image')) {
                         document.body.style.backgroundImage = `url('${saved}')`;
+                        document.body.style.backgroundSize = 'cover';
+                        document.body.style.backgroundAttachment = 'fixed';
+                        document.body.style.backgroundPosition = 'center';
                         document.body.classList.add('has-wallpaper');
+                        updateWallpaperActiveState(saved);
                         return;
                     }
                 } catch(e) { console.error("Error loading custom wallpaper:", e); }
             }
 
-            // في حالة الفشل أو النوع Preset، نستخدم الرابط المحفوظ
+            // 🏙️ في حالة الخلفيات الجاهزة (Preset) أو التدرجات:
             if (saved && saved !== 'none') {
                 if (saved.startsWith('linear-gradient') || saved.startsWith('radial-gradient')) {
                     document.body.style.backgroundImage = saved;
                 } else {
                     document.body.style.backgroundImage = `url('${saved}')`;
                 }
+                document.body.style.backgroundSize = 'cover';
+                document.body.style.backgroundAttachment = 'fixed';
+                document.body.style.backgroundPosition = 'center';
                 document.body.classList.add('has-wallpaper');
+                updateWallpaperActiveState(saved);
             }
         }
 
@@ -748,7 +808,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '1.0.0';
+            const version = window.appVersion || '1.0.2';
 
             const message = `السلام عليكم\nأريد الاشتراك في Bayan POS\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة: ${plan}\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ.`;
             

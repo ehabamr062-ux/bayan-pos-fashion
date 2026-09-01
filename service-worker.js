@@ -87,13 +87,15 @@ const STATIC_FILES = [
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(STATIC_CACHE).then(async (cache) => {
-            console.log('[SW] 🚀 جاري تخزين الملفات الأساسية...');
-            // تخزين الملفات واحداً تلو الآخر لتفادي أي خطأ وتخطي المفقود بأمان
+            console.log('[SW] 🚀 جاري تخزين الملفات الأساسية للعمل أوفلاين...');
             for (const file of STATIC_FILES) {
                 try {
-                    await cache.add(file);
+                    const response = await fetch(file, { cache: 'no-cache' });
+                    if (response && response.status === 200) {
+                        await cache.put(file, response);
+                    }
                 } catch (err) {
-                    console.warn(`[SW] تخطي ملف تعذر كاشه: ${file}`, err.message);
+                    // تجاهل الملفات غير المتوفرة بهدوء
                 }
             }
         }).then(() => self.skipWaiting())
@@ -107,7 +109,6 @@ self.addEventListener('activate', (event) => {
             return Promise.all(
                 cacheNames.map((cache) => {
                     if (cache !== STATIC_CACHE && cache !== DYNAMIC_CACHE) {
-                        console.log('[SW] 🗑️ حذف الكاش القديم:', cache);
                         return caches.delete(cache);
                     }
                 })
@@ -119,39 +120,34 @@ self.addEventListener('activate', (event) => {
 // استراتيجية التحكم في الطلبات (Cache First with Network Fallback)
 self.addEventListener('fetch', (event) => {
     const { request } = event;
-    const url = new URL(request.url);
+    if (!request || request.method !== 'GET') return;
+    if (!request.url.startsWith('http://') && !request.url.startsWith('https://')) return;
 
-    // تجاهل الطلبات غير الضرورية أو الخارجية غير الآمنة
-    if (!request.url.startsWith('http')) return;
+    const url = new URL(request.url);
     if (url.pathname.includes('socket.io') || url.pathname.includes('/api/')) return;
 
     event.respondWith(
         caches.match(request).then((cachedResponse) => {
-            // إذا كان الملف موجوداً في الكاش، أرجعه فوراً (لسرعة البرق أوفلاين)
             if (cachedResponse) {
                 return cachedResponse;
             }
 
-            // إذا لم يكن موجوداً، اجلبه من الشبكة وقم بتخزينه فوراً للمرات القادمة
             return fetch(request).then((networkResponse) => {
                 if (!networkResponse || networkResponse.status !== 200 || networkResponse.type === 'error') {
                     return networkResponse;
                 }
 
-                // تخزين نسخة من الملف المستلم (خلفيات، خطوط، مكتبات CDN)
                 const responseToCache = networkResponse.clone();
                 caches.open(DYNAMIC_CACHE).then((cache) => {
-                    cache.put(request, responseToCache);
-                });
+                    cache.put(request, responseToCache).catch(() => {});
+                }).catch(() => {});
 
                 return networkResponse;
             }).catch(() => {
-                // في حالة فشل الشبكة تماماً (أوفلاين) وعدم وجود الملف في الكاش
                 if (request.destination === 'document' || request.mode === 'navigate') {
                     return caches.match('./index.html') || caches.match('./');
                 }
 
-                // إرجاع SVG افتراضي في حالة فقدان صورة
                 if (request.destination === 'image') {
                     return new Response(
                         '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#eee"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="12">Bayan POS</text></svg>',

@@ -144,7 +144,9 @@ function applyBarcodePreset(width, height, offsetX = 0, barcodeHeight = 24, btnE
 function testPrintBarcodeLabel() {
     const testItem = {
         id: 999,
-        name: 'قميص كاجوال رجالي - M / أبيض',
+        name: 'قميص كاجوال رجالي',
+        size: 'M',
+        color: 'أبيض',
         code: 'TEST-101',
         barcode: '2026010199',
         price: 350.00
@@ -237,8 +239,8 @@ async function executePrinting(modeOrTargets, copies = 1) {
             const barcodeVal = p.barcode || p.code || p.id;
             printableItems.push({
                 name: p.name,
-                size: '',
-                color: '',
+                size: p.size || '',
+                color: p.color || '',
                 code: codeVal,
                 barcode: barcodeVal,
                 price: parseFloat(p.price) || 0,
@@ -246,6 +248,19 @@ async function executePrinting(modeOrTargets, copies = 1) {
             });
         }
     });
+
+    const labelWidth = parseFloat(bSettings.width) || 50;
+    const labelHeight = parseFloat(bSettings.height) || 25;
+    const isSmall = labelWidth <= 42 || labelHeight <= 28;
+    
+    // إذا كانت باقي العناصر مخفية، يكبر ارتفاع الباركود لملء الملصق في المنتصف
+    const isMinimal = !bSettings.showShopName && !bSettings.showPrice;
+    let baseH = parseInt(bSettings.barcodeHeight || (isSmall ? 18 : 22), 10);
+    if (isMinimal) {
+        baseH = Math.max(baseH, isSmall ? 20 : 25);
+    }
+    const barcodeH = baseH;
+    const barcodeW = isSmall ? 1.0 : 1.18;
 
     // 1. إنشاء عناصر الباركود ورسم الـ SVG محلياً عبر JsBarcode الموجود في النافذة
     let labelsHtml = '';
@@ -270,17 +285,17 @@ async function executePrinting(modeOrTargets, copies = 1) {
 
             if (window.JsBarcode) {
                 try {
-                    const bcStr = String(item.barcode || '').trim();
+                    const bcStr = String(item.barcode || item.code || '1000001').trim();
                     window.JsBarcode(svgEl, bcStr, {
                         format: "CODE128",
-                        width: 1.35,
-                        height: parseInt(bSettings.barcodeHeight || 26, 10),
+                        width: barcodeW,
+                        height: barcodeH,
                         displayValue: true,
-                        fontSize: 9,
+                        fontSize: isSmall ? 7.5 : 8.5,
                         font: "Segoe UI, Arial, sans-serif",
                         fontOptions: "bold",
                         textMargin: 1,
-                        margin: 2
+                        margin: 3 // مسافة أمان بيضاء على اليمين واليسار تمنع أكل الخطوط من الحواف
                     });
                 } catch(err) {
                     console.warn("Barcode rendering error:", err);
@@ -292,16 +307,18 @@ async function executePrinting(modeOrTargets, copies = 1) {
             labelsHtml += `
                 <div class="barcode-label">
                     ${bSettings.showShopName ? `<div class="shop-title">${shopName}</div>` : ''}
-                    ${bSettings.showItemName ? `<div class="item-name" title="${item.name}">${item.name}</div>` : ''}
-                    ${hasVariantInfo ? `
-                        <div class="variant-badge-row">
-                            ${item.size ? `<span class="size-badge">SIZE: ${item.size}</span>` : ''}
-                            ${item.color ? `<span class="color-badge">لون: ${item.color}</span>` : ''}
+                    ${(hasVariantInfo || (bSettings.showCode && item.code)) ? `
+                        <div class="meta-row">
+                            ${item.size ? `<span class="size-badge">${item.size}</span>` : ''}
+                            ${item.color ? `<span class="color-badge">${item.color}</span>` : ''}
+                            ${(bSettings.showCode && item.code) ? `<span class="code-badge">#${item.code}</span>` : ''}
                         </div>
                     ` : ''}
-                    ${bSettings.showCode && item.code ? `<div class="item-code-line">كود: ${item.code}</div>` : ''}
-                    ${svgString}
-                    ${bSettings.showPrice ? `<div class="price-tag">${priceFormatted}</div>` : ''}
+                    <div class="svg-wrap">
+                        ${svgString}
+                    </div>
+                    ${bSettings.showItemName ? `<div class="item-name" title="${item.name}">${item.name}</div>` : ''}
+                    ${bSettings.showPrice ? `<div class="price-badge"><span class="price-val">${priceFormatted}</span></div>` : ''}
                 </div>
             `;
         }
@@ -326,55 +343,60 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     size: ${bSettings.width}mm ${bSettings.height}mm;
                     margin: 0mm !important;
                 }
-                * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
+                * { 
+                    box-sizing: border-box !important; 
+                    -webkit-print-color-adjust: exact !important; 
+                    print-color-adjust: exact !important; 
+                }
                 html, body {
                     width: ${bSettings.width}mm;
                     height: ${bSettings.height}mm;
                     margin: 0 !important;
                     padding: 0 !important;
-                    font-family: 'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
                     direction: rtl;
                     text-align: center;
-                    background: #fff;
-                    color: #000;
+                    background: #ffffff;
+                    color: #000000;
                     overflow: hidden;
                 }
                 .label-container {
-                    width: 100%;
-                    display: block;
-                    margin: 0;
+                    width: ${bSettings.width}mm;
+                    margin: 0 auto;
                     padding: 0;
                 }
                 .barcode-label { 
                     width: ${bSettings.width}mm;
                     height: ${bSettings.height}mm;
                     max-height: ${bSettings.height}mm;
-                    padding: 1.2mm 1.5mm;
-                    margin: 0 auto;
-                    position: relative;
-                    left: ${bSettings.offsetX}mm;
+                    padding: 0.5mm 0.8mm;
+                    margin: 0 auto !important;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    justify-content: space-around;
+                    justify-content: center;
+                    gap: 0.8mm;
                     page-break-after: always;
                     page-break-inside: avoid;
                     overflow: hidden;
                     box-sizing: border-box;
+                    text-align: center;
                 }
                 .shop-title { 
-                    font-size: 8.5pt; 
+                    font-size: ${isSmall ? '6.5pt' : '7.8pt'}; 
                     font-weight: 900; 
                     color: #000000; 
-                    line-height: 1.1; 
+                    line-height: 1; 
                     margin: 0;
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
                     max-width: 100%;
+                    text-align: center;
+                    letter-spacing: 0.2px;
                 }
                 .item-name { 
-                    font-size: 9.5pt; 
+                    font-size: ${isSmall ? '6.8pt' : '8pt'}; 
                     font-weight: 900; 
                     margin: 0; 
                     white-space: nowrap; 
@@ -382,55 +404,66 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     text-overflow: ellipsis; 
                     max-width: 100%; 
                     color: #000000; 
-                    line-height: 1.15; 
+                    line-height: 1.1; 
+                    text-align: center;
                 }
-                .variant-badge-row { 
+                .meta-row { 
                     display: flex; 
                     justify-content: center; 
-                    gap: 6px; 
+                    gap: 3px; 
                     align-items: center; 
                     width: 100%; 
-                    font-size: 8.5pt; 
+                    font-size: ${isSmall ? '6.0pt' : '7.0pt'}; 
                     font-weight: 900; 
                     margin: 0;
+                    line-height: 1;
+                    white-space: nowrap;
+                    overflow: hidden;
                 }
                 .size-badge { 
                     background: #000000; 
                     color: #ffffff; 
-                    padding: 1px 6px; 
-                    border-radius: 4px; 
+                    padding: 0.5px 3.5px; 
+                    border-radius: 2.5px; 
                     font-weight: 900;
-                    font-size: 8.5pt;
+                    font-size: ${isSmall ? '6.0pt' : '7.0pt'};
                 }
                 .color-badge { 
                     color: #000000; 
-                    font-weight: 900;
-                    font-size: 8.5pt;
+                    font-weight: 800;
                 }
-                .item-code-line { 
-                    font-size: 7.5pt; 
-                    font-weight: 900; 
-                    color: #000000; 
-                    margin: 0; 
-                    line-height: 1; 
+                .code-badge { 
+                    color: #222222; 
+                    font-weight: 800;
                 }
-                .price-tag { 
-                    font-size: 11pt; 
-                    font-weight: 900; 
-                    color: #000000; 
-                    border: 1.5px solid #000000; 
-                    padding: 0.8mm 5mm; 
-                    border-radius: 4px; 
-                    background: #ffffff; 
-                    line-height: 1.1; 
-                    margin: 0; 
+                .svg-wrap {
+                    width: 100%;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    margin: 0 auto;
+                    text-align: center;
+                    overflow: hidden;
                 }
                 svg { 
-                    max-width: 95%; 
-                    width: 95%;
-                    height: 28px !important;
+                    max-width: 95% !important; 
+                    width: auto !important;
+                    height: auto !important;
+                    margin: 0 auto !important; 
+                    display: block !important; 
+                }
+                .price-badge { 
+                    font-size: ${isSmall ? '8pt' : '9.5pt'}; 
+                    font-weight: 900; 
+                    color: #000000; 
+                    border: 1.2px solid #000000; 
+                    padding: 0.2mm 2.5mm; 
+                    border-radius: 2.5px; 
+                    background: #ffffff; 
+                    line-height: 1; 
                     margin: 0 auto; 
-                    display: block; 
+                    display: inline-block;
+                    white-space: nowrap;
                 }
                 @media print {
                     html, body { width: ${bSettings.width}mm; height: ${bSettings.height}mm; margin: 0 !important; padding: 0 !important; }
@@ -451,7 +484,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
     setTimeout(() => {
         printWindow.focus();
         printWindow.print();
-    }, 250);
+    }, 400);
 }
 
 function applyPresetSizes(presetType) {
@@ -599,6 +632,7 @@ function generateVariantsMatrix() {
     });
 
     let generatedCount = 0;
+    tbody.innerHTML = ''; // مسح الجدول القديم لمنع تكرار الصفوف قبل توليد التشكيلة المحدثة
     listSizes.forEach(sz => {
         listColors.forEach(col => {
             const key = `${sz}___${col}`;

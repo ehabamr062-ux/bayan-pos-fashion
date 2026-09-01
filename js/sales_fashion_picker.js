@@ -110,7 +110,15 @@ function showVariantSelectionModal(product, context = 'sales') {
             let vPrice = 0;
             let priceTitle = 'سعر البيع';
 
-            if (context === 'purchase' || context === 'purReturn' || context === 'transfer' || context === 'adj') {
+            if (context === 'transfer') {
+                if (typeof window.getEffectiveTransferPrice === 'function') {
+                    vPrice = window.getEffectiveTransferPrice(product, v);
+                    priceTitle = window.getTransferPriceLabel ? window.getTransferPriceLabel() : 'سعر التحويل';
+                } else {
+                    vPrice = parseFloat(v.cost) || parseFloat(product.cost) || 0;
+                    priceTitle = 'سعر التحويل';
+                }
+            } else if (context === 'purchase' || context === 'purReturn' || context === 'adj') {
                 vPrice = parseFloat(v.cost) || parseFloat(product.cost) || 0;
                 priceTitle = 'سعر التكلفة';
             } else {
@@ -519,8 +527,10 @@ function selectVariantAndAddToCart(productId, variantIndex, context = 'sales') {
         if (sizeInput) sizeInput.value = variant.size || '';
         if (colorInput) colorInput.value = variant.color || '';
         if (priceInput) {
-            const vCost = parseFloat(variant.cost) || parseFloat(product.cost) || 0;
-            priceInput.value = vCost.toFixed(2);
+            const effPrice = (typeof window.getEffectiveTransferPrice === 'function')
+                ? window.getEffectiveTransferPrice(product, variant, defUnit)
+                : (parseFloat(variant.cost) || parseFloat(product.cost) || 0);
+            priceInput.value = effPrice.toFixed(2);
         }
 
         // قفز المؤشر فوراً لمربع الكمية مع تحديد الرقم لسرعة الضغط على Enter
@@ -657,10 +667,14 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
     if (currentSize && currentSize !== '-' && !availableSizes.includes(currentSize)) {
         availableSizes.unshift(currentSize);
     }
+    if (!item.selectedSize && !item.size && availableSizes.length > 0) {
+        item.selectedSize = availableSizes[0];
+        item.size = availableSizes[0];
+    }
 
     let sizeElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
     if (availableSizes.length > 1) {
-        const sizeOptions = availableSizes.map(s => `<option value="${s}" ${currentSize === s ? 'selected' : ''}>${s}</option>`).join('');
+        const sizeOptions = availableSizes.map(s => `<option value="${s}" ${(item.selectedSize || currentSize) === s ? 'selected' : ''}>${s}</option>`).join('');
         sizeElement = `<select onchange="updateItemVariantAttr(${index}, 'size', this.value, '${cartType}')" title="اختر المقاس"
             style="width: 80px; max-width: 100%; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer; text-align: center;">
             ${sizeOptions}
@@ -674,6 +688,10 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
     const availableColors = [...new Set(variants.map(v => v.color).filter(c => c && String(c).trim() !== '' && String(c).trim() !== '-'))];
     if (currentColor && currentColor !== '-' && !availableColors.includes(currentColor)) {
         availableColors.unshift(currentColor);
+    }
+    if (!item.selectedColor && !item.color && availableColors.length > 0) {
+        item.selectedColor = availableColors[0];
+        item.color = availableColors[0];
     }
 
     let colorElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
@@ -755,7 +773,13 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
                 item.sourceStock = srcStock;
             }
 
-            if (matchedVariant.cost && (cartType === 'transfer' || cartType === 'purchase' || cartType === 'purReturn')) {
+            if (cartType === 'transfer') {
+                if (typeof window.getEffectiveTransferPrice === 'function') {
+                    item.price = window.getEffectiveTransferPrice(item, matchedVariant);
+                } else {
+                    item.price = parseFloat(matchedVariant.cost) || item.price;
+                }
+            } else if (matchedVariant.cost && (cartType === 'purchase' || cartType === 'purReturn')) {
                 item.price = parseFloat(matchedVariant.cost) || item.price;
             }
             if (matchedVariant.price && (cartType === 'sales' || cartType === 'return') && parseFloat(matchedVariant.price) > 0) {

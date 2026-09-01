@@ -131,7 +131,7 @@ function createWindow() {
         win.webContents.closeDevTools();
     });
 
-    // إغلاق نظيف وسريع بدون تعليق عمليات النظام
+    // إغلاق نظيف وسريع مع حماية البيانات غير المحفوظة
     win.on('close', () => {
         openWindows.delete(win);
         if (openWindows.size === 0) {
@@ -139,9 +139,10 @@ function createWindow() {
             try {
                 win.webContents.send('trigger-backup-before-quit');
             } catch(err) {}
-            setTimeout(() => {
+            if (global.quitTimeout) clearTimeout(global.quitTimeout);
+            global.quitTimeout = setTimeout(() => {
                 app.exit(0);
-            }, 300);
+            }, 800);
         }
     });
 
@@ -232,7 +233,14 @@ ipcMain.on('save-backup-and-quit', (event, backupData) => {
 });
 
 ipcMain.on('cancel-quit', () => {
+    if (global.quitTimeout) {
+        clearTimeout(global.quitTimeout);
+        global.quitTimeout = null;
+    }
     isQuitting = false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        openWindows.add(mainWindow);
+    }
     console.log('Quit cancelled by Renderer (unsaved data found).');
 });
 
@@ -291,6 +299,55 @@ ipcMain.handle('hash-activation-payload', (event, payload) => {
     } catch (err) {
         console.error('Failed to hash activation payload:', err);
         return '';
+    }
+});
+
+// =========================================================================
+// 🌐 قنوات السيرفر المحلي والمزامنة الشبكية (Local Network Hub IPC)
+// =========================================================================
+ipcMain.handle('sync-master-db', (event, dbPayload) => {
+    try {
+        if (server_hub && typeof server_hub.updateMasterDbData === 'function') {
+            server_hub.updateMasterDbData(dbPayload);
+        }
+        return { success: true };
+    } catch (err) {
+        console.error('[Main] sync-master-db error:', err);
+        return { success: false, message: err.message };
+    }
+});
+
+ipcMain.handle('get-in-transit-transfers', () => {
+    try {
+        if (server_hub && typeof server_hub.getInTransitTransfersList === 'function') {
+            return server_hub.getInTransitTransfersList();
+        }
+        return [];
+    } catch (err) {
+        console.error('[Main] get-in-transit-transfers error:', err);
+        return [];
+    }
+});
+
+ipcMain.handle('get-paired-devices', () => {
+    try {
+        if (server_hub && typeof server_hub.getPairedDevicesList === 'function') {
+            return server_hub.getPairedDevicesList();
+        }
+        return [];
+    } catch (err) {
+        return [];
+    }
+});
+
+ipcMain.handle('remove-paired-device', (event, deviceId) => {
+    try {
+        if (server_hub && typeof server_hub.removePairedDevice === 'function') {
+            return server_hub.removePairedDevice(deviceId);
+        }
+        return [];
+    } catch (err) {
+        return [];
     }
 });
 

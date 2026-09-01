@@ -1,12 +1,12 @@
 // ============================================================
 //  النوافذ المنبثقة، الإشعارات، ومعاينة الفواتير (Modals & Notifications)
 // ============================================================
-        window.showNotificationsModal = function(activeTab = 'products') {
+        window.showNotificationsModal = function(activeTab = null) {
             const today = new Date();
-            const allLowStock = productsDB.filter(p => (parseFloat(p.stock) || 0) <= (parseFloat(p.minStock) || 5));
+            const allLowStock = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => (parseFloat(p.stock) || 0) <= (parseFloat(p.minStock) || 5));
             
             // فحص تواريخ الصلاحية
-            const allExpiring = productsDB.filter(p => {
+            const allExpiring = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => {
                 if (!p.expiry) return false;
                 const exp = new Date(p.expiry);
                 if (isNaN(exp.getTime())) return false;
@@ -15,7 +15,7 @@
                 return diffDays <= 30;
             });
 
-            const allDebtAccounts = accounts.filter(a => {
+            const allDebtAccounts = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
                 const debit = parseFloat(a.debit) || 0;
                 const credit = parseFloat(a.credit) || 0;
                 const balance = debit - credit;
@@ -24,12 +24,12 @@
             });
 
             // العملاء المتأخرين (رصيد > 0 وآخر عملية من أكثر من 30 يوم)
-            const allDelayed = accounts.filter(a => {
+            const allDelayed = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
                 const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
                 if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
                 const isRemindActive = (a.remind === true || a.remind === 'true');
                 if (!isRemindActive) return false;
-                const lastTrans = transactions.filter(t => t.partnerId === a.id || t.account === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
+                const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
                 if (!lastTrans) return true;
                 const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
                 const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
@@ -81,10 +81,18 @@
             const totalActiveCount = activeProductsTotal + activeAccountsTotal + activeTransfersCount;
             const totalArchivedCount = archivedLowStock.length + archivedExpiring.length + archivedDebt.length + archivedDelayed.length;
 
+            // تحديد التبويب النشط ذكياً إذا لم يحدد
+            if (!activeTab) {
+                if (activeTransfersCount > 0) activeTab = 'transfers';
+                else if (activeProductsTotal > 0) activeTab = 'products';
+                else if (activeAccountsTotal > 0) activeTab = 'accounts';
+                else activeTab = 'products';
+            }
+
             // تحديث شارة جرس الإشعارات في الهيدر فوراً
-            const topBell = document.getElementById('bellBadge');
+            const topBell = document.getElementById('bellBadge') || document.getElementById('notificationsBadge');
             if (topBell) {
-                topBell.innerText = totalActiveCount;
+                topBell.innerText = totalActiveCount > 99 ? '99+' : totalActiveCount;
                 topBell.style.display = totalActiveCount > 0 ? 'flex' : 'none';
             }
 
@@ -164,7 +172,14 @@
                         <h3 style="margin:0; font-size: 1.25rem; font-weight: 900; display: flex; align-items: center; gap: 10px; color: #f8fafc;">
                             <span style="font-size: 1.4rem;">🔔</span> مركز إدارة التنبيهات والتحويلات الواردة
                         </h3>
-                        <button onclick="document.getElementById('notifyModal').remove()" style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">&times;</button>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            ${(totalActiveCount > 0 && activeTab !== 'transfers') ? `
+                                <button onclick="acknowledgeAllNotifications('${activeTab}')" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #6ee7b7; padding: 6px 14px; border-radius: 10px; cursor: pointer; font-size: 0.85rem; font-weight: bold; display: flex; align-items: center; gap: 6px; transition: 0.2s;" onmouseover="this.style.background='rgba(16, 185, 129, 0.35)'" onmouseout="this.style.background='rgba(16, 185, 129, 0.2)'">
+                                    <span>✔️</span> استلام وقراءة الكل
+                                </button>
+                            ` : ''}
+                            <button onclick="document.getElementById('notifyModal').remove()" style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">&times;</button>
+                        </div>
                     </div>
 
                     <!-- Custom Tabs (5 تبويبات مخصصة وشاملة) -->
@@ -528,7 +543,7 @@
             const timeExpired = diffDays >= 30;
 
             if (timeExpired) {
-                showLockScreen("انتهت الفترة التجريبية.. تواصل مع عمرو إيهاب 01099195060");
+                showLockScreen("انتهت الفترة التجريبية.. تواصل مع عمرو إيهاب 01006825905");
                 return false;
             } else {
                 if (trialBanner) {
@@ -995,14 +1010,26 @@
                         const price = parseFloat(item.price || item.costPrice || item.purchasePrice || 0);
                         const total = qty * price;
                         totalValue += total;
-                        const sSize = item.size || item.selectedSize || '-';
-                        const sColor = item.color || item.selectedColor || '-';
+                        let sSize = item.size || item.selectedSize || '';
+                        let sColor = item.color || item.selectedColor || '';
+
+                        if (!sSize && item.name) {
+                            const pInfo = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB.find(p => p.id === item.id || p.name === item.name) : null;
+                            if (pInfo && pInfo.variants && pInfo.variants.length > 0) {
+                                sSize = pInfo.variants[0].size || '';
+                                sColor = pInfo.variants[0].color || '';
+                            }
+                        }
+
+                        const displaySize = (sSize && sSize !== '-') ? sSize : 'عام';
+                        const displayColor = (sColor && sColor !== '-') ? sColor : 'عام';
+
                         rowsHtml += `
                             <tr>
                                 <td style="padding: 6px 8px; border: 1px solid #000;">${idx + 1}</td>
                                 <td style="text-align:right; padding: 6px 10px; border: 1px solid #000; font-weight:bold;">${item.name}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#047857;">${sSize}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#1d4ed8;">${sColor}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#047857;">${displaySize}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#1d4ed8;">${displayColor}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${qty} ${item.unit || ''}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #000;">${price.toFixed(2)}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${total.toFixed(2)}</td>

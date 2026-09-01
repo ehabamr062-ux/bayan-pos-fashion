@@ -612,7 +612,7 @@ function exportInvoiceDataToExcel(type, fileName, customItems) {
                 const ws = XLSXLib.utils.json_to_sheet(items);
                 ws['!dir'] = 'rtl';
                 const colWidths = Object.keys(items[0]).map(key => ({
-                    wch: Math.max(key.length + 6, ...items.map(row => String(row[key] || '').length + 2))
+                    wch: items.reduce((maxW, row) => Math.max(maxW, String(row[key] || '').length + 2), key.length + 6)
                 }));
                 ws['!cols'] = colWidths;
 

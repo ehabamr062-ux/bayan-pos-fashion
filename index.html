@@ -6590,6 +6590,43 @@
                                 </div>
                             </div>
 
+                            <!-- كارت 3: سياسة تسعير التحويل المخزني والخصوصية -->
+                            <div class="settings-modern-card" style="margin-top: 15px; border-right: 5px solid #0284c7; background: #ffffff;">
+                                <div class="settings-card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 14px;">
+                                    <h3 class="settings-card-title" style="color: #0369a1; font-weight: 900; display: flex; align-items: center; gap: 8px;">
+                                        <span>🚚</span> سياسة تسعير التحويل المخزني والخصوصية
+                                    </h3>
+                                    <span style="background: #e0f2fe; color: #0284c7; font-size: 0.78rem; font-weight: 800; padding: 4px 10px; border-radius: 8px; border: 1px solid #bae6fd;">
+                                        🔒 حماية سرية الأسعار والأرباح
+                                    </span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items: center;">
+                                    <div>
+                                        <label style="display: block; margin-bottom: 6px; color: #1e293b; font-size: 0.88rem; font-weight: 900;">
+                                            نوع السعر المعتمد في شاشة وإيصالات التحويل:
+                                        </label>
+                                        <select id="settingsTransferPriceType"
+                                            style="width: 100%; height: 44px; border-radius: 10px; border: 2px solid #0284c7; background: #f0f9ff; padding: 0 12px; font-weight: 900; font-size: 0.95rem; color: #0369a1; outline: none; cursor: pointer; transition: 0.2s;"
+                                            onchange="saveTransferPriceTypeSetting(this.value)">
+                                            <option value="cost">🏷️ سعر التكلفة (Cost Price) - [الافتراضي للمدير]</option>
+                                            <option value="retail">🛍️ سعر البيع القطاعي (Retail Price)</option>
+                                            <option value="wholesale">📦 سعر البيع الجملة (Wholesale Price)</option>
+                                        </select>
+                                        <p style="color: #64748b; font-size: 0.78rem; margin: 6px 0 0 0; line-height: 1.4; font-weight: 600;">
+                                            💡 يحدد نوع السعر المعروض تلقائياً عند إضافة الأصناف في إذن التحويل لعدم كشف سعر التكلفة والأرباح للموظفين.
+                                        </p>
+                                    </div>
+                                    <div style="background: #f8fafc; padding: 14px; border-radius: 12px; border: 1.5px dashed #cbd5e1;">
+                                        <div style="font-weight: 900; font-size: 0.84rem; color: #0f172a; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                            <span>🛡️</span> فائدة الخصوصية للمحل:
+                                        </div>
+                                        <div style="font-size: 0.78rem; color: #475569; line-height: 1.5; font-weight: 600;">
+                                            عند اختيار (سعر القطاعي أو الجملة)، ستظهر شاشة التحويل والإذن المطبوع بالأسعار المحددة فقط دون كشف رأس مال وتكلفة البضاعة للكاشير أو أمين المخزن أو السائق.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
 
@@ -6747,25 +6784,25 @@
                                     </div>
                                 </div>
                                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 10px;">
-                                    <button type="button" id="bc-preset-38-25" class="bc-preset-btn" onclick="applyBarcodePreset(38, 25, 0, 20, this)"
+                                    <button type="button" id="bc-preset-38-25" class="bc-preset-btn" onclick="applyBarcodePreset(38, 25, 0, 16, this)"
                                         style="padding: 12px 14px; border-radius: 14px; background: #ffffff; border: 2px solid #e2e8f0; color: #1e293b; font-weight: 900; font-size: 0.88rem; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); transition: 0.2s; position: relative;">
                                         <span class="preset-badge" style="position: absolute; top: 6px; left: 8px; font-size: 0.9rem; display: none;">✅</span>
                                         <span>🏷️ استيكر مقاسات صغير</span>
-                                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">38 × 25 مم</span>
+                                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">38 × 25 مم (شائع للملابس)</span>
                                     </button>
-                                    <button type="button" id="bc-preset-50-25" class="bc-preset-btn" onclick="applyBarcodePreset(50, 25, 0, 24, this)"
+                                    <button type="button" id="bc-preset-50-25" class="bc-preset-btn" onclick="applyBarcodePreset(50, 25, 0, 20, this)"
                                         style="padding: 12px 14px; border-radius: 14px; background: #ffffff; border: 2px solid #e2e8f0; color: #1e293b; font-weight: 900; font-size: 0.88rem; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); transition: 0.2s; position: relative;">
                                         <span class="preset-badge" style="position: absolute; top: 6px; left: 8px; font-size: 0.9rem; display: none;">✅</span>
                                         <span>🏷️ استيكر وسط قياسي</span>
-                                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">50 × 25 مم (افتراضي)</span>
+                                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">50 × 25 مم</span>
                                     </button>
-                                    <button type="button" id="bc-preset-50-30" class="bc-preset-btn" onclick="applyBarcodePreset(50, 30, 0, 28, this)"
+                                    <button type="button" id="bc-preset-50-30" class="bc-preset-btn" onclick="applyBarcodePreset(50, 30, 0, 22, this)"
                                         style="padding: 12px 14px; border-radius: 14px; background: #ffffff; border: 2px solid #e2e8f0; color: #1e293b; font-weight: 900; font-size: 0.88rem; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); transition: 0.2s; position: relative;">
                                         <span class="preset-badge" style="position: absolute; top: 6px; left: 8px; font-size: 0.9rem; display: none;">✅</span>
                                         <span>🏷️ استيكر عريض</span>
                                         <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">50 × 30 مم</span>
                                     </button>
-                                    <button type="button" id="bc-preset-40-60" class="bc-preset-btn" onclick="applyBarcodePreset(40, 60, 0, 35, this)"
+                                    <button type="button" id="bc-preset-40-60" class="bc-preset-btn" onclick="applyBarcodePreset(40, 60, 0, 28, this)"
                                         style="padding: 12px 14px; border-radius: 14px; background: #ffffff; border: 2px solid #e2e8f0; color: #1e293b; font-weight: 900; font-size: 0.88rem; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); transition: 0.2s; position: relative;">
                                         <span class="preset-badge" style="position: absolute; top: 6px; left: 8px; font-size: 0.9rem; display: none;">✅</span>
                                         <span>👔 كارت تيكت معلق Hangtag</span>
@@ -6924,44 +6961,53 @@
 
                     <!-- محتوى التبويب: سلة المحذوفات الذكية (Trash Bin) -->
                     <div id="set-tab-trash" class="settings-tab-content hidden">
-                        <div style="max-width: 1050px; margin: 0 auto; direction: rtl; text-align: right;">
+                        <div style="max-width: 1100px; margin: 0 auto; direction: rtl; text-align: right;">
                             
                             <div class="settings-modern-card" style="margin-bottom: 0;">
-                                <div class="settings-card-header">
+                                <div class="settings-card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                                     <div>
-                                        <h3 class="settings-card-title">
-                                            <span>🗑️</span> سلة المحذوفات الذكية
+                                        <h3 class="settings-card-title" style="display: flex; align-items: center; gap: 10px; margin: 0;">
+                                            <span style="font-size: 1.4rem;">🗑️</span> سلة المحذوفات الذكية
+                                            <span id="trashCountBadge" style="background: linear-gradient(135deg, #ef4444, #dc2626); color: #fff; font-size: 0.78rem; font-weight: 900; padding: 3px 12px; border-radius: 20px; box-shadow: 0 2px 6px rgba(239,68,68,0.35); display: inline-block;">
+                                                0 عنصر
+                                            </span>
                                         </h3>
-                                        <span style="color: #64748b; font-size: 0.78rem; font-weight: 700; display: block; margin-top: 3px;">
-                                            استعراض واستعادة الأصناف والفواتير المحذوفة مؤقتاً بأمان
+                                        <span style="color: #64748b; font-size: 0.8rem; font-weight: 700; display: block; margin-top: 4px;">
+                                            استعراض واستعادة الأصناف والفواتير المحذوفة مؤقتاً بأمان وسهولة
                                         </span>
                                     </div>
-                                    <div style="display: flex; gap: 8px;">
+                                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                        <!-- حقل البحث السريع في السلة -->
+                                        <div style="position: relative;">
+                                            <input type="text" id="trashSearchInput" oninput="trashManager.renderTrashTable()" placeholder="🔍 بحث في السلة (اسم / نوع / مخزن)..." style="padding: 7px 14px; border: 1.5px solid #cbd5e1; border-radius: 10px; font-size: 0.82rem; font-weight: bold; width: 230px; background: #fff; color: #1e293b; outline: none; transition: 0.2s;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#cbd5e1'">
+                                        </div>
                                         <button type="button" onclick="trashManager.loadTrash()"
-                                            style="background: #f8fafc; color: #334155; border: 1.5px solid #cbd5e1; padding: 6px 14px; border-radius: 8px; font-weight: 800; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                            style="background: #f8fafc; color: #334155; border: 1.5px solid #cbd5e1; padding: 7px 16px; border-radius: 10px; font-weight: 800; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#f8fafc'">
                                             🔄 تحديث السلة
                                         </button>
                                         <button type="button" onclick="trashManager.emptyTrash()"
-                                            style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border: none; padding: 6px 14px; border-radius: 8px; font-weight: 800; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 10px rgba(239, 68, 68, 0.25);">
+                                            style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border: none; padding: 7px 16px; border-radius: 10px; font-weight: 800; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25); transition: 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
                                             ⚠️ إفراغ السلة
                                         </button>
                                     </div>
                                 </div>
 
-                                <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px;">
+                                <!-- جدول المحذوفات بارتفاع ثابت وشريط تمرير رأسي أنيق -->
+                                <div style="max-height: 540px; overflow-y: auto; overflow-x: auto; border: 1.5px solid #e2e8f0; border-radius: 14px; box-shadow: inset 0 2px 5px rgba(0,0,0,0.02);" class="fast-scrollbar">
                                     <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 0.88rem;">
-                                        <thead style="background: #f8fafc; border-bottom: 1.5px solid #e2e8f0;">
+                                        <thead style="background: #f8fafc; border-bottom: 2px solid #cbd5e1; position: sticky; top: 0; z-index: 2; box-shadow: 0 2px 4px rgba(0,0,0,0.04);">
                                             <tr>
-                                                <th style="padding: 10px 14px; color: #475569; font-weight: 800;">نوع العنصر</th>
-                                                <th style="padding: 10px 14px; color: #475569; font-weight: 800;">اسم / بيان العنصر</th>
-                                                <th style="padding: 10px 14px; color: #475569; font-weight: 800;">حذف بواسطة</th>
-                                                <th style="padding: 10px 14px; color: #475569; font-weight: 800;">تاريخ الحذف</th>
-                                                <th style="padding: 10px 14px; color: #475569; font-weight: 800; text-align: center;">الإجراءات</th>
+                                                <th style="padding: 11px 14px; color: #334155; font-weight: 900; background: #f8fafc; white-space: nowrap;">نوع العنصر</th>
+                                                <th style="padding: 11px 14px; color: #334155; font-weight: 900; background: #f8fafc;">اسم / بيان العنصر</th>
+                                                <th style="padding: 11px 14px; color: #334155; font-weight: 900; background: #f8fafc; text-align: center; white-space: nowrap;">🏢 المخزن</th>
+                                                <th style="padding: 11px 14px; color: #334155; font-weight: 900; background: #f8fafc; white-space: nowrap;">حذف بواسطة</th>
+                                                <th style="padding: 11px 14px; color: #334155; font-weight: 900; background: #f8fafc; white-space: nowrap;">تاريخ الحذف</th>
+                                                <th style="padding: 11px 14px; color: #334155; font-weight: 900; text-align: center; background: #f8fafc; white-space: nowrap;">الإجراءات</th>
                                             </tr>
                                         </thead>
                                         <tbody id="trashTableBody">
                                             <tr>
-                                                <td colspan="5" style="text-align: center; padding: 30px; color: #94a3b8; font-weight: 700;">
+                                                <td colspan="6" style="text-align: center; padding: 35px; color: #94a3b8; font-weight: 700;">
                                                     ⏳ جاري تحميل عناصر السلة...
                                                 </td>
                                             </tr>
@@ -7034,7 +7080,7 @@
                                     <p style="margin: 0 0 14px; opacity: 0.9; line-height: 1.6; font-size: 0.85rem; font-weight: 700;">
                                         نحن ملتزمون بتقديم تجربة برمجية فريدة ومتخصصة في أنشطة الملابس والموضة. تواصل معنا مباشرة لطلب أي ميزات جديدة أو دعم فني فوري.
                                     </p>
-                                    <a href="https://wa.me/201099195060" target="_blank"
+                                    <a href="https://wa.me/201006825905" target="_blank"
                                         style="text-decoration: none; background: #22c55e; color: white; padding: 8px 18px; border-radius: 10px; font-weight: 900; display: inline-flex; align-items: center; gap: 6px; font-size: 0.88rem; box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);">
                                         <span>💬</span> واتساب (عمرو إيهاب)
                                     </a>
@@ -9716,7 +9762,7 @@
                                 oninput="handleTransferProductSearch(this.value)"
                                 onfocus="handleTransferProductSearch(this.value)">
                             <div id="transferSearchResults" class="search-results hidden"
-                                style="position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: #ffffff; z-index: 10010; border: 1.5px solid #cbd5e1; border-radius: 14px; padding: 8px; max-height: 320px; overflow-y: auto; overflow-x: hidden; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(2, 132, 199, 0.08); width: 100%; box-sizing: border-box;">
+                                style="position: absolute; top: calc(100% + 6px); right: 0; background: #ffffff; z-index: 10010; border: 2px solid #0284c7; border-radius: 16px; padding: 10px; max-height: 380px; overflow-y: auto; overflow-x: hidden; box-shadow: 0 25px 60px rgba(15, 23, 42, 0.3), 0 0 0 1px rgba(2, 132, 199, 0.15); width: 620px; max-width: 85vw; box-sizing: border-box;">
                             </div>
                         </div>
                     </div>
@@ -10074,7 +10120,7 @@
 
     <!-- نافذة التنبيهات الموحدة (Unified Alert Modal) -->
     <div id="alertModal" class="confirm-modal-overlay hidden"
-        style="z-index: 99999999 !important;">
+        style="z-index: 2147483647 !important;">
         <div class="alert-card" style="position:relative;">
             <button onclick="closeCustomAlert()"
                 style="position: absolute; top: 10px; left: 10px; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #ef4444; font-weight: bold; padding: 5px;">✕</button>
@@ -10090,7 +10136,7 @@
 
     <!-- نافذة مدخلات مخصصة (Custom Prompt Modal) -->
     <div id="customPromptModal" class="confirm-modal-overlay hidden"
-        style="z-index: 99999999 !important;">
+        style="z-index: 2147483647 !important;">
         <div class="alert-card"
             style="position:relative; background: white; padding: 25px; border-radius: 15px; width: 400px; max-width: 90%; text-align: center;">
             <div class="alert-icon" style="font-size: 2.5rem; margin-bottom: 15px;">❓</div>
@@ -10110,7 +10156,7 @@
     </div>
 
     <!-- نافذة تأكيد الإغلاق (Unsaved Data Modal) -->
-    <div id="confirmModal" class="confirm-modal-overlay hidden">
+    <div id="confirmModal" class="confirm-modal-overlay hidden" style="z-index: 2147483647 !important;">
         <div class="confirm-modal-box">
             <h3 style="margin-top:0; color:var(--box-red);">⚠️ تـنـبـيه !</h3>
             <p style="margin:20px 0; color:#333; font-weight: bold; font-size: 1.2rem;">هل تريد حفظ الفاتورة؟</p>
@@ -10910,7 +10956,7 @@
 
         <!-- أزرار التحكم السريع -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px;">
-            <div onclick="changeWallpaper('none')"
+            <div id="wp-btn-none" onclick="changeWallpaper('none')"
                 style="background: #eee; height: 90px; border-radius: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; border: 2px dashed #999; font-weight: 900; color: #444; transition: 0.3s;">
                 <span style="font-size: 1.5rem;">🚫</span> الأساسي (بدون خلفية)
             </div>
