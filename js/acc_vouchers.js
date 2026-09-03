@@ -525,9 +525,10 @@
                         .summary-table th {
                             border: 1px solid #000;
                             padding: 4px 2px;
-                            font-size: 10px;
+                            font-size: 11px;
                             font-weight: 900;
-                            background: #f1f5f9;
+                            color: #000 !important;
+                            background: #ffffff;
                         }
                         .summary-table td {
                             border: 1px solid #000;
@@ -748,9 +749,10 @@
                         .summary-table th {
                             border: 1px solid #000;
                             padding: 4px 2px;
-                            font-size: 10px;
+                            font-size: 11px;
                             font-weight: 900;
-                            background: #f1f5f9;
+                            color: #000 !important;
+                            background: #ffffff;
                         }
                         .summary-table td {
                             border: 1px solid #000;

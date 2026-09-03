@@ -591,9 +591,14 @@ async function saveSalesReturn(force = false, accountChecked = false) {
             const cleanStr = (s) => (s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
             for (const item of returnCart) {
                 const itemClean = cleanStr(item.name);
+                const itemSize = (item.selectedSize || item.size || '').trim();
+                const itemColor = (item.selectedColor || item.color || '').trim();
+
                 const origItems = transactions.filter(t => 
                     String(t.invoiceId) === String(originalInvoiceId) && 
                     (cleanStr(t.product) === itemClean || cleanStr(t.productName) === itemClean || (item.id && (t.productId == item.id || t.product == item.id))) && 
+                    (!itemSize || (t.size || t.selectedSize || '').trim() === itemSize) &&
+                    (!itemColor || (t.color || t.selectedColor || '').trim() === itemColor) &&
                     t.type && t.type.includes('بيع') && !t.type.includes('مرتجع')
                 );
                 
@@ -603,6 +608,8 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                     const otherReturns = transactions.filter(t => 
                         String(t.originalInvoiceId) === String(originalInvoiceId) && 
                         (cleanStr(t.product) === itemClean || cleanStr(t.productName) === itemClean || (item.id && (t.productId == item.id || t.product == item.id))) && 
+                        (!itemSize || (t.size || t.selectedSize || '').trim() === itemSize) &&
+                        (!itemColor || (t.color || t.selectedColor || '').trim() === itemColor) &&
                         t.type && t.type.includes('مرتجع') &&
                         (!isEditMode || String(t.invoiceId) !== String(editingInvoiceId))
                     );
@@ -610,10 +617,11 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                     const maxAllowed = Math.max(0, totalSoldQty - alreadyReturned);
 
                     if (item.qty > maxAllowed) {
+                        const varLabel = (itemSize || itemColor) ? ` (${[itemSize, itemColor].filter(Boolean).join(' - ')})` : '';
                         showCustomAlert({
                             type: 'error',
                             titleText: '⚠️ خطأ في كمية المرتجع',
-                            msg: `الكمية المراد إرجاعها للصنف "<b>${item.name}</b>" هي (<b>${item.qty}</b>) وتتجاوز أقصى كمية مسموح بإرجاعها من الفاتورة الأصلية رقم #${originalInvoiceId} وهي (<b>${maxAllowed}</b>).`
+                            msg: `الكمية المراد إرجاعها للصنف "<b>${item.name}${varLabel}</b>" هي (<b>${item.qty}</b>) وتتجاوز أقصى كمية مسموح بإرجاعها من الفاتورة الأصلية رقم #${originalInvoiceId} وهي (<b>${maxAllowed}</b>).`
                         });
                         return false;
                     }
@@ -762,6 +770,7 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                 product: item.name,
 
                 warehouse: activeWH,
+                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'),
 
                 unit: item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (item.unit || 'قطعة'),
 
@@ -852,6 +861,43 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 }
 
 function printReturnReceipt(type = 'sales') {
+    const isSalesRet = (type === 'sales' || type === 'salesReturn');
+    const partner = isSalesRet 
+        ? (document.getElementById('salesReturnPartnerDisplay')?.innerText || document.getElementById('salesReturnAccountInput')?.value || 'عميل نقدي')
+        : (document.getElementById('purReturnPartnerDisplay')?.innerText || document.getElementById('purReturnAccountInput')?.value || 'مورد نقدي');
+    const invId = isSalesRet 
+        ? (document.getElementById('salesReturnBadgeID')?.innerText || 'RET-01')
+        : (document.getElementById('purReturnBadgeID')?.innerText || 'PRET-01');
+    const cartArr = isSalesRet 
+        ? (typeof returnCart !== 'undefined' ? returnCart : []) 
+        : (typeof purReturnCart !== 'undefined' ? purReturnCart : []);
+
+    if (cartArr.length > 0 && typeof printInvoice === 'function') {
+        const subTotal = cartArr.reduce((sum, item) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
+        printInvoice({
+            invoiceNumber: invId,
+            invoiceType: isSalesRet ? 'مرتجع مبيعات' : 'مرتجع مشتريات',
+            docType: isSalesRet ? 'sales' : 'purchase',
+            date: new Date().toLocaleDateString('en-CA'),
+            time: new Date().toTimeString().slice(0, 5),
+            cashier: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : '',
+            customer: partner,
+            items: cartArr.map(it => ({
+                name: it.name || it.product,
+                qty: parseFloat(it.qty || 1),
+                price: parseFloat(it.price || 0),
+                total: parseFloat(it.total != null ? it.total : ((parseFloat(it.price) || 0) * (parseFloat(it.qty) || 1))),
+                unit: it.unit || 'قطعة',
+                size: it.size || it.selectedSize || (it.selectedVariant && it.selectedVariant.size) || '',
+                color: it.color || it.selectedColor || (it.selectedVariant && it.selectedVariant.color) || ''
+            })),
+            totalAmount: subTotal,
+            paid: subTotal,
+            deferred: 0
+        });
+        return;
+    }
+
     const sectionType = (type === 'purchase' || type === 'purchaseReturn') ? 'purchaseReturn' : 'salesReturn';
     if (typeof prepareBillHTML === 'function') prepareBillHTML(sectionType);
     const receiptArea = document.getElementById('receipt-area');
@@ -1141,9 +1187,14 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
             const cleanStr = (s) => (s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
             for (const item of purReturnCart) {
                 const itemClean = cleanStr(item.name);
+                const itemSize = (item.selectedSize || item.size || '').trim();
+                const itemColor = (item.selectedColor || item.color || '').trim();
+
                 const origItems = transactions.filter(t => 
                     String(t.invoiceId) === String(originalInvoiceId) && 
                     (cleanStr(t.product) === itemClean || cleanStr(t.productName) === itemClean || (item.id && (t.productId == item.id || t.product == item.id))) && 
+                    (!itemSize || (t.size || t.selectedSize || '').trim() === itemSize) &&
+                    (!itemColor || (t.color || t.selectedColor || '').trim() === itemColor) &&
                     t.type && t.type.includes('شراء') && !t.type.includes('مرتجع')
                 );
                 
@@ -1153,6 +1204,8 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                     const otherReturns = transactions.filter(t => 
                         String(t.originalInvoiceId) === String(originalInvoiceId) && 
                         (cleanStr(t.product) === itemClean || cleanStr(t.productName) === itemClean || (item.id && (t.productId == item.id || t.product == item.id))) && 
+                        (!itemSize || (t.size || t.selectedSize || '').trim() === itemSize) &&
+                        (!itemColor || (t.color || t.selectedColor || '').trim() === itemColor) &&
                         t.type && t.type.includes('مرتجع') &&
                         (!isEditMode || String(t.invoiceId) !== String(editingInvoiceId))
                     );
@@ -1160,10 +1213,11 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                     const maxAllowed = Math.max(0, totalBoughtQty - alreadyReturned);
 
                     if (item.qty > maxAllowed) {
+                        const varLabel = (itemSize || itemColor) ? ` (${[itemSize, itemColor].filter(Boolean).join(' - ')})` : '';
                         showCustomAlert({
                             type: 'error',
                             titleText: '⚠️ خطأ في كمية المرتجع',
-                            msg: `الكمية المراد إرجاعها للصنف "<b>${item.name}</b>" هي (<b>${item.qty}</b>) وتتجاوز أقصى كمية مسموح بإرجاعها من الفاتورة الأصلية رقم #${originalInvoiceId} وهي (<b>${maxAllowed}</b>).`
+                            msg: `الكمية المراد إرجاعها للصنف "<b>${item.name}${varLabel}</b>" هي (<b>${item.qty}</b>) وتتجاوز أقصى كمية مسموح بإرجاعها من الفاتورة الأصلية رقم #${originalInvoiceId} وهي (<b>${maxAllowed}</b>).`
                         });
                         return false;
                     }
@@ -1290,6 +1344,7 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                 product: item.name,
 
                 warehouse: activeWH,
+                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'),
 
                 unit: item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (p ? p.unit : 'قطعة'),
 

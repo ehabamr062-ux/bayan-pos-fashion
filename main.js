@@ -627,10 +627,21 @@ ipcMain.handle('get-master-db', () => {
     return server_hub.getMasterDbData();
 });
 
+ipcMain.handle('check-firewall-status', async () => {
+    const { exec } = require('child_process');
+    return new Promise((resolve) => {
+        exec('netsh advfirewall firewall show rule name="Bayan POS Local Server"', (err, stdout) => {
+            const isOpen = !err && stdout && stdout.includes('Enabled:') && stdout.includes('Yes') && stdout.includes('4545');
+            resolve({ success: true, isOpen: !!isOpen });
+        });
+    });
+});
+
 ipcMain.handle('fix-firewall-rule', async () => {
     const { exec } = require('child_process');
     return new Promise((resolve) => {
-        exec('powershell -Command "Start-Process cmd -ArgumentList \'/c netsh advfirewall firewall add rule name=\\\"Bayan POS Local Server\\\" dir=in action=allow protocol=TCP localport=4545 profile=any\' -Verb RunAs"', (err) => {
+        const cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList \'/c netsh advfirewall firewall delete rule name=\\\"Bayan POS Local Server\\\" & netsh advfirewall firewall add rule name=\\\"Bayan POS Local Server\\\" dir=in action=allow protocol=TCP localport=4545 profile=any\' -Verb RunAs"';
+        exec(cmd, (err) => {
             if (err) resolve({ success: false, message: err.message });
             else resolve({ success: true });
         });

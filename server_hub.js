@@ -97,15 +97,205 @@ function saveMasterDb() {
     }
 }
 
-function updateMasterDbData(db) {
+function mergeTransactions(existingList = [], incomingList = []) {
+    if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
+    if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+
+    const map = new Map();
+    const getKey = (t) => {
+        if (!t) return '';
+        if (t.id) return `id_${t.id}`;
+        const inv = t.invoiceId || '';
+        const prod = t.product || t.productName || '';
+        const s = t.size || t.selectedSize || '';
+        const c = t.color || t.selectedColor || '';
+        const d = t.dateISO || t.date || '';
+        const tm = t.timeISO || t.time || '';
+        const wh = t.warehouse || '';
+        const qty = t.qty || 0;
+        return `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+    };
+
+    existingList.forEach(t => {
+        const k = getKey(t);
+        if (k) map.set(k, t);
+    });
+
+    incomingList.forEach(t => {
+        const k = getKey(t);
+        if (!k) return;
+        if (!map.has(k)) {
+            map.set(k, t);
+        } else {
+            const existing = map.get(k);
+            map.set(k, { ...existing, ...t });
+        }
+    });
+
+    return Array.from(map.values());
+}
+
+function getTrashedProductKeys(trashList = []) {
+    const set = new Set();
+    if (!Array.isArray(trashList)) return set;
+    trashList.forEach(t => {
+        if (!t) return;
+        const d = t.originalData || t;
+        if (d.id) set.add(String(d.id));
+        if (d.barcode) set.add(String(d.barcode).trim());
+    });
+    return set;
+}
+
+function mergeProducts(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+    const trashedKeys = getTrashedProductKeys(trashList);
+
+    // إذا كان التحديث قادماً من السيرفر الرئيسي الماستر نفسه، فإن قائمته للأصناف هي المرجع الأساسي المعتمد للكتالوج
+    if (isMasterPush && Array.isArray(incomingList)) {
+        return incomingList.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+    }
+
+    if (!Array.isArray(existingList) || existingList.length === 0) {
+        return (Array.isArray(incomingList) ? incomingList : []).filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+    }
+    if (!Array.isArray(incomingList) || incomingList.length === 0) {
+        return existingList.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+    }
+
+    const map = new Map();
+    const getKey = (p) => p.id || p.barcode || p.name;
+
+    existingList.forEach(p => {
+        const k = getKey(p);
+        if (k && !trashedKeys.has(String(k))) map.set(String(k), p);
+    });
+
+    incomingList.forEach(p => {
+        const k = getKey(p);
+        if (!k || trashedKeys.has(String(k))) return;
+        const sKey = String(k);
+        if (!map.has(sKey)) {
+            map.set(sKey, p);
+        } else {
+            const existing = map.get(sKey);
+            const mergedWhStocks = { ...(existing.warehouseStocks || {}), ...(p.warehouseStocks || {}) };
+            
+            let mergedVariants = p.variants || existing.variants;
+            if (Array.isArray(existing.variants) && Array.isArray(p.variants)) {
+                const varMap = new Map();
+                existing.variants.forEach(v => varMap.set(`${v.size}_${v.color}`, v));
+                p.variants.forEach(v => {
+                    const vk = `${v.size}_${v.color}`;
+                    if (!varMap.has(vk)) {
+                        varMap.set(vk, v);
+                    } else {
+                        const ev = varMap.get(vk);
+                        const vWhStocks = { ...(ev.warehouseStocks || {}), ...(v.warehouseStocks || {}) };
+                        varMap.set(vk, { ...ev, ...v, warehouseStocks: vWhStocks });
+                    }
+                });
+                mergedVariants = Array.from(varMap.values());
+            }
+
+            map.set(sKey, {
+                ...existing,
+                ...p,
+                warehouseStocks: mergedWhStocks,
+                variants: mergedVariants
+            });
+        }
+    });
+
+    return Array.from(map.values()).filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+}
+
+function getTrashedAccountKeys(trashList = []) {
+    const set = new Set();
+    if (!Array.isArray(trashList)) return set;
+    trashList.forEach(t => {
+        if (!t) return;
+        const tType = String(t.type || '').toLowerCase();
+        if (tType === 'account' || tType === 'عميل' || tType === 'مورد') {
+            const d = t.originalData || t;
+            if (d.id) set.add(String(d.id));
+            if (d.name) set.add(String(d.name).trim());
+        }
+    });
+    return set;
+}
+
+function mergeAccounts(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+    const trashedKeys = getTrashedAccountKeys(trashList);
+
+    if (isMasterPush && Array.isArray(incomingList)) {
+        return incomingList.filter(a => a && !trashedKeys.has(String(a.id)) && !trashedKeys.has(String(a.name || '').trim()));
+    }
+
+    if (!Array.isArray(existingList) || existingList.length === 0) {
+        return (Array.isArray(incomingList) ? incomingList : []).filter(a => a && !trashedKeys.has(String(a.id)) && !trashedKeys.has(String(a.name || '').trim()));
+    }
+    if (!Array.isArray(incomingList) || incomingList.length === 0) {
+        return existingList.filter(a => a && !trashedKeys.has(String(a.id)) && !trashedKeys.has(String(a.name || '').trim()));
+    }
+
+    const map = new Map();
+    const getKey = (a) => a.id || a.code || a.name;
+
+    existingList.forEach(a => {
+        const k = getKey(a);
+        if (k && !trashedKeys.has(String(k))) map.set(String(k), a);
+    });
+
+    incomingList.forEach(a => {
+        const k = getKey(a);
+        if (!k || trashedKeys.has(String(k))) return;
+        const sKey = String(k);
+        if (!map.has(sKey)) {
+            map.set(sKey, a);
+        } else {
+            const existing = map.get(sKey);
+            map.set(sKey, { ...existing, ...a });
+        }
+    });
+
+    return Array.from(map.values()).filter(a => a && !trashedKeys.has(String(a.id)) && !trashedKeys.has(String(a.name || '').trim()));
+}
+
+function mergeTrash(existingList = [], incomingList = []) {
+    if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
+    if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+
+    const map = new Map();
+    const getKey = (item) => item.id || `${item.type}_${item.label}_${item.deletedAt}`;
+
+    existingList.forEach(it => {
+        const k = getKey(it);
+        if (k) map.set(String(k), it);
+    });
+
+    incomingList.forEach(it => {
+        const k = getKey(it);
+        if (!k) return;
+        const sKey = String(k);
+        if (!map.has(sKey)) {
+            map.set(sKey, it);
+        }
+    });
+
+    return Array.from(map.values());
+}
+
+function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
     if (db && typeof db === 'object') {
+        const mergedTrash = mergeTrash(masterDbData.trash || [], db.trash || []);
+        const isMaster = (isMasterServer === true || sourceDeviceId === 'DEV-HOST' || db.isMasterServer);
         masterDbData = {
-            products: Array.isArray(db.products) && db.products.length > 0 ? db.products : (masterDbData.products || []),
-            accounts: Array.isArray(db.accounts) && db.accounts.length > 0 ? db.accounts : (masterDbData.accounts || []),
-            transactions: Array.isArray(db.transactions) ? db.transactions : (masterDbData.transactions || []),
+            trash: mergedTrash,
+            products: mergeProducts(masterDbData.products || [], db.products || [], mergedTrash, isMaster),
+            accounts: mergeAccounts(masterDbData.accounts || [], db.accounts || [], mergedTrash, isMaster),
+            transactions: mergeTransactions(masterDbData.transactions || [], db.transactions || []),
             users: Array.isArray(db.users) && db.users.length > 0 ? db.users : (masterDbData.users || []),
             warehouses: Array.isArray(db.warehouses) && db.warehouses.length > 0 ? db.warehouses : (masterDbData.warehouses || []),
-            trash: Array.isArray(db.trash) ? db.trash : (masterDbData.trash || []),
             treasuryAudit: Array.isArray(db.treasuryAudit) ? db.treasuryAudit : (masterDbData.treasuryAudit || []),
             settings: db.settings && typeof db.settings === 'object' ? { ...masterDbData.settings, ...db.settings } : (masterDbData.settings || {}),
             lastUpdated: new Date().toISOString()
@@ -190,9 +380,9 @@ function startServer(appRootDir, onNotification) {
 
                 // ص. مزامنة البيانات الكاملة: إرسال تحديثات التابلت للسيرفر الرئيسي (Push Data)
                 if (pathname === '/api/sync/push' && req.method === 'POST') {
-                    const { db, sourceDeviceId } = jsonBody;
+                    const { db, sourceDeviceId, isMasterServer } = jsonBody;
                     if (db) {
-                        updateMasterDbData(db);
+                        updateMasterDbData(db, sourceDeviceId, isMasterServer);
                         if (typeof onNotification === 'function') {
                             onNotification('sync-data-pushed', { db, sourceDeviceId, clientIp });
                         }
@@ -206,10 +396,22 @@ function startServer(appRootDir, onNotification) {
                     return;
                 }
 
-                // ق. فتح منفذ السيرفر في جدار حماية ويندوز تلقائياً (Fix Firewall)
+                // ق1. فحص حالة منفذ جدار الحماية (Check Firewall Status)
+                if (pathname === '/api/check-firewall' && req.method === 'GET') {
+                    const { exec } = require('child_process');
+                    exec('netsh advfirewall firewall show rule name="Bayan POS Local Server"', (err, stdout) => {
+                        const isOpen = !err && stdout && stdout.includes('Enabled:') && stdout.includes('Yes') && stdout.includes('4545');
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, isOpen: !!isOpen }));
+                    });
+                    return;
+                }
+
+                // ق2. فتح منفذ السيرفر في جدار حماية ويندوز تلقائياً (Fix Firewall)
                 if (pathname === '/api/fix-firewall' && req.method === 'POST') {
                     const { exec } = require('child_process');
-                    exec('powershell -Command "Start-Process cmd -ArgumentList \'/c netsh advfirewall firewall add rule name=\\\"Bayan POS Local Server\\\" dir=in action=allow protocol=TCP localport=4545 profile=any\' -Verb RunAs"', (err) => {
+                    const cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList \'/c netsh advfirewall firewall delete rule name=\\\"Bayan POS Local Server\\\" & netsh advfirewall firewall add rule name=\\\"Bayan POS Local Server\\\" dir=in action=allow protocol=TCP localport=4545 profile=any\' -Verb RunAs"';
+                    exec(cmd, (err) => {
                         if (err) {
                             res.writeHead(500, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ success: false, message: err.message }));

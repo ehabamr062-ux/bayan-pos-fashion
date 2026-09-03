@@ -70,10 +70,42 @@ const trashManager = {
         try {
             await db.trash.add(trashItem);
             await this.loadTrash();
+            if (typeof saveData === 'function') await saveData();
             showToast(`🗑️ تم نقل "${label}" إلى سلة المحذوفات`, "info");
         } catch (error) {
             console.error("فشل النقل للسلة:", error);
             showToast("❌ فشل نقل العنصر لسلة المحذوفات", "error");
+        }
+    },
+
+    /**
+     * نقل كميات كبيرة دفعة واحدة إلى سلة المحذوفات فائق السرعة (Bulk Move to Trash)
+     */
+    async bulkMoveToTrash(items, type, warehouse = null) {
+        if (!Array.isArray(items) || items.length === 0) return;
+        const activeWH = warehouse || ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي');
+        const now = new Date().toISOString();
+        const deletedBy = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'نظام آلي';
+
+        const trashItems = items.map(item => ({
+            type: type,
+            label: item.name || item.label || 'عنصر محذوف',
+            warehouse: (type === 'account') ? 'كافة المخازن / عام' : (item.warehouse || activeWH),
+            originalData: item,
+            deletedAt: now,
+            deletedBy: deletedBy
+        }));
+
+        try {
+            if (window.db && window.db.trash) {
+                await window.db.trash.bulkAdd(trashItems);
+            }
+            if (!window.trashBin) window.trashBin = [];
+            window.trashBin.push(...trashItems);
+            window.trash = window.trashBin;
+            this.renderTrashTable();
+        } catch (error) {
+            console.error("فشل النقل الجماعي للسلة:", error);
         }
     },
 
@@ -344,6 +376,7 @@ const trashManager = {
             await db.trash.delete(Number(id) || id);
             window.trashBin = window.trashBin.filter(x => String(x.id) !== String(id));
             await this.loadTrash();
+            if (typeof saveData === 'function') await saveData();
 
             showToast(`✅ تم استعادة "${item.label || 'العنصر'}" بنجاح`, "success");
         } catch (error) {
@@ -368,6 +401,7 @@ const trashManager = {
                     try {
                         await db.trash.delete(id);
                         await this.loadTrash();
+                        if (typeof saveData === 'function') await saveData();
                         showToast("🗑️ تم الحذف النهائي بنجاح", "info");
                     } catch (error) {
                         console.error("فشل الحذف النهائي:", error);
@@ -379,6 +413,7 @@ const trashManager = {
             try {
                 await db.trash.delete(id);
                 await this.loadTrash();
+                if (typeof saveData === 'function') await saveData();
                 showToast("🗑️ تم الحذف النهائي بنجاح", "info");
             } catch (error) {
                 console.error("فشل الحذف النهائي:", error);
@@ -405,6 +440,7 @@ const trashManager = {
                         await db.trash.clear();
                         window.trashBin = [];
                         await this.loadTrash();
+                        if (typeof saveData === 'function') await saveData();
                         showToast("🧹 تم إفراغ السلة بنجاح", "success");
                     } catch (error) {
                         console.error("فشل إفراغ السلة:", error);
@@ -417,6 +453,7 @@ const trashManager = {
                 await db.trash.clear();
                 window.trashBin = [];
                 await this.loadTrash();
+                if (typeof saveData === 'function') await saveData();
                 showToast("🧹 تم إفراغ السلة بنجاح", "success");
             } catch (error) {
                 console.error("فشل إفراغ السلة:", error);

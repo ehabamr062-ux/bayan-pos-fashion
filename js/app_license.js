@@ -20,23 +20,25 @@
                 const uniqueIds = new Set(ops.map(t => t.invoiceId));
                 invoiceCount = uniqueIds.size;
             }
-            
+            const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : localStorage.getItem('bayan_trial_max_invoices')) || '0', 10);
+            invoiceCount = Math.max(invoiceCount, storedMax);
+
             const trialCountEl = document.getElementById('trialInvoicesCount');
             if (trialCountEl) trialCountEl.innerText = invoiceCount;
-            
+
             const trialStatusEl = document.getElementById('trialStatusText');
             if (trialStatusEl) {
                 if (currentPlan === 'باقة نسخة المجانية') {
                     if (invoiceCount >= 200) {
-                        trialStatusEl.innerText = 'الحالة: انتهت';
+                        trialStatusEl.innerText = 'الحالة: انتهت (200/200)';
                         trialStatusEl.style.color = '#ef4444'; // Red
                     } else {
-                        trialStatusEl.innerText = 'الحالة: نشطة';
+                        trialStatusEl.innerText = `الحالة: نشطة (متبقي ${200 - invoiceCount} فاتورة)`;
                         trialStatusEl.style.color = '#10b981'; // Green
                     }
                 } else {
-                    trialStatusEl.innerText = 'الحالة: تم استهلاك خطة النسخة التجريبية';
-                    trialStatusEl.style.color = '#64748b'; // Gray
+                    trialStatusEl.innerText = 'الحالة: تم الترقية لباقة مدفوعة ✓';
+                    trialStatusEl.style.color = '#10b981'; // Green
                 }
             }
 
@@ -523,8 +525,14 @@ window.isSubscriptionValid = function(actionType = 'invoice') {
             count = uniqueIds.size;
         }
         
+        const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : localStorage.getItem('bayan_trial_max_invoices')) || '0', 10);
+        const effectiveCount = Math.max(count, storedMax);
+        if (count > storedMax && typeof setStore === 'function') {
+            setStore('bayan_trial_max_invoices', String(count));
+        }
+        
         // إذا تم استهلاك 200 فاتورة، يتم قفل الفواتير والعمليات
-        if (count >= 200) return false;
+        if (effectiveCount >= 200) return false;
         
         if (actionType === 'receipt') {
             const rCount = transactions.filter(t => t.type && t.type.includes('قبض') && t.invoiceId).length;
@@ -607,6 +615,38 @@ window.enforceSubscriptionCheck = function(actionType = 'invoice') {
         return false;
     }
     return true;
+};
+
+// تسجيل استهلاك فاتورة جديدة في الباقة التجريبية مع حماية ضد حذف الفواتير القديمة
+window.registerTrialInvoiceCreation = function() {
+    try {
+        const currentPlan = window.getBayanPlan ? window.getBayanPlan() : 'باقة نسخة المجانية';
+        if (currentPlan === 'باقة نسخة المجانية') {
+            let count = 0;
+            if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+                const ops = transactions.filter(t => t.type && (t.type.includes('بيع') || t.type.includes('شراء')) && !t.type.includes('مرتجع') && t.invoiceId);
+                const uniqueIds = new Set(ops.map(t => t.invoiceId));
+                count = uniqueIds.size;
+            }
+            const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : localStorage.getItem('bayan_trial_max_invoices')) || '0', 10);
+            const newMax = Math.max(count, storedMax + 1);
+            if (typeof setStore === 'function') setStore('bayan_trial_max_invoices', String(newMax));
+            try { localStorage.setItem('bayan_trial_max_invoices', String(newMax)); } catch(e) {}
+
+            // تنبيهات مبكرة عند الاقتراب من الحد النهائي
+            if (newMax === 180 || newMax === 195) {
+                if (typeof showToast === 'function') {
+                    showToast(`⚠️ تنبيه: استهلكت ${newMax} من أصل 200 فاتورة تجريبية. يرجى الترقية قريباً!`, 'warning');
+                }
+            } else if (newMax >= 200) {
+                if (typeof showToast === 'function') {
+                    showToast(`🛑 تنبيه: لقد استهلكت كامل رصيد الفواتير المجانية (200/200). تم إيقاف حفظ الفواتير الجديدة.`, 'error');
+                }
+            }
+        }
+    } catch(e) {
+        console.error("Error in registerTrialInvoiceCreation:", e);
+    }
 };
 
 // ================= خدمة التراخيص المحمية (LicenseService) =================

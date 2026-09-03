@@ -57,6 +57,12 @@
                 return { total, paid, credit };
             }
 
+            const isNonCashMethod = (m) => {
+                if (!m) return false;
+                const str = String(m).toLowerCase();
+                return str.includes('بنك') || str.includes('تحويل') || str.includes('فيزا') || str.includes('شيك') || str.includes('شبكة') || str.includes('فودافون') || str.includes('انستاباي') || str.includes('إنستاباي') || str.includes('insta') || str.includes('محفظة');
+            };
+
             // 1. حساب الرصيد السابق الموحد لمجموع الحركات النقدية قبل تاريخ البداية
             let previousBalance = 0;
             const priorRaw = transactions.filter(t => t.dateISO && t.dateISO < fromDate);
@@ -66,19 +72,20 @@
                 const paid = g.paid || 0;
                 const total = g.total || 0;
                 const gType = g.type || '';
+                const isNonCash = isNonCashMethod(g.method);
 
                 if (gType.includes('قبض')) {
-                    previousBalance += total;
+                    if (!isNonCash) previousBalance += total;
                 } else if (gType.includes('صرف')) {
-                    previousBalance -= total;
+                    if (!isNonCash) previousBalance -= total;
                 } else if (gType.includes('بيع') && !gType.includes('مرتجع')) {
-                    previousBalance += paid;
+                    if (!isNonCash) previousBalance += paid;
                 } else if ((gType.includes('شراء') || gType.includes('مشتريات')) && !gType.includes('مرتجع')) {
-                    previousBalance -= paid;
+                    if (!isNonCash) previousBalance -= paid;
                 } else if (gType.includes('مرتجع بيع')) {
-                    previousBalance -= paid;
+                    if (!isNonCash) previousBalance -= paid;
                 } else if (gType.includes('مرتجع شراء')) {
-                    previousBalance += paid;
+                    if (!isNonCash) previousBalance += paid;
                 }
             });
 
@@ -94,8 +101,8 @@
             let salesReturn = { count: 0, total: 0, cash: 0, credit: 0 };
             let purchases = { count: 0, total: 0, cash: 0, credit: 0 };
             let purchasesReturn = { count: 0, total: 0, cash: 0, credit: 0 };
-            let receipts = { count: 0, total: 0 };
-            let disbursements = { count: 0, total: 0 };
+            let receipts = { count: 0, total: 0, cash: 0, nonCash: 0 };
+            let disbursements = { count: 0, total: 0, cash: 0, nonCash: 0 };
             let adjustments = { count: 0, total: 0 };
             let transfers = { count: 0, total: 0 };
 
@@ -142,9 +149,13 @@
                 } else if (gType.includes('قبض')) {
                     receipts.count++;
                     receipts.total += total;
+                    if (isNonCashMethod(g.method)) receipts.nonCash = (receipts.nonCash || 0) + total;
+                    else receipts.cash = (receipts.cash || 0) + total;
                 } else if (gType.includes('صرف')) {
                     disbursements.count++;
                     disbursements.total += total;
+                    if (isNonCashMethod(g.method)) disbursements.nonCash = (disbursements.nonCash || 0) + total;
+                    else disbursements.cash = (disbursements.cash || 0) + total;
                 } else if (gType.includes('تسوية')) {
                     adjustments.count++;
                     adjustments.total += total;
@@ -181,30 +192,32 @@
                 <tr><td>🔄 مرتجع مبيعات</td><td>${salesReturn.count}</td><td>${salesReturn.total.toFixed(2)}</td><td>${salesReturn.cash.toFixed(2)}</td><td>${salesReturn.credit.toFixed(2)}</td></tr>
                 <tr><td>🧺 مشتريات</td><td>${purchases.count}</td><td>${purchases.total.toFixed(2)}</td><td>${purchases.cash.toFixed(2)}</td><td>${purchases.credit.toFixed(2)}</td></tr>
                 <tr><td>🔙 مرتجع مشتريات</td><td>${purchasesReturn.count}</td><td>${purchasesReturn.total.toFixed(2)}</td><td>${purchasesReturn.cash.toFixed(2)}</td><td>${purchasesReturn.credit.toFixed(2)}</td></tr>
-                <tr><td>💰 قبض (إيرادات)</td><td>${receipts.count}</td><td>${receipts.total.toFixed(2)}</td><td>${receipts.total.toFixed(2)}</td><td>0.00</td></tr>
-                <tr><td>💸 صرف (مصروفات)</td><td>${disbursements.count}</td><td>${disbursements.total.toFixed(2)}</td><td>${disbursements.total.toFixed(2)}</td><td>0.00</td></tr>
+                <tr><td>💰 قبض (إيرادات)</td><td>${receipts.count}</td><td>${receipts.total.toFixed(2)}</td><td>${receipts.cash.toFixed(2)}</td><td>${receipts.nonCash.toFixed(2)}</td></tr>
+                <tr><td>💸 صرف (مصروفات)</td><td>${disbursements.count}</td><td>${disbursements.total.toFixed(2)}</td><td>${disbursements.cash.toFixed(2)}</td><td>${disbursements.nonCash.toFixed(2)}</td></tr>
                 <tr style="background: rgba(142, 68, 173, 0.05);"><td>⚖️ تسوية المخزن</td><td>${adjustments.count}</td><td>${adjustments.total.toFixed(2)}</td><td>-</td><td>-</td></tr>
                 <tr style="background: rgba(94, 51, 112, 0.1);"><td>🚚 تحويل مخزني</td><td>${transfers.count}</td><td>${transfers.total.toFixed(2)}</td><td>-</td><td>-</td></tr>
                 <tr style="font-weight:900; background:#f1f5f9; border-top:2px solid #cbd5e1;">
                     <td>📊 إجمالي الحركة والإيرادات (المبيعات + القبض)</td>
                     <td>${sales.count + receipts.count}</td>
                     <td style="color:#1e293b;">${(sales.total + receipts.total).toFixed(2)}</td>
-                    <td style="color:var(--main-green);">${(sales.cash + receipts.total).toFixed(2)}</td>
-                    <td style="color:#d97706;">${sales.credit.toFixed(2)}</td>
+                    <td style="color:var(--main-green);">${(sales.cash + receipts.cash).toFixed(2)}</td>
+                    <td style="color:#d97706;">${(sales.credit + receipts.nonCash).toFixed(2)}</td>
                 </tr>
             `;
 
-            // إجمالي اليومية الفعلي (ما يجب أن يكون في الدرج حالياً)
-            const dailyTotal = (sales.cash || 0) + (receipts.total || 0) + (purchasesReturn.cash || 0) 
-                             - (salesReturn.cash || 0) - (purchases.cash || 0) - (disbursements.total || 0);
+            // إجمالي اليومية الفعلي (ما يجب أن يكون في الدرج الورقي حالياً)
+            const cashReceipts = receipts.cash !== undefined ? receipts.cash : receipts.total;
+            const cashDisbursements = disbursements.cash !== undefined ? disbursements.cash : disbursements.total;
+
+            const dailyTotal = (sales.cash || 0) + (cashReceipts || 0) + (purchasesReturn.cash || 0) 
+                             - (salesReturn.cash || 0) - (purchases.cash || 0) - (cashDisbursements || 0);
                              
             const dailyTotalEl = document.getElementById('dailyTotalVal');
             if (dailyTotalEl) {
                 dailyTotalEl.innerText = dailyTotal.toLocaleString('en-US', { minimumFractionDigits: 2 });
                 const parentBadge = document.getElementById('dailyTotalSalesReceipts');
                 if (parentBadge) {
-                    // تحديث دالة إظهار التفاصيل إذا أردنا إرسال كل المعاملات لاحقاً
-                    parentBadge.onclick = () => showDailyTotalBreakdown(sales.cash || 0, receipts.total || 0, disbursements.total || 0, dailyTotal);
+                    parentBadge.onclick = () => showDailyTotalBreakdown(sales.cash || 0, cashReceipts || 0, cashDisbursements || 0, dailyTotal);
                 }
             }
 
@@ -216,8 +229,8 @@
                 lastUpdateEl.innerHTML = `آخر تحديث: <b style="color:var(--main-green);">${timeStr}</b> | م ${dateStr}`;
             }
 
-            // حساب القيم النهائية للخزينة (بدون تضمين تسويات المخزن لأنها لا تؤثر على الكاش)
-            const netCashMovement = (sales.cash + receipts.total + purchasesReturn.cash) - (purchases.cash + disbursements.total + salesReturn.cash);
+            // حساب القيم النهائية للخزينة (الكاش الفعلي بالدرج)
+            const netCashMovement = (sales.cash + cashReceipts + purchasesReturn.cash) - (purchases.cash + cashDisbursements + salesReturn.cash);
             const finalCashBalance = previousBalance + netCashMovement;
             const movementColor = netCashMovement >= 0 ? "var(--main-green)" : "var(--box-red)";
             const balanceColor = finalCashBalance >= 0 ? "var(--main-green)" : "var(--box-red)";
@@ -229,16 +242,18 @@
                 <tr><td>🔄 مرتجع مبيعات نقدي</td><td style="color:var(--box-red); font-weight:bold;">${salesReturn.cash.toFixed(2)}</td></tr>
                 <tr><td>🧺 مشتريات نقدية</td><td style="color:var(--box-red); font-weight:bold;">${purchases.cash.toFixed(2)}</td></tr>
                 <tr><td>🔙 مرتجع مشتريات نقدي</td><td style="color:var(--main-green); font-weight:bold;">${purchasesReturn.cash.toFixed(2)}</td></tr>
-                <tr><td>💰 قبض (إيرادات)</td><td style="color:var(--main-green); font-weight:bold;">${receipts.total.toFixed(2)}</td></tr>
-                <tr><td>💸 صرف (مصروفات)</td><td style="color:var(--box-red); font-weight:bold;">${disbursements.total.toFixed(2)}</td></tr>
+                <tr><td>💰 قبض نقدي (إيرادات الدرج)</td><td style="color:var(--main-green); font-weight:bold;">${cashReceipts.toFixed(2)}</td></tr>
+                ${(receipts.nonCash && receipts.nonCash > 0) ? `<tr><td>💳 قبض بنكي / إلكتروني</td><td style="color:#2563eb; font-weight:bold;">${receipts.nonCash.toFixed(2)}</td></tr>` : ''}
+                <tr><td>💸 صرف نقدي (مصروفات الدرج)</td><td style="color:var(--box-red); font-weight:bold;">${cashDisbursements.toFixed(2)}</td></tr>
+                ${(disbursements.nonCash && disbursements.nonCash > 0) ? `<tr><td>🏦 صرف بنكي / إلكتروني</td><td style="color:#7c3aed; font-weight:bold;">${disbursements.nonCash.toFixed(2)}</td></tr>` : ''}
                 <tr style="background: rgba(142, 68, 173, 0.05);"><td>⚖️ تسوية المخزن (غير مؤثرة على الكاش)</td><td style="color:${adjustments.total >= 0 ? 'var(--main-green)' : 'var(--box-red)'}; font-weight:bold;">${adjustments.total.toFixed(2)}</td></tr>
                 <tr style="background: rgba(94, 51, 112, 0.1);"><td>🚚 تحويل مخزني (غير مؤثر على الكاش)</td><td style="color:#5e3370; font-weight:bold;">${transfers.total.toFixed(2)}</td></tr>
                 <tr style="font-weight:bold; background:#f9f9f9; border-top:2px dashed #ccc;">
-                    <td>⏺️ رصيد سابق (افتتاحي)</td>
+                    <td>⏺️ رصيد سابق (افتتاحي نقدية)</td>
                     <td style="color:#2c3e50;">${previousBalance.toFixed(2)}</td>
                 </tr>
                 <tr style="background:rgba(211, 211, 211, 0.2); font-weight:900;">
-                    <td>🔄 صافي الحركة اليومية</td>
+                    <td>🔄 صافي الحركة النقدية بالدرج</td>
                     <td style="color:${movementColor}; font-size:1.1rem;">${netCashMovement.toFixed(2)}</td>
                 </tr>
                 <tr style="background:var(--main-blue); color:white; font-weight:bold; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">

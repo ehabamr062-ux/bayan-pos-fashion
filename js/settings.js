@@ -500,6 +500,13 @@ function renderUsersTable() {
             ? `<span style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; padding: 3px 10px; border-radius: 50px; font-size: 0.75rem; font-weight: 900;">❄️ مجمّد</span>`
             : `<span style="background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 3px 10px; border-radius: 50px; font-size: 0.75rem; font-weight: 900;">🟢 نشط</span>`;
 
+        let whBadge = `<span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">🌐 كافة المخازن</span>`;
+        if (u.warehouseScope === 'main') {
+            whBadge = `<span style="background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">🏢 الرئيسي فقط</span>`;
+        } else if (u.warehouseScope === 'specific' && u.assignedWarehouse) {
+            whBadge = `<span style="background: #fdf4ff; color: #a21caf; border: 1px solid #f5d0fe; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">🏬 ${u.assignedWarehouse}</span>`;
+        }
+
         rowsHtml += `
             <tr style="${isFrozen ? 'opacity: 0.65; background: #fff5f5;' : ''}">
                 <td style="font-weight: 800; color: #1e293b;">${u.name}</td>
@@ -511,6 +518,7 @@ function renderUsersTable() {
                         ${u.role === 'admin' ? '⭐ مدير نظام' : '🔹 موظف'}
                     </span>
                 </td>
+                <td style="text-align: center;">${whBadge}</td>
                 <td style="text-align: center;">${statusBadge}</td>
                 <td>
                     <div style="display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap;">
@@ -638,11 +646,35 @@ function executeCopyPermissions(targetIdx) {
     if (typeof logAuditAction === 'function') logAuditAction('نسخ صلاحيات', `من: ${sourceUser.name} إلى: ${targetUser.name}`);
 }
 
+function populateUserSpecificWarehouseSelect() {
+    const sel = document.getElementById('newUserSpecificWarehouse');
+    if (!sel) return;
+    const list = (typeof warehouses !== 'undefined' && Array.isArray(warehouses)) ? warehouses : [{ name: 'المخزن الرئيسي' }];
+    sel.innerHTML = list.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+}
+window.populateUserSpecificWarehouseSelect = populateUserSpecificWarehouseSelect;
+
+function onUserWarehouseScopeChange(scope) {
+    const grp = document.getElementById('newUserSpecificWarehouseGroup');
+    if (!grp) return;
+    if (scope === 'specific') {
+        populateUserSpecificWarehouseSelect();
+        grp.style.display = 'block';
+    } else {
+        grp.style.display = 'none';
+    }
+}
+window.onUserWarehouseScopeChange = onUserWarehouseScopeChange;
+
 function addUser() {
     const name = document.getElementById('newUserName').value.trim();
     const pin = document.getElementById('newUserPin').value.trim();
     const role = document.getElementById('newUserRole').value;
     const nfcUid = (document.getElementById('newUserNfcUid') ? document.getElementById('newUserNfcUid').value.trim() : '');
+    const warehouseScope = document.getElementById('newUserWarehouseScope') ? document.getElementById('newUserWarehouseScope').value : 'all';
+    const assignedWarehouse = (warehouseScope === 'specific' && document.getElementById('newUserSpecificWarehouse'))
+        ? document.getElementById('newUserSpecificWarehouse').value
+        : (warehouseScope === 'main' ? 'المخزن الرئيسي' : '');
 
     if (!name || !pin) return showToast("⚠️ يرجى إدخال اسم المستخدم ورمز الدخول", "error");
 
@@ -693,6 +725,8 @@ function addUser() {
         role, 
         nfcUid: nfcUid || '',
         isFrozen: isFrozen,
+        warehouseScope,
+        assignedWarehouse,
         permissions 
     };
 
@@ -712,7 +746,7 @@ function addUser() {
     renderUsersTable();
     resetUserForm();
     
-    if (typeof logAuditAction === 'function') logAuditAction(isUpdating ? 'تحديث موظف' : 'إضافة موظف جديد', `الاسم: ${newUser.name}, الدور: ${newUser.role}, كارت NFC: ${newUser.nfcUid || 'لا يوجد'}`);
+    if (typeof logAuditAction === 'function') logAuditAction(isUpdating ? 'تحديث موظف' : 'إضافة موظف جديد', `الاسم: ${newUser.name}, الدور: ${newUser.role}, المخزن: ${warehouseScope === 'specific' ? assignedWarehouse : (warehouseScope === 'main' ? 'الرئيسي فقط' : 'كافة المخازن')}`);
     if (typeof syncUsersToCloud === 'function') syncUsersToCloud();
 }
 
@@ -739,6 +773,17 @@ function editUser(idx) {
     if (document.getElementById('newUserNfcUid')) {
         document.getElementById('newUserNfcUid').value = u.nfcUid || '';
     }
+
+    const scopeEl = document.getElementById('newUserWarehouseScope');
+    if (scopeEl) {
+        scopeEl.value = u.warehouseScope || 'all';
+        onUserWarehouseScopeChange(scopeEl.value);
+        if (u.warehouseScope === 'specific' && u.assignedWarehouse) {
+            const specificSel = document.getElementById('newUserSpecificWarehouse');
+            if (specificSel) specificSel.value = u.assignedWarehouse;
+        }
+    }
+
     toggleAdminPermsUI(u.role);
 
     const p = u.permissions || {};
@@ -782,6 +827,11 @@ function resetUserForm() {
     document.getElementById('newUserRole').value = 'user';
     if (document.getElementById('newUserNfcUid')) {
         document.getElementById('newUserNfcUid').value = '';
+    }
+    const scopeEl = document.getElementById('newUserWarehouseScope');
+    if (scopeEl) {
+        scopeEl.value = 'all';
+        onUserWarehouseScopeChange('all');
     }
     document.querySelectorAll('#permissionsGrid input[type="checkbox"]').forEach(chk => {
         chk.checked = chk.id.includes('view') || chk.id.includes('reports') || chk.id.includes('add');
@@ -1011,6 +1061,16 @@ async function deleteWarehouse(idx) {
     }
 
     warehouses.splice(idx, 1);
+    if (typeof users !== 'undefined' && Array.isArray(users)) {
+        users.forEach(u => {
+            if (u.assignedWarehouse === targetWH.name) {
+                u.warehouseScope = 'all';
+                u.assignedWarehouse = '';
+            }
+        });
+        renderUsersTable();
+    }
+    if (typeof populateUserSpecificWarehouseSelect === 'function') populateUserSpecificWarehouseSelect();
     if (typeof saveData === 'function') saveData();
     renderWarehousesTable();
     if (typeof renderInventoryTable === 'function') renderInventoryTable();
@@ -1066,6 +1126,14 @@ function saveWarehouse() {
                             t.partner = name;
                             changed = true;
                         }
+                    }
+                });
+            }
+
+            if (typeof users !== 'undefined' && Array.isArray(users)) {
+                users.forEach(u => {
+                    if (u.assignedWarehouse === oldName) {
+                        u.assignedWarehouse = name;
                     }
                 });
             }
@@ -1172,22 +1240,113 @@ window.saveTransferPriceTypeSetting = async function(val) {
 function applyWarehouseSwitchFromSettings() {
     const val = document.getElementById('settingsActiveWarehouseSelect').value;
     if (currentUser) {
+        if (currentUser.role !== 'admin' && currentUser.warehouseScope === 'main' && val !== 'المخزن الرئيسي') {
+            return showToast("⛔ عذراً، حسابك مقيد بالمخزن الرئيسي فقط ولا يمكنك التبديل لمخزن آخر.", "error");
+        }
+        if (currentUser.role !== 'admin' && currentUser.warehouseScope === 'specific' && currentUser.assignedWarehouse && val !== currentUser.assignedWarehouse) {
+            return showToast(`⛔ عذراً، حسابك مقيد بـ (${currentUser.assignedWarehouse}) فقط ولا يمكنك التبديل لمخزن آخر.`, "error");
+        }
         currentUser.warehouseName = val;
         // ✅ أمان: نحفظ pin فقط (لا role أو permissions)
         setStore('pos_session_user', JSON.stringify({ pin: currentUser.pin, warehouseName: val }));
         const whHeader = document.getElementById('currentWarehouseName');
         if (whHeader) whHeader.innerText = ` 📦 ${val}`;
+        if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
         showToast(`تم تغيير المستودع النشط إلى: ${val}`, "success");
         updateWarehousesSummaryBoard();
         
         // تحديث كافة الجداول لعرض بيانات المخزن الجديد فوراً
         if (typeof renderInventoryTable === 'function') renderInventoryTable();
         if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+        if (typeof renderCart === 'function') renderCart();
         if (typeof renderPOSCart === 'function') renderPOSCart();
+        if (typeof renderProductsGrid === 'function') renderProductsGrid();
         if (typeof updateNotifications === 'function') updateNotifications();
         if (typeof window.checkIncomingTransfersAlert === 'function') window.checkIncomingTransfersAlert();
     }
 }
+
+window.updateHeaderWarehouseSelect = function() {
+    const sel = document.getElementById('headerActiveWarehouseSelect');
+    const lockBadge = document.getElementById('warehouseLockBadge');
+    if (!sel) return;
+
+    const allWh = ['المخزن الرئيسي'];
+    if (typeof warehouses !== 'undefined' && Array.isArray(warehouses)) {
+        warehouses.forEach(w => {
+            if (w.name && !allWh.includes(w.name)) allWh.push(w.name);
+        });
+    }
+
+    const currentWh = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
+        ? currentUser.warehouseName
+        : 'المخزن الرئيسي';
+
+    // فحص صلاحيات المستخدم الحالي
+    let isRestricted = false;
+    let allowedList = allWh;
+
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.role !== 'admin') {
+        if (currentUser.warehouseScope === 'main') {
+            isRestricted = true;
+            allowedList = ['المخزن الرئيسي'];
+        } else if (currentUser.warehouseScope === 'specific' && currentUser.assignedWarehouse) {
+            isRestricted = true;
+            allowedList = [currentUser.assignedWarehouse];
+        }
+    }
+
+    sel.innerHTML = allowedList.map(w => `<option value="${w}" style="background: #0f172a; color: #fff;" ${w === currentWh ? 'selected' : ''}>${w}</option>`).join('');
+    sel.value = currentWh;
+
+    if (isRestricted) {
+        sel.disabled = true;
+        sel.style.opacity = '0.85';
+        sel.style.cursor = 'not-allowed';
+        if (lockBadge) lockBadge.style.display = 'inline-block';
+    } else {
+        sel.disabled = false;
+        sel.style.opacity = '1';
+        sel.style.cursor = 'pointer';
+        if (lockBadge) lockBadge.style.display = 'none';
+    }
+
+    const legacySpan = document.getElementById('currentWarehouseName');
+    if (legacySpan) legacySpan.innerText = ` 📦 ${currentWh}`;
+};
+
+window.switchWarehouseFromHeader = function(val) {
+    if (!val) return;
+    if (typeof currentUser !== 'undefined' && currentUser) {
+        if (currentUser.role !== 'admin' && currentUser.warehouseScope === 'main' && val !== 'المخزن الرئيسي') {
+            window.updateHeaderWarehouseSelect();
+            return showToast("⛔ عذراً، حسابك مقيد بالمخزن الرئيسي فقط ولا يمكنك التبديل لمخزن آخر.", "error");
+        }
+        if (currentUser.role !== 'admin' && currentUser.warehouseScope === 'specific' && currentUser.assignedWarehouse && val !== currentUser.assignedWarehouse) {
+            window.updateHeaderWarehouseSelect();
+            return showToast(`⛔ عذراً، حسابك مقيد بـ (${currentUser.assignedWarehouse}) فقط ولا يمكنك التبديل لمخزن آخر.`, "error");
+        }
+
+        currentUser.warehouseName = val;
+        setStore('pos_session_user', JSON.stringify({ pin: currentUser.pin, warehouseName: val }));
+        window.updateHeaderWarehouseSelect();
+
+        const settingsSel = document.getElementById('settingsActiveWarehouseSelect');
+        if (settingsSel) settingsSel.value = val;
+
+        showToast(`🏬 تم تغيير المستودع النشط إلى: ${val}`, "success");
+        if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
+
+        // تحديث كافة الجداول لعرض بيانات المخزن الجديد فوراً
+        if (typeof renderInventoryTable === 'function') renderInventoryTable();
+        if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+        if (typeof renderCart === 'function') renderCart();
+        if (typeof renderPOSCart === 'function') renderPOSCart();
+        if (typeof renderProductsGrid === 'function') renderProductsGrid();
+        if (typeof updateNotifications === 'function') updateNotifications();
+        if (typeof window.checkIncomingTransfersAlert === 'function') window.checkIncomingTransfersAlert();
+    }
+};
 
 window.filterInventoryByWarehouse = function(whName) {
     if (!whName) return;

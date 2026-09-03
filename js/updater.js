@@ -11,12 +11,12 @@
 (function initAutoUpdater() {
     if (typeof window === 'undefined') return;
 
-    // 🛑 مفتاح التحديثات: معطل مؤقتاً لتفادي التقاط إصدارات السوبرماركت (v1.0.8) حتى تجهيز سيرفر الفاشون الجديد
-    const IS_UPDATER_ENABLED = false;
+    // 🚀 مفتاح نظام التحديثات التلقائية لنظام الفاشون (مربوط بمستودع bayan-pos-fashion)
+    const IS_UPDATER_ENABLED = true;
 
     // بيانات المستودع المربوط على GitHub Releases والرسائل السحابية
     const GITHUB_REPO_OWNER = 'ehabamr062-ux';
-    const GITHUB_REPO_NAME = 'Bayan-Pos-Fashion';
+    const GITHUB_REPO_NAME = 'bayan-pos-fashion';
     const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
     const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
     const GITHUB_BROADCAST_URL = `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/main/announcements.json`;
@@ -741,7 +741,7 @@
 
     window.checkCloudAnnouncements = async function () {
         try {
-            const url = 'https://raw.githubusercontent.com/ehabamr062-ux/Bayan-Pos-System/main/announcements.json?t=' + Date.now();
+            const url = GITHUB_BROADCAST_URL + '?t=' + Date.now();
             const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) return;
             const data = await res.json();

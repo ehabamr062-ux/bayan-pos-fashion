@@ -658,11 +658,27 @@ window.showVariantSelectionModal = showVariantSelectionModal;
 function renderVariantSelectElements(item, index, cartType = 'sales') {
     const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
     const variants = (pInfo && pInfo.variants && Array.isArray(pInfo.variants)) ? pInfo.variants : [];
+    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
 
     const currentSize = item.selectedSize || item.size || '';
     const currentColor = item.selectedColor || item.color || '';
 
-    // 1. خيارات المقاسات (Dropdown للمقاسات بدون أي شرطة)
+    // دالة مساعدة لحساب رصيد تشكيلة معينة في المخزن النشط
+    const getVarStockInWH = (s, c) => {
+        const v = variants.find(varObj => 
+            (!s || String(varObj.size || '').trim() === String(s).trim()) &&
+            (!c || String(varObj.color || '').trim() === String(c).trim())
+        );
+        if (!v) return 0;
+        if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[activeWH] !== undefined) {
+            return parseFloat(v.warehouseStocks[activeWH]) || 0;
+        } else if (activeWH === 'المخزن الرئيسي' || !v.warehouseStocks) {
+            return parseFloat(v.stock) || 0;
+        }
+        return 0;
+    };
+
+    // 1. خيارات المقاسات (Dropdown للمقاسات مع توضيح الرصيد المتاح)
     const availableSizes = [...new Set(variants.map(v => v.size).filter(s => s && String(s).trim() !== '' && String(s).trim() !== '-'))];
     if (currentSize && currentSize !== '-' && !availableSizes.includes(currentSize)) {
         availableSizes.unshift(currentSize);
@@ -674,9 +690,14 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
 
     let sizeElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
     if (availableSizes.length > 1) {
-        const sizeOptions = availableSizes.map(s => `<option value="${s}" ${(item.selectedSize || currentSize) === s ? 'selected' : ''}>${s}</option>`).join('');
+        const sizeOptions = availableSizes.map(s => {
+            const st = getVarStockInWH(s, currentColor);
+            const isSelected = (item.selectedSize || currentSize) === s;
+            const stockLabel = cartType === 'sales' ? ` (${st > 0 ? st : '0 ❌'})` : '';
+            return `<option value="${s}" ${isSelected ? 'selected' : ''} ${cartType === 'sales' && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${s}${stockLabel}</option>`;
+        }).join('');
         sizeElement = `<select onchange="updateItemVariantAttr(${index}, 'size', this.value, '${cartType}')" title="اختر المقاس"
-            style="width: 80px; max-width: 100%; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer; text-align: center;">
+            style="width: 90px; max-width: 100%; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer; text-align: center;">
             ${sizeOptions}
         </select>`;
     } else if (availableSizes.length === 1 || (currentSize && currentSize !== '-')) {
@@ -684,7 +705,7 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
         sizeElement = `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${displaySize}</span>`;
     }
 
-    // 2. خيارات الألوان (Dropdown للألوان بدون أي شرطة)
+    // 2. خيارات الألوان (Dropdown للألوان مع توضيح الرصيد المتاح)
     const availableColors = [...new Set(variants.map(v => v.color).filter(c => c && String(c).trim() !== '' && String(c).trim() !== '-'))];
     if (currentColor && currentColor !== '-' && !availableColors.includes(currentColor)) {
         availableColors.unshift(currentColor);
@@ -696,9 +717,14 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
 
     let colorElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
     if (availableColors.length > 1) {
-        const colorOptions = availableColors.map(c => `<option value="${c}" ${currentColor === c ? 'selected' : ''}>${c}</option>`).join('');
+        const colorOptions = availableColors.map(c => {
+            const st = getVarStockInWH(currentSize, c);
+            const isSelected = currentColor === c;
+            const stockLabel = cartType === 'sales' ? ` (${st > 0 ? st : '0 ❌'})` : '';
+            return `<option value="${c}" ${isSelected ? 'selected' : ''} ${cartType === 'sales' && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${c}${stockLabel}</option>`;
+        }).join('');
         colorElement = `<select onchange="updateItemVariantAttr(${index}, 'color', this.value, '${cartType}')" title="اختر اللون"
-            style="width: 80px; max-width: 100%; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer; text-align: center;">
+            style="width: 90px; max-width: 100%; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer; text-align: center;">
             ${colorOptions}
         </select>`;
     } else if (availableColors.length === 1 || (currentColor && currentColor !== '-')) {
@@ -721,6 +747,49 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
     const item = currentCart[index];
     if (!item) return;
 
+    const prevSize = item.selectedSize || item.size || '';
+    const prevColor = item.selectedColor || item.color || '';
+
+    let candidateSize = (attr === 'size') ? value : prevSize;
+    let candidateColor = (attr === 'color') ? value : prevColor;
+
+    // فحص المخزن النشط ورصيد المقاس/اللون المطلوب في حالة المبيعات لمنع بيع رصيد غير متاح
+    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+    const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
+
+    if (cartType === 'sales' && pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {
+        const matchedVar = pInfo.variants.find(v => 
+            (!candidateSize || String(v.size || '').trim() === String(candidateSize).trim()) && 
+            (!candidateColor || String(v.color || '').trim() === String(candidateColor).trim())
+        );
+
+        let candidateStock = 0;
+        if (matchedVar) {
+            if (matchedVar.warehouseStocks && typeof matchedVar.warehouseStocks === 'object' && matchedVar.warehouseStocks[activeWH] !== undefined) {
+                candidateStock = parseFloat(matchedVar.warehouseStocks[activeWH]) || 0;
+            } else if (activeWH === 'المخزن الرئيسي' || !matchedVar.warehouseStocks) {
+                candidateStock = parseFloat(matchedVar.stock) || 0;
+            } else {
+                candidateStock = 0;
+            }
+        }
+
+        const factor = parseFloat(item.unitFactor) || 1;
+        const requestedBaseQty = (parseFloat(item.qty) || 1) * factor;
+
+        if (candidateStock < requestedBaseQty) {
+            if (typeof showToast === 'function') {
+                showToast(`🚫 التشكيلة [${candidateSize || ''} ${candidateColor || ''}] غير متوفرة في مخزن (${activeWH})! الرصيد المتاح (${candidateStock}) فقط`, 'error');
+            }
+            if (typeof BayanBarcode !== 'undefined' && typeof BayanBarcode.playBeep === 'function') {
+                BayanBarcode.playBeep(false);
+            }
+            // إعادة رسم السلة للتراجع عن الاختيار غير المتاح في الـ select
+            renderCart();
+            return;
+        }
+    }
+
     if (attr === 'size') {
         item.selectedSize = value;
         item.size = value;
@@ -730,7 +799,6 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
     }
 
     // البحث عن التشكيلة المطابقة لتحديث السعر والباركود والرصيد المخزني الفعلي للتشكيلة الجديدة
-    const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
     if (pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {
         const sSize = String(item.selectedSize || item.size || '').trim();
         const sColor = String(item.selectedColor || item.color || '').trim();
@@ -746,14 +814,13 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
         if (matchedVariant) {
             if (matchedVariant.barcode) item.barcode = matchedVariant.barcode;
 
-            // تحديد المخزن النشط
-            const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
-
             let variantLiveStock = 0;
             if (matchedVariant.warehouseStocks && typeof matchedVariant.warehouseStocks === 'object' && matchedVariant.warehouseStocks[activeWH] !== undefined) {
                 variantLiveStock = parseFloat(matchedVariant.warehouseStocks[activeWH]) || 0;
             } else if (activeWH === 'المخزن الرئيسي' || !matchedVariant.warehouseStocks) {
                 variantLiveStock = parseFloat(matchedVariant.stock) || 0;
+            } else {
+                variantLiveStock = 0;
             }
 
             const factor = parseFloat(item.unitFactor) || 1;

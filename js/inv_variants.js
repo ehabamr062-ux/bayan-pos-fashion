@@ -205,8 +205,21 @@ async function executePrinting(modeOrTargets, copies = 1) {
             if (p) targets.push(p);
         });
     } else {
-        if (productsDB.length === 0) return showToast("⚠️ المخزن فارغ!", "error");
-        targets = [...productsDB];
+        // وضع كافة الأصناف: استرجاع كل الأصناف من قاعدة البيانات الحية (IndexedDB) لضمان جلب كل ما هو مسجل
+        if (typeof db !== 'undefined' && db.products) {
+            try {
+                const dbProds = await db.products.toArray();
+                if (Array.isArray(dbProds) && dbProds.length > 0) {
+                    targets = dbProds;
+                }
+            } catch(e) {
+                console.warn("DB load in executePrinting error:", e);
+            }
+        }
+        if (targets.length === 0) {
+            targets = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? [...productsDB] : [];
+        }
+        if (targets.length === 0) return showToast("⚠️ المخزن فارغ!", "error");
     }
 
     const bSettings = getBarcodeLabelSettings();
@@ -218,7 +231,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
     targets.forEach(p => {
         if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
             p.variants.forEach((v, vIdx) => {
-                let vBc = v.barcode || '';
+                let vBc = String(v.barcode || '').trim();
                 if (!vBc) {
                     vBc = generateVariantBarcode(v.size, v.color, vIdx + 1);
                     v.barcode = vBc;
@@ -235,13 +248,16 @@ async function executePrinting(modeOrTargets, copies = 1) {
                 });
             });
         } else {
-            const codeVal = p.code || p.barcode || p.id;
-            const barcodeVal = p.barcode || p.code || p.id;
+            let barcodeVal = String(p.barcode || p.code || '').trim();
+            if (!barcodeVal) {
+                barcodeVal = (typeof generateVariantBarcode === 'function') ? generateVariantBarcode('', '', 1) : ('20' + String(Date.now()).slice(-8));
+                p.barcode = barcodeVal;
+            }
             printableItems.push({
                 name: p.name,
                 size: p.size || '',
                 color: p.color || '',
-                code: codeVal,
+                code: p.code || barcodeVal,
                 barcode: barcodeVal,
                 price: parseFloat(p.price) || 0,
                 copies: copies
@@ -307,11 +323,10 @@ async function executePrinting(modeOrTargets, copies = 1) {
             labelsHtml += `
                 <div class="barcode-label">
                     ${bSettings.showShopName ? `<div class="shop-title">${shopName}</div>` : ''}
-                    ${(hasVariantInfo || (bSettings.showCode && item.code)) ? `
+                    ${hasVariantInfo ? `
                         <div class="meta-row">
                             ${item.size ? `<span class="size-badge">${item.size}</span>` : ''}
                             ${item.color ? `<span class="color-badge">${item.color}</span>` : ''}
-                            ${(bSettings.showCode && item.code) ? `<span class="code-badge">#${item.code}</span>` : ''}
                         </div>
                     ` : ''}
                     <div class="svg-wrap">
@@ -349,8 +364,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     print-color-adjust: exact !important; 
                 }
                 html, body {
-                    width: ${bSettings.width}mm;
-                    height: ${bSettings.height}mm;
+                    width: 100%;
                     margin: 0 !important;
                     padding: 0 !important;
                     font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
@@ -358,7 +372,6 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     text-align: center;
                     background: #ffffff;
                     color: #000000;
-                    overflow: hidden;
                 }
                 .label-container {
                     width: ${bSettings.width}mm;
@@ -377,7 +390,9 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     justify-content: center;
                     gap: 0.8mm;
                     page-break-after: always;
+                    break-after: page;
                     page-break-inside: avoid;
+                    break-inside: avoid;
                     overflow: hidden;
                     box-sizing: border-box;
                     text-align: center;
@@ -466,8 +481,27 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     white-space: nowrap;
                 }
                 @media print {
-                    html, body { width: ${bSettings.width}mm; height: ${bSettings.height}mm; margin: 0 !important; padding: 0 !important; }
-                    .barcode-label { border: none !important; box-shadow: none !important; }
+                    html, body { 
+                        width: 100% !important; 
+                        height: auto !important; 
+                        margin: 0 !important; 
+                        padding: 0 !important; 
+                        overflow: visible !important;
+                    }
+                    .label-container {
+                        width: ${bSettings.width}mm !important;
+                        margin: 0 auto !important;
+                    }
+                    .barcode-label { 
+                        width: ${bSettings.width}mm !important;
+                        height: ${bSettings.height}mm !important;
+                        border: none !important; 
+                        box-shadow: none !important; 
+                        page-break-after: always !important;
+                        break-after: page !important;
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
+                    }
                 }
             </style>
         </head>
@@ -518,6 +552,27 @@ function generateVariantBarcode(size = '', color = '', index = 1) {
     return candidate;
 }
 
+window.copyVariantBarcode = function(btn) {
+    const row = btn.closest('tr');
+    const inp = row ? row.querySelector('.var-barcode-input') : null;
+    if (inp && inp.value.trim()) {
+        const val = inp.value.trim();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(val).then(() => {
+                if (typeof showToast === 'function') showToast(`📋 تم نسخ باركود المقاس: ${val}`, 'success');
+            }).catch(() => {
+                inp.select();
+                document.execCommand('copy');
+                if (typeof showToast === 'function') showToast(`📋 تم نسخ باركود المقاس: ${val}`, 'success');
+            });
+        } else {
+            inp.select();
+            document.execCommand('copy');
+            if (typeof showToast === 'function') showToast(`📋 تم نسخ باركود المقاس: ${val}`, 'success');
+        }
+    }
+};
+
 function addVariantRow(size = '', color = '', barcode = '', stock = 1, price = null, wholesale = null, cost = null) {
     const tbody = document.getElementById('productVariantsTableBody');
     if (!tbody) return;
@@ -549,9 +604,16 @@ function addVariantRow(size = '', color = '', barcode = '', stock = 1, price = n
             <input type="text" class="search-input var-color-input" value="${color}" placeholder="مثال: أسود"
                 style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px;">
         </td>
-        <td>
-            <input type="text" class="search-input var-barcode-input" value="${autoBarcode}" placeholder="باركود القطعة"
-                style="height: 32px; font-family: monospace; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; letter-spacing: 0.5px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
+        <td style="min-width: 155px;">
+            <div style="display: flex; gap: 4px; align-items: center;">
+                <input type="text" class="search-input var-barcode-input" value="${autoBarcode}" placeholder="باركود القطعة" readonly
+                    onclick="this.select()"
+                    style="height: 32px; font-family: monospace; font-weight: 800; text-align: center; border: 1.5px solid #cbd5e1; border-radius: 6px; letter-spacing: 0.5px; font-size: 0.82rem; width: 100%; box-sizing: border-box; background: #f8fafc; color: #1e293b; cursor: default;"
+                    title="🔒 باركود فريد محمي تلقائياً - غير قابل للمسح أو التعديل العرضي">
+                <button type="button" onclick="copyVariantBarcode(this)" title="نسخ باركود هذا المقاس"
+                    style="padding: 0 7px; height: 32px; background: #f1f5f9; border: 1.5px solid #cbd5e1; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: inline-flex; align-items: center; justify-content: center; transition: 0.15s;"
+                    onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">📋</button>
+            </div>
         </td>
         <td>
             <input type="number" class="search-input var-stock-input" value="${effectiveStock}" min="0" data-orig-stock="${effectiveStock}"
@@ -1260,7 +1322,9 @@ function printProductVariantHangtags() {
                     align-items: center;
                     justify-content: space-between;
                     page-break-after: always;
+                    break-after: page;
                     page-break-inside: avoid;
+                    break-inside: avoid;
                     overflow: hidden;
                     border: 1px dashed #ccc;
                 }
@@ -1270,10 +1334,10 @@ function printProductVariantHangtags() {
                 .size-badge { font-size: 8pt; font-weight: 900; background: #000; color: #fff; padding: 0.5mm 2.5mm; border-radius: 2px; }
                 .color-badge { font-size: 7.5pt; font-weight: 800; color: #333; }
                 .price-badge { font-size: 9.5pt; font-weight: 900; color: #000; border: 1.5px solid #000; padding: 0.5mm 3.5mm; border-radius: 3px; line-height: 1; }
-                svg { max-width: 96%; height: 26px; margin: 0 auto; display: block; }
+                svg { max-width: 95%; height: 26px; margin: 0 auto !important; display: block !important; direction: ltr !important; }
                 @media print {
-                    html, body { width: ${bSettings.width || 50}mm; margin: 0 !important; padding: 0 !important; }
-                    .hangtag-label { border: none !important; box-shadow: none !important; }
+                    html, body { width: 100% !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+                    .hangtag-label { border: none !important; box-shadow: none !important; page-break-after: always !important; break-after: page !important; }
                 }
             </style>
         </head>
@@ -1307,12 +1371,14 @@ function printProductVariantHangtags() {
                 try {
                     window.JsBarcode(label.querySelector('svg'), String(t.barcode), {
                         format: "CODE128",
-                        width: 1.3,
+                        width: 1.25,
                         height: 24,
                         displayValue: true,
                         fontSize: 9,
+                        font: "Segoe UI, Arial, sans-serif",
+                        fontOptions: "bold",
                         textMargin: 1,
-                        margin: 0
+                        margin: 2
                     });
                 } catch(e) {
                     console.warn("JsBarcode error:", e);

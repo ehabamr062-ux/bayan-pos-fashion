@@ -1638,11 +1638,23 @@ async function savePurchase(force = false, accountChecked = false) {
                             (!sColor || String(v.color || '').trim() === sColor)
                         );
                         if (matchedVar) {
-                            matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
+                            const oldVarStock = (parseFloat(matchedVar.stock) || 0);
+                            matchedVar.stock = oldVarStock + baseQty;
                             if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                             matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
                             if (parseFloat(item.salePrice) > 0) {
                                 matchedVar.price = parseFloat(item.salePrice);
+                            }
+                            // 🌟 تحديث تكلفة المقاس المحدد (Variant Cost) بدقة
+                            if (itemUnitPriceBase > 0) {
+                                const oldVarCost = (matchedVar.cost !== undefined && !isNaN(parseFloat(matchedVar.cost)) && parseFloat(matchedVar.cost) > 0)
+                                    ? parseFloat(matchedVar.cost)
+                                    : (parseFloat(p.cost) || itemUnitPriceBase);
+                                if (oldVarStock > 0) {
+                                    matchedVar.cost = parseFloat((((oldVarStock * oldVarCost) + (baseQty * itemUnitPriceBase)) / (oldVarStock + baseQty)).toFixed(2));
+                                } else {
+                                    matchedVar.cost = parseFloat(itemUnitPriceBase.toFixed(2));
+                                }
                             }
                         }
                     } else if (parseFloat(item.salePrice) > 0) {
@@ -1775,6 +1787,7 @@ async function savePurchase(force = false, accountChecked = false) {
                 invoiceTaxType: (idx === 0) ? (document.getElementById('purchaseTaxType')?.value || 'val') : 'val',
 
                 warehouse: activeWH,
+                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'),
 
                 editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل بواسطة: ${(typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'مجهول'})` : '-'
 
@@ -1831,6 +1844,10 @@ async function savePurchase(force = false, accountChecked = false) {
 
         if (typeof saveData === 'function') {
             await saveData();
+        }
+
+        if (!isEditMode && typeof window.registerTrialInvoiceCreation === 'function') {
+            window.registerTrialInvoiceCreation();
         }
 
         if (typeof logAuditAction === 'function') {

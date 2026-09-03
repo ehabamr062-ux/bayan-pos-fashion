@@ -588,7 +588,12 @@
                         </td>
                         <td class="col-inv-4" style="font-weight:bold; ${isV(4) ? '' : 'display:none;'}">${displayProduct}</td>
                         <td class="col-inv-5" style="color:${profitColor}; font-weight:bold; ${isV(5) ? '' : 'display:none;'}">${profitText}</td>
-                        <td class="col-inv-6" style="${isV(6) ? '' : 'display:none;'}">${warehouse}</td>
+                        <td class="col-inv-6" style="${isV(6) ? '' : 'display:none;'}">
+                            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;">
+                                <span style="font-weight:800; color:#1e293b; font-size:0.83rem;">🏢 ${warehouse}</span>
+                                <span style="font-size:0.72rem; color:#64748b; background:rgba(0,0,0,0.04); padding:1px 6px; border-radius:4px; font-weight:700;">${t.terminal || 'الجهاز الرئيسي 💻'}</span>
+                            </div>
+                        </td>
                         <td class="col-inv-7" style="font-weight:bold; color:var(--main-blue); ${isV(7) ? '' : 'display:none;'}">${parseFloat(totalTextFinal || 0).toFixed(2)}</td>
                         <td class="col-inv-8" style="color:blue; font-weight:bold; ${isV(8) ? '' : 'display:none;'}">${paid}</td>
                         <td class="col-inv-9" style="color:red; font-weight:bold; ${isV(9) ? '' : 'display:none;'}">${remaining}</td>
@@ -654,6 +659,8 @@
             let head = invoiceItems.find(t => t.isInvoiceHead) || invoiceItems[0];
             let tx = { ...head };
             tx.invoiceId = invoiceId;
+            tx.warehouse = head.warehouse || 'المخزن الرئيسي';
+            tx.terminal = head.terminal || 'الجهاز الرئيسي 💻';
             tx.partner = head.partner || head.customer || 'عميل نقدي';
             tx.method = head.method || head.paymentMethod || 'نقدي';
             tx.notes = invoiceItems.find(t => t.notes)?.notes || tx.notes || '';

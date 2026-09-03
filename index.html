@@ -86,6 +86,7 @@
     <script src="js/sales_purchases.js?v=1" defer></script>
     <script src="js/sales_pos.js?v=1" defer></script>
     <script src="js/sales_fashion_picker.js?v=1" defer></script>
+    <script src="js/sales_inquiry_modal.js?v=1" defer></script>
     <script src="js/sales_returns.js?v=1" defer></script>
     <script src="js/sales_history_view.js?v=1" defer></script>
     <script src="js/inv_transfers.js?v=1" defer></script>
@@ -1122,21 +1123,29 @@
                         (مدير)</span>
                 </div>
 
-                <div id="connectionStatus" class="connection-status online" title="حالة الاتصال"
-                    style="background: transparent; border: none; padding: 0; display: flex; align-items: center; gap: 8px;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"
+                <div id="connectionStatus" class="connection-status online" title="المستودع النشط وحالة الاتصال"
+                    style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 12px; padding: 3px 10px; display: flex; align-items: center; gap: 8px; backdrop-filter: blur(4px);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"
                         stroke-linecap="round" stroke-linejoin="round">
-                        <path
-                            d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
-                        </path>
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
                         <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
                         <line x1="12" y1="22.08" x2="12" y2="12"></line>
                     </svg>
-                    <span id="currentWarehouseName" style="color: #fff; font-size: 0.95rem; font-weight: bold;">المخزن
-                        الرئيسي</span>
-                    <div style="width: 1px; height: 18px; background: rgba(255,255,255,0.3); margin: 0 8px;"></div>
-                    <span id="statusText" style="color: #fff; font-size: 0.95rem; font-weight: bold;">متصل</span>
-                    <div class="status-dot" style="margin-right: 5px;"></div>
+                    
+                    <!-- القائمة المنسدلة للتبديل السريع بين المخازن مع التحقق من الصلاحيات -->
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <select id="headerActiveWarehouseSelect" onchange="window.switchWarehouseFromHeader(this.value)"
+                            title="تبديل المستودع النشط للبيع والمخزون"
+                            style="background: transparent; color: #ffffff; border: none; font-size: 0.9rem; font-weight: 900; font-family: inherit; cursor: pointer; outline: none; padding: 2px 4px; border-radius: 6px;">
+                            <option value="المخزن الرئيسي" style="background: #0f172a; color: #fff;">المخزن الرئيسي</option>
+                        </select>
+                        <span id="warehouseLockBadge" style="display: none; font-size: 0.75rem;" title="حسابك مقيد بمخزن محدد">🔒</span>
+                    </div>
+                    <span id="currentWarehouseName" style="display:none;">المخزن الرئيسي</span>
+
+                    <div style="width: 1px; height: 16px; background: rgba(255,255,255,0.25); margin: 0 4px;"></div>
+                    <span id="statusText" style="color: #fff; font-size: 0.85rem; font-weight: bold;">متصل</span>
+                    <div class="status-dot" style="margin-right: 3px;"></div>
                 </div>
 
                 <!-- تخصيص مظهر البرنامج مدمج معهم -->
@@ -1561,20 +1570,15 @@
                 <div class="panel-header"
                     style="display: flex; align-items: flex-end; gap: 6px; background: #f1f5f9; padding: 6px; border-radius: 12px 12px 0 0; border-bottom: 2px solid #e2e8f0; flex-wrap: nowrap; overflow-x: auto;">
                     <!-- 1. أزرار التحكم -->
-                    <!-- 1. أزرار التحكم -->
                     <div class="header-column">
                         <div class="header-label-badge" style="background: #fff; color: #0f172a; font-weight: 900; border: 1.5px solid #cbd5e1; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">⚙️ تحكم</div>
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            <button class="btn-back-home" onclick="switchSection('dashboard')"
-                                title="العودة للقائمة الرئيسية"
-                                style="margin:0; padding: 0 10px; height: 40px; border-radius: 8px; background: #fff; border: 2px solid #cbd5e1; color: #1e293b; font-weight: 900; cursor: pointer;">🏠</button>
-                            <button id="toggleQuickItemsBtn" onclick="toggleQuickItems()" title="الأصناف السريعة"
-                                style="margin:0; padding: 0 10px; height: 40px; border-radius: 8px; background: var(--accent-gold); color: black; border: 2px solid var(--accent-gold); cursor: pointer; font-weight: 900;">⭐</button>
-                        </div>
+                        <button class="btn-back-home" onclick="switchSection('dashboard')"
+                            title="العودة للقائمة الرئيسية"
+                            style="margin:0; padding: 0 12px; height: 40px; border-radius: 8px; background: #fff; border: 2px solid #cbd5e1; color: #1e293b; font-weight: 900; cursor: pointer;">🏠</button>
                     </div>
 
                     <!-- 2. طريقة الدفع -->
-                    <div class="header-column" style="width: 125px; min-width: 125px;">
+                    <div class="header-column" style="width: 125px; min-width: 120px;">
                         <div class="header-label-badge"
                             style="background: #fff; color: #0f172a; font-weight: 900; border: 1.5px solid #cbd5e1; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display:flex; justify-content:space-between; align-items:center; padding: 2px 8px;">
                             <span>💵 دفع</span>
@@ -1589,14 +1593,6 @@
                             <option value="آجل">⏳ آجل</option>
                             <option value="تحويل">🏦 بنك</option>
                         </select>
-                    </div>
-
-                    <!-- 3. فلترة السلة -->
-                    <div class="header-column" style="width: 100px;">
-                        <div class="header-label-badge" style="background: #fff; color: #0f172a; font-weight: 900; border: 1.5px solid #cbd5e1; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">🔍 بحث سلة</div>
-                        <input type="text" id="cartFilterInput" placeholder="🔍 فلترة..."
-                            oninput="filterCartItems(this.value)" class="header-input-unified"
-                            style="width: 100%; border-color: #cbd5e1; padding: 0 10px; font-size: 0.85rem; background: #fff; font-weight: 600;">
                     </div>
 
                     <!-- 4. العميل -->
@@ -1652,6 +1648,19 @@
                         <button onclick="handleSearchEnter(document.getElementById('productSearch').value, event, true)"
                             style="width: 100%; height: 40px; border-radius: 8px; background: var(--primary-color); color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; transition: 0.2s; box-shadow: 0 4px 6px rgba(34, 197, 94, 0.2);">
                             ➕
+                        </button>
+                    </div>
+
+                    <!-- 9. زر استعلام سريع عن أرصدة الفروع والمخازن -->
+                    <div class="header-column" style="width: auto; min-width: 105px;">
+                        <div class="header-label-badge" style="background: #fff; color: #b45309; font-weight: 900; border: 1.5px solid #fcd34d; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">❓ فحص</div>
+                        <button type="button" id="posFastInquiryBtn" onclick="openFastItemInquiryModal()"
+                            style="width: 100%; height: 40px; border-radius: 8px; background: linear-gradient(135deg, #f59e0b, #d97706); color: #000; border: 2px solid #b45309; font-weight: 900; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 10px rgba(217, 119, 6, 0.3); transition: all 0.2s;"
+                            title="استعلام سريع عن أرصدة الصنف والمقاسات في كافة المخازن والفروع"
+                            onmouseover="this.style.transform='translateY(-2px) scale(1.02)';"
+                            onmouseout="this.style.transform='none';">
+                            <span>استعلام</span>
+                            <span style="background: #000; color: #fbbf24; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: 900;">؟</span>
                         </button>
                     </div>
                 </div>
@@ -1721,22 +1730,44 @@
                             <input type="text" id="salesNotes" placeholder="اكتب ملاحظة للفاتورة..."
                                 style="flex: 1; height: 30px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; font-size: 0.85rem; background: #fff; font-weight: 600;">
                         </div>
+                    </div>
 
-                        <!-- زر الطباعة التلقائية الفوري (Auto-Print Toggle) -->
+                    <!-- شريط أدوات التحكم السفلي (طباعة، صور الموديلات، بحث السلة، مستوى السعر) -->
+                    <div
+                        style="display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+                        
+                        <!-- زر طباعة تلقائية -->
                         <button type="button" id="posAutoPrintToggleBtn" onclick="togglePOSAutoPrint()"
                             style="height: 32px; padding: 0 10px; border-radius: 8px; border: 1.5px solid #10b981; background: rgba(16, 185, 129, 0.1); color: #047857; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s ease;"
                             title="تفعيل/تعطيل الطباعة التلقائية فور حفظ الفاتورة">
                             <span id="posAutoPrintIcon">🖨️</span>
                             <span id="posAutoPrintText">طباعة تلقائية: مفعلة</span>
                         </button>
-                        <div style="flex:1;"></div>
+
+                        <!-- زر شبكة صور الموديلات السريعة (معرض كروت الفاشون) -->
+                        <button type="button" id="toggleQuickItemsBtn" onclick="toggleQuickItems()"
+                            style="height: 32px; padding: 0 12px; border-radius: 8px; background: linear-gradient(135deg, #f59e0b, #d97706); color: #000; border: 1.5px solid #b45309; font-weight: 900; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(217,119,6,0.25); transition: 0.2s;"
+                            title="عرض وإخفاء شبكة صور وكروت الموديلات">
+                            <span>🖼️</span>
+                            <span>صور الموديلات</span>
+                        </button>
+
+                        <!-- حقل بحث وتصفية عناصر السلة المدمج -->
+                        <div style="display: flex; align-items: center; background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 0 8px; height: 32px; width: 130px; box-sizing: border-box;"
+                            title="تصفية وبحث سريع داخل جدول أصناف الفاتورة الحالية">
+                            <span style="font-size: 0.8rem; color: #64748b; margin-left: 4px;">🔍</span>
+                            <input type="text" id="cartFilterInput" placeholder="بحث بالسلة..."
+                                oninput="filterCartItems(this.value)"
+                                style="border: none; outline: none; background: transparent; width: 100%; font-size: 0.82rem; font-weight: 700; color: #1e293b; font-family:'Cairo',sans-serif;">
+                        </div>
+
                         <!-- كارت مستوى السعر مع زر الدبوس الذكي للتثبيت الدائم -->
-                        <div style="background: #1e293b; color: white; padding: 2px 8px; border-radius: 8px; display: flex; align-items: center; gap: 6px; border: 1.5px solid var(--gold); box-shadow: 0 2px 6px rgba(0,0,0,0.15);">
-                            <span style="font-size: 0.8rem; font-weight: bold;">💳 مستوى السعر:</span>
+                        <div style="background: #1e293b; color: white; padding: 2px 8px; border-radius: 8px; display: flex; align-items: center; gap: 6px; border: 1.5px solid var(--gold); box-shadow: 0 2px 6px rgba(0,0,0,0.15); height: 32px; box-sizing: border-box;">
+                            <span style="font-size: 0.78rem; font-weight: bold;">💳 السعر:</span>
                             <select id="salesPriceLevel" onchange="onSalesPriceLevelChange()"
-                                style="background: transparent; color: var(--gold); border: none; font-weight: bold; cursor: pointer; outline: none; font-size: 0.9rem;">
-                                <option value="retail" style="background:#1e293b; color:white;">🛒 قطاعي (بيع)</option>
-                                <option value="wholesale" style="background:#1e293b; color:white;">📦 جملة (تجار)</option>
+                                style="background: transparent; color: var(--gold); border: none; font-weight: bold; cursor: pointer; outline: none; font-size: 0.85rem;">
+                                <option value="retail" style="background:#1e293b; color:white;">🛒 قطاعي</option>
+                                <option value="wholesale" style="background:#1e293b; color:white;">📦 جملة</option>
                             </select>
                             <button type="button" id="pinPriceLevelBtn" onclick="togglePinPriceLevel()" title="تثبيت هذا المستوى كافتراضي دائم للبرنامج"
                                 style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); color: white; font-size: 0.95rem; cursor: pointer; padding: 2px 6px; border-radius: 6px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center;"
@@ -3928,8 +3959,40 @@
                     التغيرات ✅</button>
             </div>
 
+            <!-- 🌟 كروت ملخص وإحصائيات حركة الأصناف اليومية (الوارد، المنصرف، الصافي، القيمة) -->
+            <div id="historySummaryStatsCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 10px; margin-bottom: 8px;">
+                <div style="background: linear-gradient(135deg, #ecfdf5, #d1fae5); border: 1.5px solid #a7f3d0; border-radius: 12px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                    <div>
+                        <div style="font-size: 0.8rem; font-weight: 800; color: #047857;">📥 إجمالي الوارد (قطع)</div>
+                        <div id="histCardInQty" style="font-size: 1.3rem; font-weight: 900; color: #065f46; margin-top: 2px;">0</div>
+                    </div>
+                    <span style="font-size: 1.8rem; opacity: 0.85;">📦</span>
+                </div>
+                <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 1.5px solid #fecaca; border-radius: 12px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                    <div>
+                        <div style="font-size: 0.8rem; font-weight: 800; color: #b91c1c;">📤 إجمالي المنصرف (قطع)</div>
+                        <div id="histCardOutQty" style="font-size: 1.3rem; font-weight: 900; color: #991b1b; margin-top: 2px;">0</div>
+                    </div>
+                    <span style="font-size: 1.8rem; opacity: 0.85;">🛒</span>
+                </div>
+                <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1.5px solid #bfdbfe; border-radius: 12px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                    <div>
+                        <div style="font-size: 0.8rem; font-weight: 800; color: #1d4ed8;">⚖️ صافي حركة المخزون</div>
+                        <div id="histCardNetQty" style="font-size: 1.3rem; font-weight: 900; color: #1e40af; margin-top: 2px;">0</div>
+                    </div>
+                    <span style="font-size: 1.8rem; opacity: 0.85;">📊</span>
+                </div>
+                <div style="background: linear-gradient(135deg, #f5f3ff, #ede9fe); border: 1.5px solid #ddd6fe; border-radius: 12px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                    <div>
+                        <div style="font-size: 0.8rem; font-weight: 800; color: #6d28d9;">💰 إجمالي القيمة المالية</div>
+                        <div id="histCardTotalAmount" style="font-size: 1.3rem; font-weight: 900; color: #5b21b6; margin-top: 2px;">0.00 <span style="font-size: 0.75rem;">ج.م</span></div>
+                    </div>
+                    <span style="font-size: 1.8rem; opacity: 0.85;">💵</span>
+                </div>
+            </div>
+
             <div class="table-container"
-                style="margin-top: 15px; flex: 1 !important; min-height: 0 !important; overflow-y: auto !important;">
+                style="margin-top: 6px; flex: 1 !important; min-height: 0 !important; overflow-y: auto !important;">
                 <table class="invoice-table">
                     <thead
                         style="background-color: var(--main-purple); color: white; position: sticky; top: 0; z-index: 10;">
@@ -5110,8 +5173,8 @@
                                     style="font-size: 0.85rem; font-weight: 700;">ج.م</span></span>
                         </div>
                     </div>
-                    <!-- كرت سعر الجملة -->
-                    <div
+                    <!-- كرت سعر الجملة (يخضع للصلاحية) -->
+                    <div id="inquiryWholesaleCard"
                         style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 1px solid #bbf7d0; border-radius: 16px; padding: 15px; display: flex; align-items: center; gap: 12px;">
                         <span
                             style="font-size: 2rem; background: white; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">👥</span>
@@ -5178,7 +5241,7 @@
                     </div>
                     <div style="overflow-x: auto; max-height: 220px;">
                         <table class="inquiry-table" style="width: 100%; border-collapse: collapse; text-align: center; font-size: 0.88rem;">
-                            <thead style="position: sticky; top: 0; background: #0f172a; color: white;">
+                            <thead id="inquiryVariantsTableHead" style="position: sticky; top: 0; background: #0f172a; color: white;">
                                 <tr>
                                     <th style="width: 35px; padding: 8px 4px;">#</th>
                                     <th style="padding: 8px;">المقاس (Size)</th>
@@ -6024,11 +6087,11 @@
                                             <span style="display: block; color: #64748b; font-size: 0.75rem; font-weight: 700;">تعديل العمليات المؤرشفة</span>
                                         </div>
                                     </label>
-                                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: #ffffff; border-radius: 12px; border: 1.5px solid #fcd34d;">
-                                        <input type="checkbox" id="showInquiryCostPrice" style="width: 18px; height: 18px; accent-color: #d97706; cursor: pointer;">
+                                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: #ffffff; border-radius: 12px; border: 1.5px solid #10b981;">
+                                        <input type="checkbox" id="showInquiryCostPrice" style="width: 18px; height: 18px; accent-color: #059669; cursor: pointer;">
                                         <div>
-                                            <span style="display: block; font-weight: 900; color: #1e293b; font-size: 0.85rem;">سعر التكلفة في الاستعلام</span>
-                                            <span style="display: block; color: #64748b; font-size: 0.75rem; font-weight: 700;">إظهار كرت التكلفة بالاستعلام</span>
+                                            <span style="display: block; font-weight: 900; color: #1e293b; font-size: 0.85rem;">إظهار أسعار التكلفة والجملة بالاستعلام</span>
+                                            <span style="display: block; color: #64748b; font-size: 0.75rem; font-weight: 700;">عند التعطيل يظهر سعر بيع القطاعي فقط لحماية سرية التكلفة</span>
                                         </div>
                                     </label>
                                 </div>
@@ -6345,6 +6408,28 @@
                                     </div>
                                 </div>
 
+                                <!-- 🏢 نطاق وصلاحية العمل على المخازن والفروع -->
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; background: #f8fafc; padding: 12px 16px; border-radius: 12px; border: 1.5px solid #e2e8f0;">
+                                    <div class="form-group">
+                                        <label style="display: block; color: #1e293b; font-weight: 800; margin-bottom: 6px; font-size: 0.85rem;">
+                                            🏢 نطاق صلاحية المخازن المصرح بها للموظف
+                                        </label>
+                                        <select id="newUserWarehouseScope" onchange="onUserWarehouseScopeChange(this.value)">
+                                            <option value="all">🌐 كافة المخازن والفروع (كامل الصلاحية)</option>
+                                            <option value="main">🏢 المخزن الرئيسي فقط</option>
+                                            <option value="specific">🏬 مخزن / فرع محدد (تخصيص فرع بعينه)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" id="newUserSpecificWarehouseGroup" style="display: none;">
+                                        <label style="display: block; color: #1e293b; font-weight: 800; margin-bottom: 6px; font-size: 0.85rem;">
+                                            🏬 حدد المخزن / الفرع المخصص لهذا الموظف
+                                        </label>
+                                        <select id="newUserSpecificWarehouse">
+                                            <!-- يتم تعبئته برمجياً -->
+                                        </select>
+                                    </div>
+                                </div>
+
                                 <!-- شريط القوالب السريعة للصلاحيات -->
                                 <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
                                     <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #475569; font-size: 0.85rem;">
@@ -6523,6 +6608,7 @@
                                                 <th style="padding: 10px 14px; text-align: center;">🔑 PIN</th>
                                                 <th style="padding: 10px 14px; text-align: center;">💳 NFC</th>
                                                 <th style="padding: 10px 14px; text-align: center;">🏷️ الدور</th>
+                                                <th style="padding: 10px 14px; text-align: center;">🏢 المخزن المصرّح به</th>
                                                 <th style="padding: 10px 14px; text-align: center;">🟢 الحالة</th>
                                                 <th style="padding: 10px 14px; text-align: center; width: 180px;">⚡ التحكم</th>
                                             </tr>
@@ -9064,58 +9150,112 @@
                 <!-- تبويب عام -->
                 <div id="tab-general">
                     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:14px;">
-                        <div class="bayan-input-card">
+                        <div class="bayan-input-card" style="display: none;">
                             <label class="bayan-card-label"><span>🏷️</span> كود النظام (SysCode)</label>
                             <input type="text" id="newItemSysCode" class="search-input"
                                 style="background: #f1f5f9; font-weight: 800; color: #2563eb;"
                                 placeholder="توليد تلقائي...">
                         </div>
                         <div class="bayan-input-card">
-                            <label class="bayan-card-label"><span>🔢</span> كود داخلي / الموديل</label>
-                            <input type="text" id="newItemCode" class="search-input" placeholder="كود يدوي للموديل...">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0;"><span>🔢</span> كود الموديل (اختياري)</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_code')" title="اضغط لمعرفة وظيفة كود الموديل">❓</span>
+                            </div>
+                            <div style="display: flex; gap: 6px; align-items: center;">
+                                <input type="text" id="newItemCode" class="search-input" style="flex: 1;" placeholder="مثال: موديل 576...">
+                                <button type="button" class="bayan-copy-btn" onclick="copyFieldContent('newItemCode', 'كود الموديل')" title="نسخ كود الموديل">📋</button>
+                            </div>
+                            <div id="help_code" class="bayan-field-help-box hidden">
+                                💡 <b>كود الموديل:</b> كود بشري مختصر للموديل من اختيارك (مثل: 576 أو TR-01) يتيح لك البحث عن الصنف في شاشة البيع بالاسم بدون الحاجة لاستخدام الاسكانر.
+                            </div>
                         </div>
                         <div class="bayan-input-card" style="background: #fffdf5; border-color: #fde047;">
-                            <label class="bayan-card-label" style="color: #854d0e;"><span>⚖️</span> كود الميزان (PLU Code)</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0; color: #854d0e;"><span>⚖️</span> كود الميزان (PLU Code)</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_scalePlu')" title="اضغط لمعرفة وظيفة كود الميزان">❓</span>
+                            </div>
                             <input type="text" id="newItemScalePlu" class="search-input" placeholder="مثال: 3 أو 15 (للأصناف بالكيلو)..."
                                 style="font-weight: 800; color: #854d0e; background: #ffffff; border-color: #fde047;">
+                            <div id="help_scalePlu" class="bayan-field-help-box hidden">
+                                💡 <b>كود الميزان:</b> كود الصنف الخاص بموازين الباركود الإلكترونية (مثل ميزان الخضار والجبن) لقراءة الوزن الإجمالي وحساب السعر أوتوماتيكياً.
+                            </div>
                         </div>
                         <div class="bayan-input-card" style="grid-column: span 2;">
-                            <label class="bayan-card-label"><span>📷</span> الباركود الدولي (Scanner / Barcode)</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0;"><span>📷</span> باركود الصنف (الاسكانر / الباركود الدولي)</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_barcode')" title="اضغط لمعرفة وظيفة باركود الصنف">❓</span>
+                            </div>
                             <div style="display: flex; gap: 8px; align-items: center;">
                                 <input type="text" id="newItemBarcode" class="search-input"
-                                    style="flex: 1; font-size: 1rem; font-weight: bold; letter-spacing: 0.5px;" placeholder="مسح الباركود بجهاز الاسكانر...">
+                                    style="flex: 1; font-size: 1rem; font-weight: bold; letter-spacing: 0.5px;" placeholder="مسح الباركود بالاسكانر أو توليد تلقائي...">
+                                <button type="button" class="bayan-copy-btn" onclick="copyFieldContent('newItemBarcode', 'باركود الصنف')" title="نسخ باركود الصنف">📋</button>
                                 <button type="button" class="bayan-btn" onclick="generateMainProductBarcode()"
                                     style="padding: 0 14px; height: 38px; background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1.5px solid #93c5fd; color: #1d4ed8; font-weight: 900; border-radius: 10px; font-size: 0.84rem; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 5px; box-shadow: 0 2px 6px rgba(37,99,235,0.12);"
                                     title="توليد باركود دولي فريد تلقائياً">⚡ باركود تلقائي</button>
                             </div>
+                            <div id="help_barcode" class="bayan-field-help-box hidden">
+                                💡 <b>باركود الصنف:</b> الرقم الدولي المشفر المطبوع على تيكت الصنف، أو الرقم المولد من السيستم، وهو الذي يقرأه جهاز الاسكانر بالليزر لإضافة الصنف للفاتورة في لحظة.
+                            </div>
                         </div>
                         <div class="bayan-input-card">
-                            <label class="bayan-card-label"><span>📂</span> المجموعة / التصنيف</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0;"><span>📂</span> المجموعة / التصنيف</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_category')" title="اضغط لمعرفة وظيفة التصنيف">❓</span>
+                            </div>
                             <input type="text" id="newItemCategory" list="categoriesList" class="search-input" placeholder="اختر أو اكتب تصنيفاً جديداً">
                             <datalist id="categoriesList">
                                 <option value="عام">
                             </datalist>
+                            <div id="help_category" class="bayan-field-help-box hidden">
+                                💡 <b>التصنيف:</b> لفرز وتقسيم البضاعة بالمحل لمجموعات (مثل: ملابس رجالي، أحذية رياضية، فساتين) لتسهيل الجرد واستخراج تقارير أرباح كل قسم.
+                            </div>
                         </div>
                         <div class="bayan-input-card">
-                            <label class="bayan-card-label"><span>🏷️</span> الماركة / البراند (Brand)</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0;"><span>🏷️</span> الماركة / البراند (Brand)</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_brand')" title="اضغط لمعرفة وظيفة الماركة">❓</span>
+                            </div>
                             <input type="text" id="newItemBrand" list="brandsList" class="search-input" placeholder="مثال: Zara, Nike, Local...">
                             <datalist id="brandsList"></datalist>
+                            <div id="help_brand" class="bayan-field-help-box hidden">
+                                💡 <b>الماركة:</b> العلامة التجارية للمنتج (مثل: Zara, Nike) لمساعدتك في معرفة الماركات الأكثر مبيعاً بالمحل وتصفية تقارير المبيعات.
+                            </div>
                         </div>
                         <div class="bayan-input-card">
-                            <label class="bayan-card-label"><span>🏭</span> المورد الأساسي (Supplier)</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0;"><span>🏭</span> المورد الأساسي (Supplier)</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_supplier')" title="اضغط لمعرفة وظيفة المورد">❓</span>
+                            </div>
                             <input type="text" id="newItemSupplier" list="suppliersDatalist" class="search-input" placeholder="اختر أو اكتب اسم المورد">
                             <datalist id="suppliersDatalist"></datalist>
+                            <div id="help_supplier" class="bayan-field-help-box hidden">
+                                💡 <b>المورد:</b> اسم التاجر أو المصنع الذي تشتري منه هذا الصنف لربطه بفواتير المشتريات ومتابعة حسابات الموردين وديون البضاعة.
+                            </div>
                         </div>
                         <div class="bayan-input-card">
-                            <label class="bayan-card-label"><span>📍</span> مكان الرف / استاند العرض</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <label class="bayan-card-label" style="margin: 0;"><span>📍</span> مكان الرف / استاند العرض</label>
+                                <span class="bayan-help-badge" onclick="toggleFieldHelp('help_shelf')" title="اضغط لمعرفة وظيفة مكان الرف">❓</span>
+                            </div>
                             <input type="text" id="newItemShelf" class="search-input" placeholder="مثال: A-01 / استاند 3">
+                            <div id="help_shelf" class="bayan-field-help-box hidden">
+                                💡 <b>مكان الرف:</b> موقع الصنف داخل المحل أو استاند العرض (مثل: استاند 2 أو رف B) لمساعدة البائعين في إيجاد القطعة فوراً عندما يطلبها العميل.
+                            </div>
                         </div>
-                        <div class="bayan-input-card" style="grid-column: span 2; display: flex; flex-direction: row; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #fffbeb, #fef3c7); border: 1.5px solid #f59e0b; padding: 12px 18px; border-radius: 14px;">
-                            <label class="form-label" for="isQuickItem"
-                                style="margin:0; font-weight: 900; color: #92400e; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.92rem;">
-                                <span>⭐</span> إضافة الصنف لشاشة الأصناف السريعة في الكاشير (Quick Items)
-                            </label>
-                            <input type="checkbox" id="isQuickItem" style="width: 22px; height: 22px; cursor: pointer; accent-color: #d97706;">
+                        <div class="bayan-input-card" style="grid-column: span 2; display: flex; flex-direction: column; background: linear-gradient(135deg, #fffbeb, #fef3c7); border: 1.5px solid #f59e0b; padding: 12px 18px; border-radius: 14px;">
+                            <div style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; width: 100%;">
+                                <label class="form-label" for="isQuickItem"
+                                    style="margin:0; font-weight: 900; color: #92400e; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.92rem;">
+                                    <span>⭐</span> إضافة الصنف لشاشة الأصناف السريعة في الكاشير (Quick Items)
+                                </label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span class="bayan-help-badge" onclick="toggleFieldHelp('help_quickItem')" title="شرح الأصناف السريعة">❓</span>
+                                    <input type="checkbox" id="isQuickItem" style="width: 22px; height: 22px; cursor: pointer; accent-color: #d97706;">
+                                </div>
+                            </div>
+                            <div id="help_quickItem" class="bayan-field-help-box hidden" style="background: #fff; border-color: #fcd34d; color: #78350f;">
+                                💡 <b>الأصناف السريعة:</b> عند تفعيل هذا الخيار، سيظهر الصنف كزر كبير وسريع في شاشة الكاشير لبيعه بنقرة واحدة بدون الحاجة للبحث أو الاسكانر (ممتاز للأكياس والشرابات والقطع الأكثر طلباً).
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -10206,20 +10346,20 @@
                     <div class="plan-card" id="plan-باقة نسخة المجانية">
                         <div class="active-marker">بـاقتـك الـحـالـيـة ⚡</div>
                         <span class="plan-badge">🌱</span>
-                        <h3 class="plan-name">النسخة التجريبية</h3>
+                        <h3 class="plan-name" style="font-size: 1.4rem; font-weight: 950; color: #0f172a;">النسخة التجريبية</h3>
 
-                        <div class="plan-price" style="font-size: 1.1rem; color: #64748b; margin-bottom: 5px;">
-                            <span id="trialInvoicesCount">0</span>/200 <span>فاتورة مستخدمة</span>
+                        <div class="plan-price" style="font-size: 1.4rem; font-weight: 950; color: #0f172a; margin-bottom: 8px;">
+                            <span id="trialInvoicesCount" style="color: #0f172a; font-weight: 950; font-size: 1.6rem;">0</span>/200 <span style="color: #1e293b; font-weight: 850; font-size: 0.95rem;">فاتورة مستخدمة</span>
                         </div>
 
-                        <div style="font-weight: bold; color: #ef4444; margin-bottom: 10px; font-size: 1.1rem;"
+                        <div style="font-weight: 950; color: #ef4444; margin-bottom: 12px; font-size: 1.15rem;"
                             id="trialStatusText">
                             الحالة: انتهت
                         </div>
 
                         <div id="trialDetails" class="hidden"
-                            style="text-align: right; background: #f8fafc; padding: 10px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 10px; border: 1px solid #e2e8f0; width: 100%; box-sizing: border-box;">
-                            <ul class="plan-features" style="font-size: 0.8rem; margin: 0; padding-right: 15px;">
+                            style="text-align: right; background: #f8fafc; padding: 12px; border-radius: 10px; font-size: 0.92rem; margin-bottom: 12px; border: 1px solid #cbd5e1; width: 100%; box-sizing: border-box;">
+                            <ul class="plan-features" style="font-size: 0.92rem; font-weight: 850; color: #0f172a; margin: 0; padding-right: 15px; line-height: 1.8;">
                                 <li>✔ جميع الأقسام تعمل</li>
                                 <li>✔ حتى 200 فاتورة</li>
                                 <li>✔ دعم محلي</li>
@@ -10231,7 +10371,7 @@
                             <button class="details-btn"
                                 onclick="document.getElementById('trialDetails').classList.toggle('hidden')"
                                 title="عرض المميزات"
-                                style="width: 100%; background: #f1f5f9; border-color: #cbd5e1; color: #334155; padding: 8px; border-radius: 6px;">👁️
+                                style="width: 100%; background: #f1f5f9; border-color: #cbd5e1; color: #0f172a; font-weight: 850; padding: 10px; border-radius: 8px; font-size: 0.95rem;">👁️
                                 عرض التفاصيل</button>
                         </div>
                     </div>
@@ -10240,19 +10380,19 @@
                     <div class="plan-card" id="plan-الباقة الأساسية">
                         <div class="active-marker">بـاقتـك الـحـالـيـة ⚡</div>
                         <span class="plan-badge">🌱</span>
-                        <h3 class="plan-name">الباقة الشهرية</h3>
-                        <div class="plan-price">200 <span>ج.م / شهرياً</span></div>
-                        <ul class="plan-features" style="font-size: 0.8rem; margin-bottom: 10px;">
+                        <h3 class="plan-name" style="font-size: 1.4rem; font-weight: 950; color: #0f172a;">الباقة الشهرية</h3>
+                        <div class="plan-price" style="font-size: 2.3rem; font-weight: 950; color: #090d16; margin-bottom: 15px;">150 <span style="font-size: 1rem; color: #1e293b; font-weight: 850;">ج.م / شهرياً</span></div>
+                        <ul class="plan-features" style="font-size: 0.95rem; font-weight: 850; color: #0f172a; margin-bottom: 15px; line-height: 1.8;">
                             <li>إدارة مبيعات ومشتريات احترافية</li>
                             <li>عدد فواتير غير محدود ♾️</li>
                             <li>نظام مخازن وحسابات متكامل</li>
                             <li>دعم فني وتحديثات مستمرة</li>
                         </ul>
                         <div style="display: flex; gap: 8px; width: 100%; margin-top: auto;">
-                            <button class="sub-btn" style="padding: 8px; flex: 1;"
-                                onclick="requestActivation('الباقة الشهرية', 200)">اشترك الآن</button>
+                            <button class="sub-btn" style="padding: 10px; flex: 1; font-weight: 900; font-size: 0.95rem;"
+                                onclick="requestActivation('الباقة الشهرية', 150)">اشترك الآن</button>
                             <button class="details-btn" onclick="showPackageFeatures('الباقة الأساسية')"
-                                title="عرض المميزات">👁️</button>
+                                title="عرض المميزات" style="font-weight: 900;">👁️</button>
                         </div>
                     </div>
 
@@ -10260,22 +10400,21 @@
                     <div class="plan-card featured" id="plan-الباقة المتقدمة">
                         <div class="active-marker">بـاقتـك الـحـالـيـة ⚡</div>
                         <span class="plan-badge">🚀</span>
-                        <h3 class="plan-name">الباقة السنوية</h3>
-                        <div class="plan-price">1500 <span>ج.م / سنوياً</span></div>
-                        <ul class="plan-features" style="font-size: 0.8rem; margin-bottom: 10px;">
+                        <h3 class="plan-name" style="font-size: 1.4rem; font-weight: 950; color: #0f172a;">الباقة السنوية</h3>
+                        <div class="plan-price" style="font-size: 2.3rem; font-weight: 950; color: #090d16; margin-bottom: 15px;">1200 <span style="font-size: 1rem; color: #1e293b; font-weight: 850;">ج.م / سنوياً</span></div>
+                        <ul class="plan-features" style="font-size: 0.95rem; font-weight: 850; color: #0f172a; margin-bottom: 15px; line-height: 1.8;">
                             <li>كافة مميزات الباقة الأساسية</li>
                             <li>عدد فواتير غير محدود ♾️</li>
                             <li>نسخ احتياطي محلي تلقائي وآمن</li>
-                            <li
-                                style="color: #fff; background: rgba(39, 174, 96, 0.5); padding: 2px 5px; border-radius: 4px; font-weight: bold;">
-                                💰 خصم مميز: وفر أكثر من 200 جنيه!</li>
+                            <li style="color: #047857; background: #d1fae5; padding: 4px 8px; border-radius: 6px; font-weight: 950; border: 1px solid #6ee7b7;">
+                                💰 خصم مميز: وفر 600 جنيه!</li>
                         </ul>
                         <div style="display: flex; gap: 8px; width: 100%; margin-top: auto;">
-                            <button class="sub-btn" style="padding: 8px; flex: 1;"
-                                onclick="requestActivation('الباقة السنوية', 1500)">اشترك الآن</button>
+                            <button class="sub-btn" style="padding: 10px; flex: 1; font-weight: 900; font-size: 0.95rem;"
+                                onclick="requestActivation('الباقة السنوية', 1200)">اشترك الآن</button>
                             <button class="details-btn" onclick="showPackageFeatures('الباقة المتقدمة')"
                                 title="عرض المميزات"
-                                style="background: #f8fafc; border-color: var(--accent-gold);">👁️</button>
+                                style="background: #f8fafc; border-color: var(--accent-gold); font-weight: 900;">👁️</button>
                         </div>
                     </div>
 
@@ -10283,23 +10422,24 @@
                     <div class="plan-card" id="plan-الباقة الاحترافية">
                         <div class="active-marker">بـاقتـك الـحـالـيـة ⚡</div>
                         <span class="plan-badge">👑</span>
-                        <h3 class="plan-name">الباقة مدى الحياة</h3>
-                        <div class="plan-price" style="display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap;">
-                            <span style="text-decoration: line-through; color: #94a3b8; font-size: 1.15rem; font-weight: 700; opacity: 0.8;">4500</span>
-                            <span style="font-size: 1.8rem; font-weight: 900; color: var(--gold);">3500</span>
-                            <span style="font-size: 0.85rem; color: #64748b;">ج.م / مـدى الحـيـاة</span>
+                        <h3 class="plan-name" style="font-size: 1.4rem; font-weight: 950; color: #0f172a;">الباقة مدى الحياة</h3>
+                        <div class="plan-price" style="display: flex; align-items: baseline; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 15px;">
+                            <span style="text-decoration: line-through; color: #ef4444; font-size: 1.35rem; font-weight: 950; opacity: 0.9;">3500</span>
+                            <span style="font-size: 2.4rem; font-weight: 950; color: #b45309; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">3000</span>
+                            <span style="font-size: 1rem; color: #1e293b; font-weight: 900;">ج.م / مـدى الحـيـاة</span>
                         </div>
-                        <ul class="plan-features" style="font-size: 0.8rem; margin-bottom: 10px;">
+                        <ul class="plan-features" style="font-size: 0.95rem; font-weight: 850; color: #0f172a; margin-bottom: 15px; line-height: 1.8;">
                             <li>امتلاك البرنامج للأبد (بدون اشتراك)</li>
                             <li>عدد فواتير غير محدود ♾️</li>
                             <li>دعم فني شامل مدى الحياة</li>
-                            <li style="color: var(--gold); font-weight: bold;">⚡ "اشتري دماغك": مرة واحدة وللأبد!</li>
+                            <li style="color: #92400e; background: #fef3c7; padding: 4px 8px; border-radius: 6px; font-weight: 950; border: 1px solid #fde68a;">
+                                ⚡ "اشتري دماغك": مرة واحدة وللأبد!</li>
                         </ul>
                         <div style="display: flex; gap: 8px; width: 100%; margin-top: auto;">
-                            <button class="sub-btn" style="padding: 8px; flex: 1;"
-                                onclick="requestActivation('الباقة مدى الحياة', 3500)">اشترك الآن</button>
+                            <button class="sub-btn" style="padding: 10px; flex: 1; font-weight: 900; font-size: 0.95rem;"
+                                onclick="requestActivation('الباقة مدى الحياة', 3000)">اشترك الآن</button>
                             <button class="details-btn" onclick="showPackageFeatures('الباقة الاحترافية')"
-                                title="عرض المميزات">👁️</button>
+                                title="عرض المميزات" style="font-weight: 900;">👁️</button>
                         </div>
                     </div>
                 </div>
@@ -10730,28 +10870,28 @@
         </div>
     </div>
 
-    <div id="stmtShareMenu" class="share-menu centered-popup">
+    <div id="stmtShareMenu" class="share-menu centered-popup" style="max-width: 440px; border-radius: 24px; padding: 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.25);">
         <button class="close-modal-btn" onclick="toggleShareMenu('stmtShareMenu')">&times;</button>
-        <div class="modal-title">📤 خيارات مشاركة كشف الحساب</div>
-        <div class="share-item" onclick="shareAccountStatement('whatsapp')">
-            <span style="color:#25D366;">📱</span> واتساب
+        <div class="modal-title" style="font-size: 1.25rem; margin-bottom: 15px; border-bottom: 1.5px solid #f1f5f9; padding-bottom: 10px;">📤 خيارات مشاركة كشف الحساب</div>
+        <div class="share-item" onclick="shareAccountStatement('whatsapp')" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
+            <span style="color:#25D366; font-size: 1.3rem;">📱</span> إرسال كشف الحساب عبر واتساب
         </div>
-        <div class="share-item" onclick="shareAccountStatement('telegram')">
-            <span style="color:#0088cc;">✈️</span> تلجرام
+        <div class="share-item" onclick="shareAccountStatement('telegram')" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
+            <span style="color:#0088cc; font-size: 1.3rem;">✈️</span> إرسال كشف الحساب عبر تلجرام
         </div>
-        <div class="share-item" onclick="exportAccountStatementToExcel()">
-            <span style="color:#217346; font-size:1.2rem;">📊</span> Excel
+        <div class="share-item" onclick="exportAccountStatementToExcel(); toggleShareMenu('stmtShareMenu');" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
+            <span style="color:#217346; font-size: 1.3rem;">📊</span> تصدير ملف Excel
         </div>
-        <div class="share-item" onclick="printAccountStatement()">
-            <span style="color:#34495e;">🖨️</span> طباعة الكشف
+        <div class="share-item" onclick="printStatement(); toggleShareMenu('stmtShareMenu');" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
+            <span style="color:#34495e; font-size: 1.3rem;">🖨️</span> طباعة الكشف فوراً
         </div>
         <div style="margin: 10px 0; border-top: 1px dashed #ccc;"></div>
-        <div style="font-size: 0.8rem; color: #7f8c8d; margin-bottom: 5px;">مشاركة المختار فقط:</div>
-        <div class="share-item" onclick="shareSelectedStatementTransactions('whatsapp')">
-            <span style="color:#25D366;">✅📱</span> واتساب (المختار)
+        <div style="font-size: 0.82rem; color: #64748b; font-weight: bold; margin-bottom: 6px;">مشاركة العمليات المحددة فقط:</div>
+        <div class="share-item" onclick="shareSelectedStatementTransactions('whatsapp')" style="cursor: pointer; padding: 10px 16px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
+            <span style="color:#25D366; font-size: 1.2rem;">✅📱</span> واتساب (المحدد فقط)
         </div>
-        <div class="share-item" onclick="shareSelectedStatementTransactions('telegram')">
-            <span style="color:#0088cc;">✅✈️</span> تلجرام (المختار)
+        <div class="share-item" onclick="shareSelectedStatementTransactions('telegram')" style="cursor: pointer; padding: 10px 16px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
+            <span style="color:#0088cc; font-size: 1.2rem;">✅✈️</span> تلجرام (المحدد فقط)
         </div>
     </div>
 
@@ -12045,24 +12185,6 @@
                     إغلاق النافذة
                 </button>
             </div>
-        </div>
-    </div>
-
-    <!-- نافذة منبثقة لمشاركة كشف الحساب -->
-    <div id="stmtShareMenu" class="share-menu centered-popup" style="max-width: 440px; border-radius: 24px; padding: 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.25);">
-        <button class="close-modal-btn" onclick="toggleShareMenu('stmtShareMenu')">&times;</button>
-        <div class="modal-title" style="font-size: 1.25rem; margin-bottom: 15px; border-bottom: 1.5px solid #f1f5f9; padding-bottom: 10px;">📤 خيارات مشاركة كشف الحساب</div>
-        <div class="share-item" onclick="shareAccountStatement('whatsapp')" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
-            <span style="color:#25D366; font-size: 1.3rem;">📱</span> إرسال كشف الحساب عبر واتساب
-        </div>
-        <div class="share-item" onclick="shareAccountStatement('telegram')" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
-            <span style="color:#0088cc; font-size: 1.3rem;">✈️</span> إرسال كشف الحساب عبر تلجرام
-        </div>
-        <div class="share-item" onclick="exportAccountStatementToExcel(); toggleShareMenu('stmtShareMenu');" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
-            <span style="color:#217346; font-size: 1.3rem;">📊</span> تصدير ملف Excel
-        </div>
-        <div class="share-item" onclick="printStatement(); toggleShareMenu('stmtShareMenu');" style="cursor: pointer; padding: 12px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; display: flex; align-items: center; gap: 10px; font-weight: 800; transition: 0.2s;">
-            <span style="color:#34495e; font-size: 1.3rem;">🖨️</span> طباعة التقرير فوراً
         </div>
     </div>
 

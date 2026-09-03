@@ -52,13 +52,46 @@
                         users.map(u => '<option value="' + u.name + '">' + u.name + ' (' + (u.role === 'admin' ? 'مدير' : 'كاشير') + ')</option>').join('');
 
                     uSelect.onchange = () => {
-                       document.getElementById('loginPinInput').focus();
+                        const selectedName = uSelect.value;
+                        const u = users.find(x => x.name === selectedName);
+                        if (u && wSelect) {
+                            if (u.warehouseScope === 'main') {
+                                wSelect.value = 'المخزن الرئيسي';
+                                wSelect.disabled = true;
+                                wSelect.title = '🔒 هذا الحساب مقيد بالمخزن الرئيسي فقط';
+                                wSelect.style.background = '#f1f5f9';
+                                wSelect.style.cursor = 'not-allowed';
+                            } else if (u.warehouseScope === 'specific' && u.assignedWarehouse) {
+                                if (!Array.from(wSelect.options).some(opt => opt.value === u.assignedWarehouse)) {
+                                    wSelect.innerHTML += `<option value="${u.assignedWarehouse}">${u.assignedWarehouse}</option>`;
+                                }
+                                wSelect.value = u.assignedWarehouse;
+                                wSelect.disabled = true;
+                                wSelect.title = `🔒 هذا الحساب مقيد بـ (${u.assignedWarehouse})`;
+                                wSelect.style.background = '#f1f5f9';
+                                wSelect.style.cursor = 'not-allowed';
+                            } else {
+                                wSelect.disabled = false;
+                                wSelect.title = '';
+                                wSelect.style.background = '';
+                                wSelect.style.cursor = '';
+                                const savedWH = localStorage.getItem('bayan_terminal_warehouse');
+                                if (savedWH && warehouses.some(w => w.name === savedWH)) {
+                                    wSelect.value = savedWH;
+                                }
+                            }
+                        }
+                        document.getElementById('loginPinInput').focus();
                     };
                 }
             }
 
             if (wSelect) {
                 wSelect.innerHTML = warehouses.map(w => '<option value="' + w.name + '">' + w.name + '</option>').join('');
+                const savedTerminalWH = localStorage.getItem('bayan_terminal_warehouse');
+                if (savedTerminalWH && warehouses.some(w => w.name === savedTerminalWH)) {
+                    wSelect.value = savedTerminalWH;
+                }
             }
 
             modal.classList.remove('hidden'); 
@@ -150,7 +183,17 @@
                 }
 
                 if (pin === foundUser.pin) {
-                    const whName = document.getElementById('loginWarehouseSelect').value || 'المخزن الرئيسي';
+                    let whName = document.getElementById('loginWarehouseSelect').value || 'المخزن الرئيسي';
+                    // ✅ أمان صارم: فرض المخزن المصرح به للموظف بناءً على إعدادات المدير
+                    if (foundUser.warehouseScope === 'main') {
+                        whName = 'المخزن الرئيسي';
+                    } else if (foundUser.warehouseScope === 'specific' && foundUser.assignedWarehouse) {
+                        whName = foundUser.assignedWarehouse;
+                    }
+                    try {
+                        localStorage.setItem('bayan_terminal_warehouse', whName);
+                    } catch(e) {}
+
                     // ✅ أمان: نحفظ في IndexedDB - الدور والصلاحيات تُحمَّل من DB لا من localStorage
                     currentUser = { ...foundUser, warehouseName: whName };
                     // نحفظ فقط pin + warehouseName في localStorage (لا نحفظ role أو permissions)
@@ -160,6 +203,7 @@
                     document.body.classList.remove('is-logged-out'); // إظهار عناصر البرنامج
                     document.getElementById('currentUserDisplay').innerHTML = `<span style="opacity: 0.8;">👤</span><span>${currentUser.name} (${currentUser.role === 'admin' ? 'مدير' : 'موظف'})</span>`;
                     document.getElementById('currentWarehouseName').innerText = `📦 ${whName}`;
+                    if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
                     document.getElementById('loginUsernameInput').value = '';
                     document.getElementById('loginPinInput').value = '';
                     selectedLoginUser = null;
@@ -245,9 +289,19 @@
                 return false;
             }
 
-            const whName = (document.getElementById('loginWarehouseSelect') && document.getElementById('loginWarehouseSelect').value) 
+            let whName = (document.getElementById('loginWarehouseSelect') && document.getElementById('loginWarehouseSelect').value) 
                 ? document.getElementById('loginWarehouseSelect').value 
                 : 'المخزن الرئيسي';
+
+            // ✅ أمان صارم: فرض المخزن المصرح به للموظف عند الدخول بكارت NFC
+            if (foundUser.warehouseScope === 'main') {
+                whName = 'المخزن الرئيسي';
+            } else if (foundUser.warehouseScope === 'specific' && foundUser.assignedWarehouse) {
+                whName = foundUser.assignedWarehouse;
+            }
+            try {
+                localStorage.setItem('bayan_terminal_warehouse', whName);
+            } catch(e) {}
 
             currentUser = { ...foundUser, warehouseName: whName };
             if (typeof setStore === 'function') {
@@ -264,6 +318,7 @@
             }
             const whDisplay = document.getElementById('currentWarehouseName');
             if (whDisplay) whDisplay.innerText = `📦 ${whName}`;
+            if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
 
             if (document.getElementById('loginUsernameInput')) document.getElementById('loginUsernameInput').value = '';
             if (document.getElementById('loginPinInput')) document.getElementById('loginPinInput').value = '';
@@ -531,11 +586,14 @@
                 event.preventDefault();
                 const isAccountModal = !document.getElementById('newAccountModal')?.classList.contains('hidden');
                 const isItemModal = !document.getElementById('newItemModal')?.classList.contains('hidden');
+                const isTransferModal = !document.getElementById('transferModal')?.classList.contains('hidden');
 
                 if (isAccountModal) {
                     if (typeof saveAccount === 'function') saveAccount(false);
                 } else if (isItemModal) {
                     if (typeof saveNewItem === 'function') saveNewItem('save');
+                } else if (isTransferModal) {
+                    if (typeof processBatchTransfer === 'function') processBatchTransfer();
                 } else if (activeSectionId === 'sales-section') {
                     if (typeof saveBill === 'function') saveBill();
                 } else if (activeSectionId === 'purchase-section') {

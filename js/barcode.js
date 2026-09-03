@@ -207,9 +207,10 @@ const BayanBarcode = (function () {
         const secId = activeSection.id;
         if (secId === 'sales-section') return 'sales';
         if (secId === 'purchase-section') return 'purchase';
+        if (secId === 'sales-return-section') return 'salesReturn';
+        if (secId === 'purchase-return-section') return 'purchaseReturn';
         if (secId === 'adjustment-section') return 'adjustment';
 
-        // باقي الشاشات مستبعدة (مرتجعات، سندات، حسابات، تقارير...)
         return null;
     }
 
@@ -627,6 +628,94 @@ const BayanBarcode = (function () {
                 showToast(`✅ [تحويل سريع] +1 ${product.name}${vDetails}`, 'success');
             }
             clearAndFocusSearch('transferProductSearch');
+            return;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 5. شاشة مرتجع المبيعات (Sales Returns)
+        // ══════════════════════════════════════════════════════════
+        if (targetScreen === 'salesReturn') {
+            const vSize = variant ? (variant.size || '') : '';
+            const vColor = variant ? (variant.color || '') : '';
+            const pPrice = variant ? (parseFloat(variant.price) || parseFloat(product.price) || 0) : (parseFloat(product.price) || 0);
+
+            if (typeof returnCart !== 'undefined' && Array.isArray(returnCart)) {
+                const existing = returnCart.find(it =>
+                    it.id === product.id &&
+                    ((it.size || it.selectedSize || '') === vSize) &&
+                    ((it.color || it.selectedColor || '') === vColor)
+                );
+
+                if (existing) {
+                    existing.qty = (parseFloat(existing.qty) || 0) + 1;
+                } else {
+                    returnCart.push({
+                        id: product.id,
+                        name: product.name,
+                        code: (variant && variant.barcode) ? variant.barcode : (product.code || product.id),
+                        price: pPrice,
+                        qty: 1,
+                        maxQty: 9999,
+                        selectedSize: vSize,
+                        selectedColor: vColor,
+                        selectedVariant: variant,
+                        selectedUnit: unit,
+                        unitFactor: unit ? (unit.factor || 1) : 1
+                    });
+                }
+
+                if (typeof renderReturnCart === 'function') renderReturnCart();
+                playBeep(true);
+                const vDetails = variant ? ` (${vSize ? 'مقاس: ' + vSize : ''}${vColor ? ' - لون: ' + vColor : ''})` : '';
+                if (typeof showToast === 'function') {
+                    showToast(`✅ [مرتجع مبيعات] +1 ${product.name}${vDetails}`, 'success');
+                }
+                clearAndFocusSearch('returnProductSearch');
+            }
+            return;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 6. شاشة مرتجع المشتريات (Purchase Returns)
+        // ══════════════════════════════════════════════════════════
+        if (targetScreen === 'purchaseReturn') {
+            const vSize = variant ? (variant.size || '') : '';
+            const vColor = variant ? (variant.color || '') : '';
+            const pCost = variant ? (parseFloat(variant.cost) || parseFloat(product.cost) || 0) : (parseFloat(product.cost) || 0);
+
+            if (typeof purReturnCart !== 'undefined' && Array.isArray(purReturnCart)) {
+                const existing = purReturnCart.find(it =>
+                    it.id === product.id &&
+                    ((it.size || it.selectedSize || '') === vSize) &&
+                    ((it.color || it.selectedColor || '') === vColor)
+                );
+
+                if (existing) {
+                    existing.qty = (parseFloat(existing.qty) || 0) + 1;
+                } else {
+                    purReturnCart.push({
+                        id: product.id,
+                        name: product.name,
+                        code: (variant && variant.barcode) ? variant.barcode : (product.code || product.id),
+                        price: pCost,
+                        qty: 1,
+                        maxQty: 9999,
+                        selectedSize: vSize,
+                        selectedColor: vColor,
+                        selectedVariant: variant,
+                        selectedUnit: unit,
+                        unitFactor: unit ? (unit.factor || 1) : 1
+                    });
+                }
+
+                if (typeof renderPurReturnCart === 'function') renderPurReturnCart();
+                playBeep(true);
+                const vDetails = variant ? ` (${vSize ? 'مقاس: ' + vSize : ''}${vColor ? ' - لون: ' + vColor : ''})` : '';
+                if (typeof showToast === 'function') {
+                    showToast(`✅ [مرتجع شراء] +1 ${product.name}${vDetails}`, 'success');
+                }
+                clearAndFocusSearch('purReturnProductSearch');
+            }
             return;
         }
     }

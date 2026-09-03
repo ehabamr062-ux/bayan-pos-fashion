@@ -367,6 +367,8 @@ async function addTreasuryAuditRecord() {
                 await window.bayanDB.table("treasuryAudit").put(newRecord);
             }
             console.log("💾 تم حفظ عملية الخزينة بنجاح في IndexedDB.");
+            window.treasuryAudit = window.treasuryAuditRecords;
+            if (typeof saveData === 'function') await saveData();
         } catch (e) {
             console.warn("⚠️ حفظ تلقائي للعملية بالذاكرة والسجلات...", e);
         }

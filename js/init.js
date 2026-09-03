@@ -16,6 +16,7 @@ loadData().then(async () => {
     if (currentUser) {
         console.log(`👤 أهلاً بك مجدداً: ${currentUser.name}`);
         if (typeof updateNotifications === 'function') updateNotifications();
+        if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
     } else if (typeof initLogin === 'function') {
         initLogin();
     }

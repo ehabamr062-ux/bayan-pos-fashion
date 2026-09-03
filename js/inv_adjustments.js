@@ -471,9 +471,13 @@ async function saveAdjustment() {
                 const factor = item.unitFactor || 1;
                 const newBaseStock = item.qty * factor;
 
-                p.stock = (parseFloat(p.stock) || 0) + newBaseStock;
+                const prevPStock = parseFloat(p.stock) || 0;
+                p.stock = prevPStock + newBaseStock;
                 if (!p.warehouseStocks) p.warehouseStocks = {};
-                p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + newBaseStock;
+                const currentPWhStock = (p.warehouseStocks[activeWH] !== undefined && !isNaN(parseFloat(p.warehouseStocks[activeWH])))
+                    ? parseFloat(p.warehouseStocks[activeWH])
+                    : (activeWH === 'المخزن الرئيسي' ? prevPStock : 0);
+                p.warehouseStocks[activeWH] = Math.max(0, currentPWhStock + newBaseStock);
 
                 if (p.variants && Array.isArray(p.variants)) {
                     const sVal = item.selectedSize || item.size || '';
@@ -484,9 +488,13 @@ async function saveAdjustment() {
                         (!sVal || v.size === sVal) && (!cVal || v.color === cVal)
                     );
                     if (matchedVar) {
-                        matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + newBaseStock;
+                        const prevVarStock = parseFloat(matchedVar.stock) || 0;
+                        matchedVar.stock = prevVarStock + newBaseStock;
                         if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
-                        matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + newBaseStock;
+                        const currentVarWhStock = (matchedVar.warehouseStocks[activeWH] !== undefined && !isNaN(parseFloat(matchedVar.warehouseStocks[activeWH])))
+                            ? parseFloat(matchedVar.warehouseStocks[activeWH])
+                            : (activeWH === 'المخزن الرئيسي' ? prevVarStock : 0);
+                        matchedVar.warehouseStocks[activeWH] = Math.max(0, currentVarWhStock + newBaseStock);
                     }
                 }
 

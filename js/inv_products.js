@@ -13,14 +13,24 @@ async function saveNewItem(mode = 'save') {
     const minPrice = parseFloat(document.getElementById('newItemMinPrice').value) || 0;
     const discount = parseFloat(document.getElementById('newItemDiscount').value) || 0;
 
-    const sysCode = document.getElementById('newItemSysCode').value;
-    const barcode = document.getElementById('newItemBarcode').value;
-    const code = document.getElementById('newItemCode').value;
+    const sysCode = document.getElementById('newItemSysCode')?.value || '';
+    let barcode = document.getElementById('newItemBarcode')?.value?.trim() || '';
+    if (!barcode) {
+        if (typeof generateVariantBarcode === 'function') {
+            barcode = generateVariantBarcode('', '', 1);
+        } else {
+            barcode = '20' + String(Date.now()).slice(-8);
+        }
+        if (document.getElementById('newItemBarcode')) {
+            document.getElementById('newItemBarcode').value = barcode;
+        }
+    }
+    const code = document.getElementById('newItemCode')?.value?.trim() || '';
     const scalePlu = document.getElementById('newItemScalePlu')?.value?.trim() || '';
-    const category = document.getElementById('newItemCategory').value;
+    const category = document.getElementById('newItemCategory')?.value || '';
     const brand = document.getElementById('newItemBrand')?.value?.trim() || '';
     const supplier = document.getElementById('newItemSupplier')?.value?.trim() || '';
-    const shelf = document.getElementById('newItemShelf').value;
+    const shelf = document.getElementById('newItemShelf')?.value || '';
 
     let stock = parseFloat(document.getElementById('newItemStock').value) || 0;
     const minStock = parseFloat(document.getElementById('newItemMinStock').value) || 0;
@@ -467,8 +477,10 @@ function fillProductModal(p) {
     let currentWhStock = 0;
     if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[activeWH] !== undefined) {
         currentWhStock = parseFloat(p.warehouseStocks[activeWH]) || 0;
-    } else {
+    } else if (activeWH === 'المخزن الرئيسي' || !p.warehouseStocks) {
         currentWhStock = parseFloat(p.stock) || 0;
+    } else {
+        currentWhStock = 0;
     }
 
     if (document.getElementById('newItemMinPrice')) document.getElementById('newItemMinPrice').value = p.minPrice || 0;
@@ -538,8 +550,10 @@ function fillProductModal(p) {
                 let vStockForActiveWH = 0;
                 if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[activeWH] !== undefined) {
                     vStockForActiveWH = parseFloat(v.warehouseStocks[activeWH]) || 0;
-                } else {
+                } else if (activeWH === 'المخزن الرئيسي' || !v.warehouseStocks) {
                     vStockForActiveWH = parseFloat(v.stock) || 0;
+                } else {
+                    vStockForActiveWH = 0;
                 }
                 window.initialModalVariants.push({
                     size: v.size,
@@ -621,17 +635,61 @@ window.renderProductWarehouseStocksTable = function(p) {
     });
 };
 
-// توليد باركود دولي فريد تلقائياً للصنف الرئيسي
-window.generateMainProductBarcode = function() {
+// توليد باركود دولي فريد تلقائياً للصنف الرئيسي مع حماية من التغيير العرضي
+window.generateMainProductBarcode = function(force = false) {
+    const inp = document.getElementById('newItemBarcode');
+    if (!inp) return;
+    const currentVal = inp.value.trim();
+    if (currentVal && !force) {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'warning',
+                titleText: '⚠️ تنبيه: الصنف لديه باركود بالفعل',
+                msg: `الصنف مسجل له باركود بالفعل (${currentVal})، هل أنت متأكد من رغبتك في تغييره وإعادة توليد باركود جديد؟`,
+                confirmText: 'نعم، تغيير وتوليد جديد',
+                cancelText: 'إلغاء والاحتفاظ بالباركود الحالي',
+                showCancel: true,
+                onConfirm: () => window.generateMainProductBarcode(true)
+            });
+            return;
+        }
+    }
     const sysCode = document.getElementById('newItemSysCode')?.value || String(Date.now()).slice(-6);
     const cleanSys = String(sysCode).replace(/\D/g, '').slice(-5) || '10001';
     const rand = Math.floor(1000 + Math.random() * 9000);
     const barcode = `20${cleanSys}${rand}`.slice(0, 13);
-    const inp = document.getElementById('newItemBarcode');
-    if (inp) {
-        inp.value = barcode;
-        if (typeof showToast === 'function') showToast(`⚡ تم توليد باركود فريد: ${barcode}`, 'success');
+    inp.value = barcode;
+    if (typeof showToast === 'function') showToast(`⚡ تم توليد باركود فريد: ${barcode}`, 'success');
+};
+
+// وظيفة نسخ محتوى الحقل بنقرة واحدة
+window.copyFieldContent = function(elementId, labelName = 'الكود') {
+    const el = document.getElementById(elementId);
+    if (!el || !el.value.trim()) {
+        if (typeof showToast === 'function') showToast(`⚠️ لا يوجد ${labelName} لنسخه!`, 'warning');
+        return;
     }
+    const val = el.value.trim();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(() => {
+            if (typeof showToast === 'function') showToast(`📋 تم نسخ ${labelName}: ${val} بنجاح!`, 'success');
+        }).catch(() => {
+            el.select();
+            document.execCommand('copy');
+            if (typeof showToast === 'function') showToast(`📋 تم نسخ ${labelName} بنجاح!`, 'success');
+        });
+    } else {
+        el.select();
+        document.execCommand('copy');
+        if (typeof showToast === 'function') showToast(`📋 تم نسخ ${labelName} بنجاح!`, 'success');
+    }
+};
+
+// وظيفة إظهار/إخفاء شروحات علامة الاستفهام
+window.toggleFieldHelp = function(helpBoxId) {
+    const box = document.getElementById(helpBoxId);
+    if (!box) return;
+    box.classList.toggle('hidden');
 };
 
 // طباعة تيكت الباركود مباشرة من كارت الصنف
@@ -648,42 +706,10 @@ window.printCurrentProductBarcodeDirect = function() {
         brand: brand
     };
 
-    if (typeof printHangtagSingleItem === 'function') {
+    if (typeof executePrinting === 'function') {
+        executePrinting([labelItem], 1);
+    } else if (typeof printHangtagSingleItem === 'function') {
         printHangtagSingleItem(labelItem);
-    } else {
-        const printWindow = window.open('', '_blank', 'width=380,height=420');
-        if (!printWindow) return alert('يرجى السماح بالنوافذ المنبثقة للطباعة');
-        printWindow.document.write(`
-            <!DOCTYPE html>
-            <html dir="rtl">
-            <head>
-                <meta charset="utf-8">
-                <title>طباعة تيكت - ${name}</title>
-                <style>
-                    body { font-family: 'Cairo', sans-serif; text-align: center; padding: 12px; margin: 0; }
-                    .tag-card { border: 1.5px dashed #000; padding: 14px; border-radius: 10px; width: 220px; margin: auto; }
-                    .brand { font-size: 11px; font-weight: bold; color: #444; }
-                    .name { font-size: 13px; font-weight: 900; margin: 4px 0; }
-                    .price { font-size: 16px; font-weight: 900; margin: 6px 0; color: #000; }
-                    .barcode-lines { font-family: monospace; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
-                    .barcode-num { font-family: monospace; font-size: 13px; font-weight: bold; margin-top: 3px; }
-                </style>
-            </head>
-            <body>
-                <div class="tag-card">
-                    ${brand ? `<div class="brand">🏷️ ${brand}</div>` : ''}
-                    <div class="name">${name}</div>
-                    <div class="price">${price.toFixed(2)} ج.م</div>
-                    <div class="barcode-lines">|||||||||||||||||||</div>
-                    <div class="barcode-num">${barcode}</div>
-                </div>
-                <script>
-                    window.onload = function() { window.print(); setTimeout(function() { window.close(); }, 500); }
-                </script>
-            </body>
-            </html>
-        `);
-        printWindow.document.close();
     }
 };
 

@@ -910,6 +910,8 @@
                                 <div><b style="color: #64748b; font-size: 0.85rem;">💳 طريقة الدفع:</b> <span style="font-weight: 800; color: #1e293b;">${displayMethod}</span></div>
                             `}
                             <div><b style="color: #64748b; font-size: 0.85rem;">👤 المستخدم المسؤول:</b> <span style="font-weight: 800; color: #1e293b;">${tx.cashier || tx.user || '-'}</span></div>
+                            <div><b style="color: #64748b; font-size: 0.85rem;">🏢 المخزن / الفرع:</b> <span style="font-weight: 800; color: #1e293b;">${tx.warehouse || 'المخزن الرئيسي'}</span></div>
+                            <div><b style="color: #64748b; font-size: 0.85rem;">💻 جهاز الإصدار:</b> <span style="font-weight: 800; color: #1e293b;">${tx.terminal || 'الجهاز الرئيسي 💻'}</span></div>
                             ${tx.notes ? `<div style="grid-column: span 2;"><b style="color: #64748b; font-size: 0.85rem;">📝 ملاحظات:</b> <span style="font-weight: 800; color: #1e293b;">${tx.notes}</span></div>` : ''}
                         </div>
                         
@@ -1486,7 +1488,19 @@
 
         function selectHistoryRow(idx) {
             selectedHistoryIndex = idx;
-            renderHistoryTable();
+            const tbody = document.getElementById('historyTableBody');
+            if (!tbody) return;
+            tbody.querySelectorAll('tr').forEach(tr => {
+                tr.classList.remove('selected-row');
+                const rad = tr.querySelector('input[type="radio"]');
+                if (rad) rad.checked = false;
+            });
+            const targetRow = tbody.querySelector(`tr[data-orig-index="${idx}"]`);
+            if (targetRow) {
+                targetRow.classList.add('selected-row');
+                const rad = targetRow.querySelector('input[type="radio"]');
+                if (rad) rad.checked = true;
+            }
         }
 
         function selectInvoiceRow(idx) {

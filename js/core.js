@@ -339,6 +339,8 @@ async function loadData() {
         warehouses = [{ id: 1, name: 'المخزن الرئيسي', address: 'المقر الرئيسي' }];
 
     }
+    window.warehouses = warehouses;
+
 
     // تحميل أسباب الخصم والإضافة التلقائية (من localStorage للمحافظة على التوافق حالياً)
 

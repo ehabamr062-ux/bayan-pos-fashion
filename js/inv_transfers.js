@@ -1249,7 +1249,10 @@
                                 const p = productsDB.find(prod => prod.name === item.name || prod.id === item.id);
                                 if (p) {
                                     if (!p.warehouseStocks) p.warehouseStocks = {};
-                                    p.warehouseStocks[wFrom] = Math.max(0, (parseFloat(p.warehouseStocks[wFrom]) || 0) - baseQty);
+                                    const currentPWhStock = (p.warehouseStocks[wFrom] !== undefined && !isNaN(parseFloat(p.warehouseStocks[wFrom])))
+                                        ? parseFloat(p.warehouseStocks[wFrom])
+                                        : (wFrom === 'المخزن الرئيسي' ? (parseFloat(p.stock) || 0) : 0);
+                                    p.warehouseStocks[wFrom] = Math.max(0, currentPWhStock - baseQty);
 
                                     // خصم رصيد التشكيلة (المقاس واللون) من المخزن المصدر
                                     if (p.variants && Array.isArray(p.variants)) {
@@ -1265,7 +1268,10 @@
                                             );
                                             if (matchedVar) {
                                                 if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
-                                                matchedVar.warehouseStocks[wFrom] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[wFrom]) || 0) - baseQty);
+                                                const currentVarWhStock = (matchedVar.warehouseStocks[wFrom] !== undefined && !isNaN(parseFloat(matchedVar.warehouseStocks[wFrom])))
+                                                    ? parseFloat(matchedVar.warehouseStocks[wFrom])
+                                                    : (wFrom === 'المخزن الرئيسي' ? (parseFloat(matchedVar.stock) || 0) : 0);
+                                                matchedVar.warehouseStocks[wFrom] = Math.max(0, currentVarWhStock - baseQty);
                                             }
                                         }
                                     }
@@ -1443,19 +1449,19 @@
         // =========================================================================
         function getAlertedTransfers() {
             try {
-                const raw = (typeof getStore === 'function' ? getStore('bayan_alerted_transfers') : localStorage.getItem('bayan_alerted_transfers'));
+                const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'default').trim();
+                const raw = sessionStorage.getItem(`bayan_alerted_transfers_${activeWH}`);
                 return raw ? JSON.parse(raw) : [];
             } catch(e) { return []; }
         }
 
         function markTransferAlerted(id) {
             try {
+                const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'default').trim();
                 const list = getAlertedTransfers();
                 if (!list.includes(id)) {
                     list.push(id);
-                    const str = JSON.stringify(list);
-                    if (typeof setStore === 'function') setStore('bayan_alerted_transfers', str);
-                    else localStorage.setItem('bayan_alerted_transfers', str);
+                    sessionStorage.setItem(`bayan_alerted_transfers_${activeWH}`, JSON.stringify(list));
                 }
             } catch(e) {}
         }
@@ -1464,12 +1470,22 @@
             if (typeof transactions === 'undefined' || !Array.isArray(transactions)) return;
             if (document.getElementById('incomingTransferApprovalModal')) return; // لا تكرار للنافذة إذا كانت مفتوحة
 
+            // تنظيف أي مفاتيح قديمة كانت متزامنة عبر الشبكة وتمنع ظهور الإشعار في الأجهزة الأخرى
+            try {
+                if (typeof window.AppStore !== 'undefined' && window.AppStore.bayan_alerted_transfers) {
+                    delete window.AppStore.bayan_alerted_transfers;
+                }
+                if (localStorage.getItem('bayan_alerted_transfers')) {
+                    localStorage.removeItem('bayan_alerted_transfers');
+                }
+            } catch(e) {}
+
             const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
 
             const pendingForThisWH = transactions.filter(t => 
                 t.type && t.type.includes('تحويل') && 
                 t.transferStatus === 'pending' && 
-                (t.warehouse === activeWH || t.toWarehouse === activeWH)
+                (String(t.warehouse || '').trim() === activeWH || String(t.toWarehouse || '').trim() === activeWH)
             );
 
             const alertedList = getAlertedTransfers();

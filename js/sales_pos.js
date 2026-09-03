@@ -246,19 +246,29 @@ let currentHeaderProductId = null; let currentHeaderUnit = null; // لتتبع �
 // دالة لاختيار الصنف وتعبئة بياناته في الهيدر (المربعات الملونة) قبل الحفظ
 
 async function selectProductToHeader(productId) {
-
-    const product = await db.products.get(productId);
+    const product = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+        ? productsDB.find(p => p.id === productId || p.id == productId)
+        : await db.products.get(productId);
 
     if (!product) return;
 
+    // إذا كان الصنف تشكيلة فاشون بها مقاسات أو ألوان، نفتح نافذة المقاسات واللون فوراً لاختيارها أولاً
+    const isVariantsActive = document.body.classList.contains('bayan-variants-enabled') || (product.variants && product.variants.length > 0);
+    if (isVariantsActive && product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+        const resultsDiv = document.getElementById('searchResults');
+        if (resultsDiv) resultsDiv.style.display = 'none';
+        if (typeof showVariantSelectionModal === 'function') {
+            showVariantSelectionModal(product, 'sales');
+            return;
+        }
+    }
+
     currentHeaderProductId = productId; // تخزين الـ ID الحالي
+    window._pendingSalesVariant = null;
 
     const resultsDiv = document.getElementById('searchResults');
-
     const pSearch = document.getElementById('productSearch');
-
     const hQty = document.getElementById('headerQty');
-
     const hPrice = document.getElementById('headerPrice');
 
     // 1. كتابة اسم الصنف في مربع البحث
@@ -349,34 +359,48 @@ async function handleSearch(query) {
     }
 
     // 1. فحص باركود أو كود (تطابق تام صريح)
-
-    if (query.length >= 8 && typeof db !== 'undefined' && db.products) {
-        try {
-            let exact = await db.products.where('barcode').equals(query).first();
-
-            if (!exact) exact = await db.products.where('code').equals(query).first();
-
-            if (exact) {
-
-                selectProductToHeader(exact.id);
-
-                return;
-
+    if (query.length >= 8) {
+        // فحص سريع في باركود التشكيلات (المقاس واللون) أولاً
+        for (const p of productsDB) {
+            if (p.variants && Array.isArray(p.variants)) {
+                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === query.trim());
+                if (vFound) {
+                    addToCart(p.id, null, vFound);
+                    if (resultsDiv) resultsDiv.style.display = 'none';
+                    const sInp = document.getElementById('productSearch');
+                    if (sInp) sInp.value = '';
+                    return;
+                }
             }
-        } catch (e) { console.warn('DB Search error:', e); }
+        }
+
+        if (typeof db !== 'undefined' && db.products) {
+            try {
+                let exact = await db.products.where('barcode').equals(query).first();
+                if (!exact) exact = await db.products.where('code').equals(query).first();
+                if (exact) {
+                    selectProductToHeader(exact.id);
+                    return;
+                }
+            } catch (e) { console.warn('DB Search error:', e); }
+        }
     }
 
     // 2. البحث الحي (Live Search)
-
     const queryLower = query.toLowerCase();
 
     const filtered = [];
     for (let i = 0; i < productsDB.length; i++) {
         const p = productsDB[i];
+        let hasVariantMatch = false;
+        if (p.variants && Array.isArray(p.variants)) {
+            hasVariantMatch = p.variants.some(v => v.barcode && String(v.barcode).toLowerCase().includes(queryLower));
+        }
         if (
             (p.name && p.name.toLowerCase().includes(queryLower)) ||
             (p.barcode && String(p.barcode).toLowerCase().includes(queryLower)) ||
-            (p.code && String(p.code).toLowerCase().includes(queryLower))
+            (p.code && String(p.code).toLowerCase().includes(queryLower)) ||
+            hasVariantMatch
         ) {
             filtered.push(p);
             if (filtered.length >= 10) break;
@@ -564,11 +588,10 @@ async function handleSearchEnter(query, event, forceAdd = false) {
     }
 
     if (forceAdd && typeof currentHeaderProductId !== 'undefined' && currentHeaderProductId) {
-
-        addToCart(currentHeaderProductId, typeof currentHeaderUnit !== 'undefined' ? currentHeaderUnit : null);
-
+        const pendingVariant = window._pendingSalesVariant || null;
+        addToCart(currentHeaderProductId, typeof currentHeaderUnit !== 'undefined' ? currentHeaderUnit : null, pendingVariant);
+        window._pendingSalesVariant = null;
         return;
-
     }
 
     if (!query || query.trim() === "") return;
@@ -577,16 +600,44 @@ async function handleSearchEnter(query, event, forceAdd = false) {
 
     // 1. بحث فوري في باركود تشكيلات المقاسات والألوان (Variant Barcode Match)
     let matchingVariant = null;
-    let pInDB = productsDB.find(p => {
-        if (p.variants && Array.isArray(p.variants)) {
-            const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
-            if (vFound) {
-                matchingVariant = vFound;
-                return true;
+    let pInDB = null;
+
+    if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+        pInDB = productsDB.find(p => {
+            if (p.variants && Array.isArray(p.variants)) {
+                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
+                if (vFound) {
+                    matchingVariant = vFound;
+                    return true;
+                }
             }
+            return false;
+        });
+    }
+
+    // إذا لم نجد في الذاكرة، نبحث مباشرة في IndexedDB لضمان التطابق 100%
+    if (!pInDB && typeof db !== 'undefined' && db.products) {
+        try {
+            const allDbProds = await db.products.toArray();
+            for (const p of allDbProds) {
+                if (p.variants && Array.isArray(p.variants)) {
+                    const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
+                    if (vFound) {
+                        pInDB = p;
+                        matchingVariant = vFound;
+                        if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                            const exIdx = productsDB.findIndex(x => x.id === p.id);
+                            if (exIdx !== -1) productsDB[exIdx] = p;
+                            else productsDB.push(p);
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn("DB variant search error:", err);
         }
-        return false;
-    });
+    }
 
     if (pInDB && matchingVariant) {
         // إذا كان مسح باركود مقاس محدد، نضيفه للسلة فوراً بتفاصيله
@@ -635,7 +686,17 @@ async function handleSearchEnter(query, event, forceAdd = false) {
             return;
         }
 
-        // دايماً نعبي الخانات أولاً ونركز على الكمية (حسب طلب المستخدم)
+        // إذا كان مسح باركود مباشر لمنتج قياسي، ينزل في السلة فوراً ويفضي الخانة لضرب الصنف التالي
+        const isExactBarcode = (pInDB.barcode && String(pInDB.barcode).trim() === cleanQuery);
+        if (isExactBarcode && (!pInDB.units || pInDB.units.length <= 1)) {
+            addToCart(pInDB.id);
+            if (resultsDiv) resultsDiv.style.display = 'none';
+            const searchInput = document.getElementById('productSearch');
+            if (searchInput) searchInput.value = '';
+            return;
+        }
+
+        // إذا تم البحث اليدوي بالاسم أو الكود، نعبي الخانات أولاً ونركز على الكمية
         selectProductToHeader(pInDB.id);
     } else {
 
@@ -2049,6 +2110,7 @@ async function saveBill(force = false, accountChecked = false) {
         }
 
         // --- 1. التحقق الصارم من توفر الكميات في المخزن (منع البيع بالسالب نهائياً) ---
+        const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
         let stockErrors = [];
 
         cart.forEach(item => {
@@ -2084,13 +2146,30 @@ async function saveBill(force = false, accountChecked = false) {
                     }
                 }
 
-                const currentBaseStock = effVariant ? (parseFloat(effVariant.stock) || 0) : (parseFloat(p.stock) || 0);
+                let currentBaseStock = 0;
+                if (effVariant) {
+                    if (effVariant.warehouseStocks && typeof effVariant.warehouseStocks === 'object' && effVariant.warehouseStocks[activeWH] !== undefined) {
+                        currentBaseStock = parseFloat(effVariant.warehouseStocks[activeWH]) || 0;
+                    } else if (activeWH === 'المخزن الرئيسي' || !effVariant.warehouseStocks) {
+                        currentBaseStock = parseFloat(effVariant.stock) || 0;
+                    } else {
+                        currentBaseStock = 0;
+                    }
+                } else {
+                    if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[activeWH] !== undefined) {
+                        currentBaseStock = parseFloat(p.warehouseStocks[activeWH]) || 0;
+                    } else if (activeWH === 'المخزن الرئيسي' || !p.warehouseStocks) {
+                        currentBaseStock = parseFloat(p.stock) || 0;
+                    } else {
+                        currentBaseStock = 0;
+                    }
+                }
                 const availStock = currentBaseStock + originalQtyInInvoice;
 
                 if (baseQty > availStock) {
                     const variantInfo = effVariant ? ` [${effVariant.size || ''} ${effVariant.color || ''}]` : '';
                     const availInUnit = (availStock / factor).toFixed(2).replace(/\.00$/, '');
-                    stockErrors.push(`❌ ${item.name}${variantInfo}: مطلوب (${item.qty}) / متوفر بالمخزن (${availInUnit})`);
+                    stockErrors.push(`❌ ${item.name}${variantInfo}: مطلوب (${item.qty}) / متوفر في (${activeWH}): (${availInUnit})`);
                 }
             }
         });
@@ -2353,7 +2432,9 @@ async function saveBill(force = false, accountChecked = false) {
 
         let accumulatedItemsTotal = 0;
 
-        const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
+        const terminalName = (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer)
+            ? 'الجهاز الرئيسي 💻'
+            : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱');
 
         cart.forEach((cartItem, idx) => {
 
@@ -2441,6 +2522,7 @@ async function saveBill(force = false, accountChecked = false) {
                 invoiceTaxType: (idx === 0) ? (document.getElementById('taxType')?.value || 'val') : 'val',
                 invoiceGrandTotal: (idx === 0) ? currentTotal : 0,
                 warehouse: activeWH,
+                terminal: terminalName,
                 unitFactor: factor, // حفظ المعامل للرجوع إليه عند التعديل مستقبلاً
                 editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل: ${currentUser ? currentUser.name : 'مجهول'})` : '-'
             });
@@ -2448,6 +2530,10 @@ async function saveBill(force = false, accountChecked = false) {
         });
 
         await saveData();
+
+        if (!isEditMode && typeof window.registerTrialInvoiceCreation === 'function') {
+            window.registerTrialInvoiceCreation();
+        }
 
         if (typeof logAuditAction === 'function') {
             const auditAction = isEditMode ? 'تحديث فاتورة بيع' : 'حفظ فاتورة بيع جديدة';
@@ -2804,96 +2890,51 @@ function printPurchaseBill() {
 
     let taxVal = parseFloat(document.getElementById('purchaseTax').value) || 0;
 
-    const taxType = document.getElementById('purchaseTaxType').value;
-
-    let taxAmount = (taxType === 'perc') ? (subTotal * taxVal / 100) : taxVal;
-
     const settings = JSON.parse(getStore('pos_settings') || '{}');
-
     const globalTaxEnabled = settings.taxEnabled || false;
-
     const globalTaxPercent = parseFloat(settings.taxPercent) || 0;
-
     let globalTaxAmount = globalTaxEnabled ? (subTotal * globalTaxPercent / 100) : 0;
-
     let finalTotal = subTotal - discountAmount + taxAmount + globalTaxAmount;
-
     const purchaseTaxReasonEl = document.getElementById('purchaseTaxReason');
-
     const selectedPurchaseTaxReason = purchaseTaxReasonEl ? purchaseTaxReasonEl.value.trim() : 'إضافة';
 
     const invoiceData = {
-
         invoiceNumber: purchaseId,
-
         invoiceType: 'نقداً',
-
         date: dt.iso || dt.full.split(' ')[0],
-
         time: dt.time || '',
-
         cashier: currentUser.name,
-
         customer: supplier,
-
         items: purchaseCart,
-
         subTotal: subTotal,
-
         discount: discountAmount,
-
         tax: taxAmount,
-
         taxLabel: selectedPurchaseTaxReason,
-
         globalTax: globalTaxAmount,
-
         totalAmount: finalTotal,
-
         paid: finalTotal,
-
         deferred: 0,
-
         prevBalance: 0,
-
         currentBalance: 0,
-
         docType: 'purchase'
-
     };
 
     if (typeof printInvoice === 'function') {
-
         printInvoice(invoiceData);
-
     } else {
-
         alert('خطأ: محرك الطباعة غير متوفر!');
-
     }
-
 }
 
 async function showCurrentBillProfit() {
-
     if (cart.length === 0) return alert("⚠️ الفاتورة فارغة!");
-
     let totalCost = 0;
-
     let totalSale = 0;
-
     for (const item of cart) {
-
-        // محاولة جلب المنتج بكل الطرق (رقم أو نص) لضمان الدقة
-
         let latestProduct = await db.products.get(item.id);
-
         if (!latestProduct && !isNaN(item.id)) {
-
             latestProduct = await db.products.get(Number(item.id));
-
         }
-
         const baseCost = latestProduct ? (parseFloat(latestProduct.avgBuyPrice) || parseFloat(latestProduct.cost) || 0) : (parseFloat(item.cost) || 0);
 
         console.log(`DB Debug - Item: ${item.name}, ID: ${item.id}, Found in DB: ${!!latestProduct}, Avg Price: ${baseCost}`);
@@ -3052,9 +3093,10 @@ function toggleQuickItems() {
     if (container.style.display === 'none') {
         container.style.display = 'flex';
         if (btn) {
-            btn.style.background = 'linear-gradient(135deg, #0284c7, #0369a1)';
-            btn.style.borderColor = '#0284c7';
-            btn.innerHTML = '📸';
+            btn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+            btn.style.borderColor = '#b45309';
+            btn.style.color = '#000';
+            btn.innerHTML = '<span>🖼️</span> <span>صور الموديلات</span>';
         }
         if (tableContainer) tableContainer.style.flex = '1.5';
         setStore('showQuickItems', 'true');
@@ -3062,8 +3104,9 @@ function toggleQuickItems() {
         container.style.display = 'none';
         if (btn) {
             btn.style.background = '#64748b';
-            btn.style.borderColor = '#64748b';
-            btn.innerHTML = '🖼️';
+            btn.style.borderColor = '#475569';
+            btn.style.color = '#fff';
+            btn.innerHTML = '<span>🖼️</span> <span>صور الموديلات</span>';
         }
         if (tableContainer) tableContainer.style.flex = '1';
         setStore('showQuickItems', 'false');
@@ -3085,8 +3128,9 @@ setTimeout(() => {
             container.style.display = 'none';
             if (btn) {
                 btn.style.background = '#64748b';
-                btn.style.borderColor = '#64748b';
-                btn.innerHTML = '🖼️';
+                btn.style.borderColor = '#475569';
+                btn.style.color = '#fff';
+                btn.innerHTML = '<span>🖼️</span> <span>صور الموديلات</span>';
             }
             if (tableContainer) tableContainer.style.flex = '1';
         }

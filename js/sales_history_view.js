@@ -122,23 +122,16 @@ function toggleHistoryColumn(index, isVisible) {
 }
 
 function applyHistoryColumnVisibility() {
+    let historyCols = JSON.parse(getStore('pos_hist_cols') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true}');
 
-    let historyCols = JSON.parse(getStore('pos_hist_cols') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true}');
-
-    for (let i = 0; i <= 10; i++) {
-
+    for (let i = 0; i <= 11; i++) {
         const isVisible = historyCols[i] !== false;
-
         toggleHistoryColumn(i, isVisible);
 
         // تحديث الشيك بوكس في القائمة المنبثقة
-
         const checkbox = document.querySelector(`#historyColCheckboxes input[onchange*="(${i},"]`);
-
         if (checkbox) checkbox.checked = isVisible;
-
     }
-
 }
 
 // متخصص لفلترة الفترة في صفحة الحركة
@@ -215,96 +208,222 @@ function applyHistoryPeriodFilter(period) {
 
 }
 
+/**
+ * 🧮 حساب الرصيد التراكمي الفعلي لكل صنف وتشكيلة لحظة كل حركة تاريخية (Running Ledger Balance)
+ */
+function computeTransactionRunningBalances() {
+    const balanceMap = new Map();
+    if (typeof transactions === 'undefined' || !Array.isArray(transactions) || transactions.length === 0) {
+        return balanceMap;
+    }
+
+    const productGroups = {};
+
+    transactions.forEach((t, origIdx) => {
+        if (!t || !t.product) return;
+        const isInvTx = ['بيع', 'شراء', 'مرتجع', 'تسوية', 'تحويل'].some(k => t.type && t.type.includes(k));
+        if (!isInvTx) return;
+
+        const pName = String(t.product || '').trim();
+        const sSize = String(t.size || t.selectedSize || '').trim();
+        const sColor = String(t.color || t.selectedColor || '').trim();
+        const key = `${pName}___${sSize}___${sColor}`;
+
+        if (!productGroups[key]) {
+            productGroups[key] = {
+                productName: pName,
+                size: sSize,
+                color: sColor,
+                txList: []
+            };
+        }
+        productGroups[key].txList.push({ t, origIdx });
+    });
+
+    Object.values(productGroups).forEach(grp => {
+        const p = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+            ? productsDB.find(x => x && (x.name === grp.productName || x.id === grp.productName))
+            : null;
+
+        let currentStock = 0;
+        if (p) {
+            if (grp.size || grp.color) {
+                const v = (p.variants && Array.isArray(p.variants))
+                    ? p.variants.find(x => 
+                        (!grp.size || String(x.size || '').trim() === grp.size) && 
+                        (!grp.color || String(x.color || '').trim() === grp.color)
+                    ) : null;
+                currentStock = v ? (parseFloat(v.stock) || 0) : (parseFloat(p.stock) || 0);
+            } else {
+                currentStock = parseFloat(p.stock) || 0;
+            }
+        }
+
+        let running = currentStock;
+        for (let i = grp.txList.length - 1; i >= 0; i--) {
+            const item = grp.txList[i];
+            balanceMap.set(item.origIdx, running);
+
+            const factor = parseFloat(item.t.unitFactor) || 1;
+            const qty = (parseFloat(item.t.qty) || 0) * factor;
+            const type = item.t.type || '';
+
+            let delta = 0;
+            if (type.includes('شراء') && !type.includes('مرتجع')) delta = qty;
+            else if (type.includes('مرتجع بيع')) delta = qty;
+            else if (type.includes('بيع') && !type.includes('مرتجع')) delta = -qty;
+            else if (type.includes('مرتجع شراء')) delta = -qty;
+            else if (type.includes('تسوية')) delta = qty;
+            else if (type.includes('تحويل')) delta = -qty;
+
+            running = running - delta;
+        }
+    });
+
+    return balanceMap;
+}
+
 function renderHistoryTable(filterName = null) {
-
     const tbody = document.getElementById('historyTableBody');
+    if (!tbody) return;
 
-    const fromDate = document.getElementById('historyDateFrom').value;
-
-    const toDate = document.getElementById('historyDateTo').value;
-
-    const typeFilter = document.getElementById('historyTypeFilter').value;
-
-    const methodFilter = document.getElementById('historyMethodFilter').value;
+    const fromDate = document.getElementById('historyDateFrom')?.value;
+    const toDate = document.getElementById('historyDateTo')?.value;
+    const typeFilter = document.getElementById('historyTypeFilter')?.value;
+    const methodFilter = document.getElementById('historyMethodFilter')?.value;
 
     if (!filterName) {
-
         const searchVal = document.getElementById('historySearch')?.value?.trim();
-
         if (searchVal) filterName = searchVal;
-
     }
 
     tbody.innerHTML = '';
 
-    // إضافة index أصلي لكل عنصر للتمكن من حذفه بشكل صحيح
+    // حساب الأرصدة التراكمية الدقيقة لكافة الحركات
+    const balanceMap = computeTransactionRunningBalances();
 
+    // إضافة index أصلي لكل عنصر للتمكن من حذفه بشكل صحيح
     let data = transactions.map((t, i) => ({ ...t, originalIndex: i }));
 
     // 1. فلترة إجبارية: عرض الحركات المخزنية فقط (استبعاد القبض والصرف المالي البحت)
-
-    data = data.filter(t => ['بيع', 'شراء', 'مرتجع', 'تسوية', 'تحويل'].some(k => t.type.includes(k)));
+    data = data.filter(t => ['بيع', 'شراء', 'مرتجع', 'تسوية', 'تحويل'].some(k => t.type && t.type.includes(k)));
 
     // 2. فلترة الأصناف: استبعاد سجلات الرأس (Head) التي لا تحتوي على صنف فعلي
-
     data = data.filter(t => t.product);
 
-    // فلترة بالتاريخ
-
-    if (fromDate) data = data.filter(t => t.dateISO >= fromDate && t.dateISO !== undefined);
-
-    if (toDate) data = data.filter(t => t.dateISO <= toDate && t.dateISO !== undefined);
+    // فلترة بالتاريخ (مرنة تدعم dateISO و date)
+    if (fromDate) data = data.filter(t => (t.dateISO ? t.dateISO >= fromDate : (t.date && t.date >= fromDate)));
+    if (toDate) data = data.filter(t => (t.dateISO ? t.dateISO <= toDate : (t.date && t.date <= toDate)));
 
     if (typeFilter && typeFilter !== 'all') {
-
         if (typeFilter === 'بيع') {
-
             data = data.filter(t => t.type.includes('بيع') && !t.type.includes('مرتجع'));
-
         } else if (typeFilter === 'شراء') {
-
             data = data.filter(t => t.type.includes('شراء') && !t.type.includes('مرتجع'));
-
         } else {
-
             data = data.filter(t => t.type.includes(typeFilter));
-
         }
-
     }
 
     // فلترة بطريقة السداد
-
-    if (methodFilter !== 'all') {
-
+    if (methodFilter && methodFilter !== 'all') {
         if (methodFilter === 'cash') {
-
             data = data.filter(t => t.method && (t.method.includes('نقدية') || t.method.includes('نقدي') || t.method.includes('فودافون')));
-
         } else if (methodFilter === 'credit') {
-
             data = data.filter(t => t.method && t.method.includes('آجل'));
-
         }
-
     }
 
     // فلترة بالاسم (إذا تم تمريره)
-
     if (filterName) {
-
-        data = data.filter(t => (t.product && t.product.toLowerCase().includes(filterName.toLowerCase())));
-
+        const fLower = filterName.toLowerCase();
+        data = data.filter(t => (t.product && t.product.toLowerCase().includes(fLower)));
     }
+
+    // فلترة برقم الفاتورة أو العميل إذا تم إدخالها
+    const invClientFilter = document.getElementById('historyInvoiceClientFilter')?.value?.trim()?.toLowerCase();
+    if (invClientFilter) {
+        data = data.filter(t => 
+            (t.invoiceId && String(t.invoiceId).toLowerCase().includes(invClientFilter)) ||
+            (t.partner && String(t.partner).toLowerCase().includes(invClientFilter))
+        );
+    }
+
+    // 📊 حساب إحصائيات الكروت العلوية من واقع الحركات المعروضة
+    let totalInQty = 0;
+    let totalOutQty = 0;
+    let totalAmountSum = 0;
+
+    data.forEach(t => {
+        const factor = parseFloat(t.unitFactor) || 1;
+        const qty = (parseFloat(t.qty) || 0) * factor;
+        const total = parseFloat(t.total) || 0;
+        totalAmountSum += total;
+
+        const type = t.type || '';
+        if ((type.includes('شراء') && !type.includes('مرتجع')) || type.includes('مرتجع بيع')) {
+            totalInQty += qty;
+        } else if ((type.includes('بيع') && !type.includes('مرتجع')) || type.includes('مرتجع شراء')) {
+            totalOutQty += qty;
+        } else if (type.includes('تسوية') || type.includes('تحويل')) {
+            if (qty >= 0) totalInQty += qty;
+            else totalOutQty += Math.abs(qty);
+        }
+    });
+
+    const netQty = totalInQty - totalOutQty;
+
+    // تحديث الكروت العلوية
+    const inCardEl = document.getElementById('histCardInQty');
+    const outCardEl = document.getElementById('histCardOutQty');
+    const netCardEl = document.getElementById('histCardNetQty');
+    const amtCardEl = document.getElementById('histCardTotalAmount');
+
+    if (inCardEl) inCardEl.innerText = totalInQty % 1 === 0 ? totalInQty : totalInQty.toFixed(2);
+    if (outCardEl) outCardEl.innerText = totalOutQty % 1 === 0 ? totalOutQty : totalOutQty.toFixed(2);
+    if (netCardEl) {
+        netCardEl.innerText = (netQty > 0 ? '+' : '') + (netQty % 1 === 0 ? netQty : netQty.toFixed(2));
+        netCardEl.style.color = netQty >= 0 ? '#1e40af' : '#dc2626';
+    }
+    if (amtCardEl) amtCardEl.innerHTML = `${totalAmountSum.toFixed(2)} <span style="font-size:0.75rem;">ج.م</span>`;
 
     let rowsHtml = '';
     data.forEach(t => {
         const isSelected = (selectedHistoryIndex === t.originalIndex);
+
+        const sSize = t.size || t.selectedSize || '';
+        const sColor = t.color || t.selectedColor || '';
+        const whName = t.warehouse || '';
+
+        let fashionBadges = '';
+        if (sSize || sColor || whName) {
+            fashionBadges = `
+                <div style="display: flex; gap: 4px; margin-top: 3px; font-size: 0.75rem; flex-wrap: wrap; align-items: center;">
+                    ${sSize ? `<span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 1px 6px; border-radius: 4px; font-weight: 800;">${sSize}</span>` : ''}
+                    ${sColor ? `<span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 1px 6px; border-radius: 4px; font-weight: 800;">${sColor}</span>` : ''}
+                    ${whName ? `<span style="background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; padding: 1px 6px; border-radius: 4px; font-weight: 700;">🏢 ${whName}</span>` : ''}
+                </div>
+            `;
+        }
+
+        // الرصيد بعد العملية التراكمي الفعلي
+        const bal = balanceMap.get(t.originalIndex);
+        let balHtml = '<span style="color:#94a3b8; font-weight:700;">—</span>';
+        if (bal !== undefined && bal !== null) {
+            if (bal > 0) {
+                balHtml = `<span style="color: #059669; font-weight: 900;">▲ ${bal % 1 === 0 ? bal : bal.toFixed(2)}</span>`;
+            } else if (bal < 0) {
+                balHtml = `<span style="color: #dc2626; font-weight: 900;">▼ ${Math.abs(bal % 1 === 0 ? bal : bal.toFixed(2))}</span>`;
+            } else {
+                balHtml = `<span style="color: #94a3b8; font-weight: 800;">0</span>`;
+            }
+        }
+
         rowsHtml += `
-            <tr class="${isSelected ? 'selected-row' : ''}" onclick="selectHistoryRow(${t.originalIndex})">
+            <tr data-orig-index="${t.originalIndex}" class="${isSelected ? 'selected-row' : ''}" onclick="selectHistoryRow(${t.originalIndex})">
                 <td class="col-hist-0"><input type="radio" name="histRad" ${isSelected ? 'checked' : ''}></td>
                 <td class="col-hist-1"><span style="background:#eee; padding:2px 6px; border-radius:4px; font-weight:bold;">${t.invoiceId || '-'}</span></td>
-                <td class="col-hist-2">${t.date}</td>
+                <td class="col-hist-2">${t.date || '-'}</td>
                 <td class="col-hist-3">
                     <span class="stock-badge ${t.type.includes('بيع') ? (t.type.includes('مرتجع') ? 'badge-return' : 'badge-sale') :
                         (t.type.includes('شراء') ? (t.type.includes('مرتجع') ? 'badge-return' : 'badge-purchase') :
@@ -312,26 +431,27 @@ function renderHistoryTable(filterName = null) {
                         ${t.type}
                     </span>
                 </td>
-                <td class="col-hist-4" style="font-weight:bold;">${t.product || '-'}</td>
-                <td class="col-hist-5">${t.qty || 0}</td>
-                <td class="col-hist-6">${t.price || 0}</td>
-                <td class="col-hist-7" style="font-weight:bold; color:var(--main-blue);">${t.total || 0}</td>
+                <td class="col-hist-4" style="text-align: right;">
+                    <div style="font-weight: 800; color: #1e293b;">${t.product || '-'}</div>
+                    ${fashionBadges}
+                </td>
+                <td class="col-hist-5" style="font-weight: bold;">${t.qty || 0}</td>
+                <td class="col-hist-6">${parseFloat(t.price || 0).toFixed(2)}</td>
+                <td class="col-hist-7" style="font-weight:bold; color:var(--main-blue);">${parseFloat(t.total || 0).toFixed(2)}</td>
                 <td class="col-hist-8">${t.partner || '-'}</td>
                 <td class="col-hist-9" style="font-size:0.75rem; color:#64748b;">${t.editDate || '-'}</td>
                 <td class="col-hist-10" style="font-size:0.85rem; color:#0f766e; font-weight:bold;">${t.user || '-'}</td>
+                <td class="col-hist-11" style="text-align: center; background: linear-gradient(135deg, rgba(124,58,237,0.05), rgba(245,158,11,0.05)); font-weight: 900;">${balHtml}</td>
             </tr>`;
     });
 
-    tbody.innerHTML = rowsHtml || `<tr><td colspan="11" style="text-align:center; padding:20px;">لا توجد حركات مسجلة</td></tr>`;
+    tbody.innerHTML = rowsHtml || `<tr><td colspan="12" style="text-align:center; padding:20px;">لا توجد حركات مسجلة</td></tr>`;
 
     if (document.getElementById('historyBadgeCount')) document.getElementById('historyBadgeCount').innerText = 'عدد: ' + data.length;
 
     if (typeof applyHistoryColumnVisibility === 'function') {
-
         applyHistoryColumnVisibility();
-
     }
-
 }
 
 // متغيرات للتحكم في ظهور الأعمدة مع الحفظ في localStorage

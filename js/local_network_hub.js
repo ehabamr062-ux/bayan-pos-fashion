@@ -138,7 +138,7 @@
                     users: window.users || [],
                     warehouses: window.warehouses || [],
                     trash: window.trash || window.trashBin || [],
-                    treasuryAudit: window.treasuryAudit || [],
+                    treasuryAudit: window.treasuryAuditRecords || window.treasuryAudit || [],
                     settings: window.AppStore || {}
                 };
 
@@ -155,7 +155,11 @@
                     const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/push`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ db: dbPayload, sourceDeviceId: this.deviceId || 'DEV-HOST' })
+                        body: JSON.stringify({ 
+                            db: dbPayload, 
+                            sourceDeviceId: this.isMasterServer ? 'DEV-HOST' : (this.deviceId || 'DEV-CLIENT'),
+                            isMasterServer: !!this.isMasterServer
+                        })
                     });
                     const data = await res.json();
                     if (data && data.lastUpdated) {
@@ -166,6 +170,173 @@
             } catch (e) {
                 console.warn('[NetworkHub] pushLocalDbToServer error:', e.message);
             }
+        },
+
+        getTrashedProductKeys: function(trashList = []) {
+            const set = new Set();
+            if (!Array.isArray(trashList)) return set;
+            trashList.forEach(t => {
+                if (!t) return;
+                const d = t.originalData || t;
+                if (d.id) set.add(String(d.id));
+                if (d.barcode) set.add(String(d.barcode).trim());
+            });
+            return set;
+        },
+
+        getTrashedAccountKeys: function(trashList = []) {
+            const set = new Set();
+            if (!Array.isArray(trashList)) return set;
+            trashList.forEach(t => {
+                if (!t) return;
+                const tType = String(t.type || '').toLowerCase();
+                if (tType === 'account' || tType === 'عميل' || tType === 'مورد') {
+                    const d = t.originalData || t;
+                    if (d.id) set.add(String(d.id));
+                    if (d.name) set.add(String(d.name).trim());
+                }
+            });
+            return set;
+        },
+
+        mergeTransactions: function(existingList = [], incomingList = []) {
+            if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
+            if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+
+            const map = new Map();
+            const getKey = (t) => {
+                if (!t) return '';
+                if (t.id) return `id_${t.id}`;
+                const inv = t.invoiceId || '';
+                const prod = t.product || t.productName || '';
+                const s = t.size || t.selectedSize || '';
+                const c = t.color || t.selectedColor || '';
+                const d = t.dateISO || t.date || '';
+                const tm = t.timeISO || t.time || '';
+                const wh = t.warehouse || '';
+                const qty = t.qty || 0;
+                return `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+            };
+
+            existingList.forEach(t => {
+                const k = getKey(t);
+                if (k) map.set(k, t);
+            });
+
+            incomingList.forEach(t => {
+                const k = getKey(t);
+                if (!k) return;
+                if (!map.has(k)) {
+                    map.set(k, t);
+                } else {
+                    const existing = map.get(k);
+                    map.set(k, { ...existing, ...t });
+                }
+            });
+
+            return Array.from(map.values());
+        },
+
+        mergeProducts: function(existingList = [], incomingList = []) {
+            if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
+            if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+
+            const map = new Map();
+            const getKey = (p) => p.id || p.barcode || p.name;
+
+            existingList.forEach(p => {
+                const k = getKey(p);
+                if (k) map.set(String(k), p);
+            });
+
+            incomingList.forEach(p => {
+                const k = getKey(p);
+                if (!k) return;
+                const sKey = String(k);
+                if (!map.has(sKey)) {
+                    map.set(sKey, p);
+                } else {
+                    const existing = map.get(sKey);
+                    const mergedWhStocks = { ...(existing.warehouseStocks || {}), ...(p.warehouseStocks || {}) };
+                    
+                    let mergedVariants = p.variants || existing.variants;
+                    if (Array.isArray(existing.variants) && Array.isArray(p.variants)) {
+                        const varMap = new Map();
+                        existing.variants.forEach(v => varMap.set(`${v.size}_${v.color}`, v));
+                        p.variants.forEach(v => {
+                            const vk = `${v.size}_${v.color}`;
+                            if (!varMap.has(vk)) {
+                                varMap.set(vk, v);
+                            } else {
+                                const ev = varMap.get(vk);
+                                const vWhStocks = { ...(ev.warehouseStocks || {}), ...(v.warehouseStocks || {}) };
+                                varMap.set(vk, { ...ev, ...v, warehouseStocks: vWhStocks });
+                            }
+                        });
+                        mergedVariants = Array.from(varMap.values());
+                    }
+
+                    map.set(sKey, {
+                        ...existing,
+                        ...p,
+                        warehouseStocks: mergedWhStocks,
+                        variants: mergedVariants
+                    });
+                }
+            });
+
+            return Array.from(map.values());
+        },
+
+        mergeAccounts: function(existingList = [], incomingList = []) {
+            if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
+            if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+
+            const map = new Map();
+            const getKey = (a) => a.id || a.code || a.name;
+
+            existingList.forEach(a => {
+                const k = getKey(a);
+                if (k) map.set(String(k), a);
+            });
+
+            incomingList.forEach(a => {
+                const k = getKey(a);
+                if (!k) return;
+                const sKey = String(k);
+                if (!map.has(sKey)) {
+                    map.set(sKey, a);
+                } else {
+                    const existing = map.get(sKey);
+                    map.set(sKey, { ...existing, ...a });
+                }
+            });
+
+            return Array.from(map.values());
+        },
+
+        mergeTrash: function(existingList = [], incomingList = []) {
+            if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
+            if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+
+            const map = new Map();
+            const getKey = (item) => item.id || `${item.type}_${item.label}_${item.deletedAt}`;
+
+            existingList.forEach(it => {
+                const k = getKey(it);
+                if (k) map.set(String(k), it);
+            });
+
+            incomingList.forEach(it => {
+                const k = getKey(it);
+                if (!k) return;
+                const sKey = String(k);
+                if (!map.has(sKey)) {
+                    map.set(sKey, it);
+                }
+            });
+
+            return Array.from(map.values());
         },
 
         pullMasterDb: async function() {
@@ -180,14 +351,66 @@
                         return;
                     }
                     this.lastSyncedTimestamp = db.lastUpdated || new Date().toISOString();
-                    if (Array.isArray(db.products)) window.productsDB = db.products;
-                    if (Array.isArray(db.accounts)) window.accounts = db.accounts;
-                    if (Array.isArray(db.transactions)) window.transactions = db.transactions;
-                    if (Array.isArray(db.trash)) window.trash = window.trashBin = db.trash;
-                    if (Array.isArray(db.treasuryAudit)) window.treasuryAudit = db.treasuryAudit;
+
+                    // دمج ذكي للعمليات يمنع حذف أي حركة تمت في وضع الأوفلاين
+                    const mergedTransactions = this.mergeTransactions(db.transactions || [], window.transactions || []);
+                    const hasNewOfflineTransactions = mergedTransactions.length > (db.transactions ? db.transactions.length : 0);
+
+                    // دمج سلة المحذوفات أولاً
+                    const mergedTrash = this.mergeTrash(db.trash || [], window.trashBin || []);
+                    window.trash = window.trashBin = mergedTrash;
+                    const trashedKeys = this.getTrashedProductKeys(mergedTrash);
+
+                    // استلام وتحديث أصناف السيرفر الماستر مع استبعاد أي صنف موجود بالسلة
+                    if (Array.isArray(db.products)) {
+                        window.productsDB = db.products.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+                    }
+
+                    const trashedAccountKeys = this.getTrashedAccountKeys(mergedTrash);
+                    if (Array.isArray(db.accounts)) {
+                        window.accounts = db.accounts.filter(a => a && !trashedAccountKeys.has(String(a.id)) && !trashedAccountKeys.has(String(a.name || '').trim()));
+                    }
+                    if (Array.isArray(db.treasuryAudit)) {
+                        window.treasuryAudit = window.treasuryAuditRecords = db.treasuryAudit;
+                        if (typeof renderTreasuryAuditTable === 'function') renderTreasuryAuditTable();
+                    }
                     if (Array.isArray(db.warehouses) && db.warehouses.length > 0) window.warehouses = db.warehouses;
                     if (db.settings && typeof db.settings === 'object') {
                         window.AppStore = { ...window.AppStore, ...db.settings };
+                    }
+
+                    // تنظيف داتابيز التابلت المحلية Dexie من الأصناف والحسابات المحذوفة فوراً
+                    if (window.bayanDB) {
+                        try {
+                            if (window.bayanDB.products) {
+                                const currentLocal = await window.bayanDB.products.toArray();
+                                const serverIdSet = new Set((window.productsDB || []).map(p => p.id));
+                                const obsoleteIds = currentLocal.filter(p => !serverIdSet.has(p.id) || trashedKeys.has(String(p.id))).map(p => p.id);
+                                if (obsoleteIds.length > 0) {
+                                    await window.bayanDB.products.bulkDelete(obsoleteIds);
+                                }
+                                if (window.productsDB && window.productsDB.length > 0) {
+                                    await window.bayanDB.products.bulkPut(window.productsDB);
+                                }
+                            }
+                            if (window.bayanDB.accounts) {
+                                const currentLocalAccs = await window.bayanDB.accounts.toArray();
+                                const serverAccIdSet = new Set((window.accounts || []).map(a => a.id));
+                                const obsoleteAccIds = currentLocalAccs.filter(a => !serverAccIdSet.has(a.id) || trashedAccountKeys.has(String(a.id))).map(a => a.id);
+                                if (obsoleteAccIds.length > 0) {
+                                    await window.bayanDB.accounts.bulkDelete(obsoleteAccIds);
+                                }
+                                if (window.accounts && window.accounts.length > 0) {
+                                    await window.bayanDB.accounts.bulkPut(window.accounts);
+                                }
+                            }
+                        } catch(dexErr) {}
+                    }
+
+                    // إذا كان لدى التابلت مبيعات أو حركات مسجلة أثناء انقطاع الاتصال (أوفلاين)، نرسلها للسيرفر فوراً!
+                    if (hasNewOfflineTransactions) {
+                        console.log(`📡 [NetworkHub] Offline transactions detected (${mergedTransactions.length - (db.transactions ? db.transactions.length : 0)} new). Pushing to Server immediately!`);
+                        this.pushLocalDbToServer();
                     }
 
                     // تحديث المستخدمين وتجديد شاشة تسجيل الدخول تلقائياً
@@ -271,12 +494,25 @@
                 // تحديث البيانات عند وصول بوش من جهاز تابلت
                 ipcRenderer.on('sync-data-pushed', async (event, { db, sourceDeviceId }) => {
                     if (db) {
-                        if (Array.isArray(db.products) && db.products.length > 0) window.productsDB = db.products;
-                        if (Array.isArray(db.accounts) && db.accounts.length > 0) window.accounts = db.accounts;
-                        if (Array.isArray(db.transactions)) window.transactions = db.transactions;
+                        const mergedTrash = this.mergeTrash(window.trashBin || [], db.trash || []);
+                        window.trash = window.trashBin = mergedTrash;
+                        const trashedKeys = this.getTrashedProductKeys(mergedTrash);
+
+                        if (Array.isArray(db.products)) {
+                            if (this.isMasterServer) {
+                                window.productsDB = (window.productsDB || []).filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+                            } else {
+                                window.productsDB = db.products.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
+                            }
+                        }
+                        if (Array.isArray(db.accounts)) window.accounts = this.mergeAccounts(window.accounts || [], db.accounts);
+                        if (Array.isArray(db.transactions)) window.transactions = this.mergeTransactions(window.transactions || [], db.transactions);
                         if (Array.isArray(db.users) && db.users.length > 0) window.users = db.users;
-                        if (Array.isArray(db.trash)) window.trash = window.trashBin = db.trash;
-                        if (Array.isArray(db.treasuryAudit)) window.treasuryAudit = db.treasuryAudit;
+                        if (Array.isArray(db.trash)) window.trash = window.trashBin = this.mergeTrash(window.trashBin || [], db.trash);
+                        if (Array.isArray(db.treasuryAudit)) {
+                            window.treasuryAudit = window.treasuryAuditRecords = db.treasuryAudit;
+                            if (typeof renderTreasuryAuditTable === 'function') renderTreasuryAuditTable();
+                        }
                         if (Array.isArray(db.warehouses) && db.warehouses.length > 0) window.warehouses = db.warehouses;
                         if (db.settings && typeof db.settings === 'object') {
                             window.AppStore = { ...window.AppStore, ...db.settings };
@@ -543,8 +779,28 @@
                 if (typeof window.refreshPendingTransfersUI === 'function') {
                     window.refreshPendingTransfersUI();
                 }
+                if (typeof window.checkIncomingTransfersAlert === 'function') {
+                    window.checkIncomingTransfersAlert();
+                }
             } catch (e) {
                 // Ignore polling errors
+            }
+        },
+
+        // فحص حالة جدار الحماية الحالية للمنفذ 4545
+        checkFirewallStatus: async function() {
+            try {
+                if (this.isMasterServer && typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    const res = await ipcRenderer.invoke('check-firewall-status');
+                    return !!(res && res.isOpen);
+                } else {
+                    const res = await fetch(`${this.serverUrl}/api/check-firewall`);
+                    const data = await res.json();
+                    return !!(data && data.isOpen);
+                }
+            } catch(e) {
+                return false;
             }
         },
 
@@ -552,6 +808,7 @@
         openServerHubModal: async function() {
             let serverInfo = { ip: '10.42.83.164', port: 4545, isRunning: true, pairedCount: 0 };
             let pairedList = [];
+            let isFwOpen = false;
 
             if (this.isMasterServer && typeof require !== 'undefined') {
                 try {
@@ -559,12 +816,16 @@
                     const info = await ipcRenderer.invoke('get-local-server-info');
                     if (info && info.ip) serverInfo = info;
                     pairedList = await ipcRenderer.invoke('get-paired-devices') || [];
+                    const fwRes = await ipcRenderer.invoke('check-firewall-status');
+                    isFwOpen = !!(fwRes && fwRes.isOpen);
                 } catch(e) {}
             } else {
                 try {
                     const res = await fetch(`${this.serverUrl}/api/server-info`);
                     const info = await res.json();
                     if (info && info.ip) serverInfo = info;
+                    const fwRes = await fetch(`${this.serverUrl}/api/check-firewall`).then(r => r.json()).catch(() => ({ isOpen: false }));
+                    isFwOpen = !!(fwRes && fwRes.isOpen);
                 } catch(e) {}
             }
 
@@ -590,7 +851,7 @@
                         <button onclick="document.getElementById('${modalId}').remove()" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:#94a3b8; font-weight:bold;">✕</button>
                     </div>
 
-                    <div style="background:#ecfdf5; border:1.5px solid #a7f3d0; padding:18px; border-radius:16px; margin-bottom:20px; text-align:center;">
+                    <div style="background:#ecfdf5; border:1.5px solid #a7f3d0; padding:18px; border-radius:16px; margin-bottom:15px; text-align:center;">
                         <div style="color:#065f46; font-size:0.9rem; font-weight:bold; margin-bottom:8px;">🔗 رابط اتصال التابلت والأجهزة الفرعية:</div>
                         <div style="display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
                             <div id="serverConnectUrlText" style="font-size:1.25rem; font-weight:900; color:#047857; font-family:monospace; background:#ffffff; padding:8px 18px; border-radius:10px; border:1.5px solid #6ee7b7; display:inline-block; user-select:all;">
@@ -613,10 +874,21 @@
                         </div>
                     </div>
 
-                    <div style="margin-bottom:18px; text-align:center;">
-                        <button type="button" onclick="window.BayanNetworkHub.fixFirewall()" style="background:#f8fafc; color:#0f172a; border:1.5px solid #94a3b8; border-radius:10px; padding:8px 18px; font-size:0.84rem; font-weight:bold; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:0.2s;">
-                            🛡️ إذا لم يفتح الرابط على التابلت (اضغط هنا للسماح في جدار الحماية بنقرة واحدة)
-                        </button>
+                    <!-- شارة حالة جدار الحماية (Windows Firewall Live Status) -->
+                    <div id="firewallStatusBanner" style="margin-bottom: 16px; text-align: center;">
+                        ${isFwOpen ? `
+                            <div style="display:inline-flex; align-items:center; gap:8px; background:#ecfdf5; border:1.5px solid #10b981; color:#065f46; padding:8px 18px; border-radius:12px; font-size:0.86rem; font-weight:900; box-shadow: 0 2px 6px rgba(16,185,129,0.15);">
+                                <span>🛡️</span>
+                                <span>جدار حماية ويندوز: المنفذ 4545 مصرح ومفتوح بنجاح ✓ (التابلت يمكنه الاتصال)</span>
+                            </div>
+                        ` : `
+                            <div style="background:#fffbeb; border:1.5px solid #f59e0b; padding:12px 18px; border-radius:14px; display:inline-flex; flex-direction:column; align-items:center; gap:8px; width:100%; box-sizing:border-box;">
+                                <div style="color:#b45309; font-weight:900; font-size:0.86rem;">⚠️ تنبيه: المنفذ 4545 قد يحتاج إذناً في جدار الحماية لفتح التابلت</div>
+                                <button type="button" onclick="window.BayanNetworkHub.fixFirewall()" style="background:linear-gradient(135deg, #f59e0b, #d97706); color:white; border:none; border-radius:10px; padding:8px 18px; font-size:0.84rem; font-weight:900; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 3px 8px rgba(245,158,11,0.25); transition:0.2s;">
+                                    🛡️ السماح في جدار الحماية بنقرة واحدة (تشغيل كمسؤول)
+                                </button>
+                            </div>
+                        `}
                     </div>
 
                     <div style="text-align:right; margin-bottom:20px;">
@@ -669,17 +941,38 @@
 
         fixFirewall: async function() {
             try {
-                if (typeof showToast === 'function') showToast('جاري فتح منفذ السيرفر في جدار حماية ويندوز...', 'info');
+                if (typeof showToast === 'function') showToast('جاري إرسال أمر السماح لجدار حماية ويندوز كمسؤول...', 'info');
 
                 if (this.isMasterServer && typeof require !== 'undefined') {
                     const { ipcRenderer } = require('electron');
                     await ipcRenderer.invoke('fix-firewall-rule');
                 } else {
                     const res = await fetch(`${this.serverUrl}/api/fix-firewall`, { method: 'POST' });
-                    const data = await res.json();
+                    await res.json();
                 }
 
-                if (typeof showToast === 'function') showToast('✅ تم إرسال أمر السماح لجدار الحماية! وافق على رسالة ويندوز وجرب الآن على التابلت.', 'success');
+                if (typeof showToast === 'function') {
+                    showToast('⏳ وافق على رسالة ويندوز (نعم / Yes) إذا ظهرت لك على الشاشة للترقية كمسؤول', 'warning');
+                }
+
+                // فحص النتيجة بعد ثانيتين وتحديث اللوحة الحية فوراً
+                setTimeout(async () => {
+                    const isOpenNow = await this.checkFirewallStatus();
+                    const banner = document.getElementById('firewallStatusBanner');
+                    if (isOpenNow) {
+                        if (typeof showToast === 'function') showToast('✅ تم فتح وتصريح المنفذ 4545 في جدار الحماية بنجاح!', 'success');
+                        if (banner) {
+                            banner.innerHTML = `
+                                <div style="display:inline-flex; align-items:center; gap:8px; background:#ecfdf5; border:1.5px solid #10b981; color:#065f46; padding:8px 18px; border-radius:12px; font-size:0.86rem; font-weight:900; box-shadow: 0 2px 6px rgba(16,185,129,0.15);">
+                                    <span>🛡️</span>
+                                    <span>جدار حماية ويندوز: المنفذ 4545 مصرح ومفتوح بنجاح ✓ (التابلت يمكنه الاتصال)</span>
+                                </div>
+                            `;
+                        }
+                    } else {
+                        if (typeof showToast === 'function') showToast('ℹ️ يمكنك أيضاً تشغيل ملف fix-firewall.bat كمسؤول مباشرة من مجلد البرنامج.', 'info');
+                    }
+                }, 2200);
             } catch(err) {
                 alert('خطأ في إرسال الأمر: ' + err.message);
             }

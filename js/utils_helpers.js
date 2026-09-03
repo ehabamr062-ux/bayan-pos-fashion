@@ -159,14 +159,23 @@
         // --- دالة توليد الأرقام المتسلسلة الآمنة والفائقة السرعة ---
         function getNextSequence(typeKeyword) {
             const list = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
+            const isTablet = (typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer);
+            const savedPrefix = localStorage.getItem('bayan_device_prefix');
+            const devPrefix = (savedPrefix !== null) ? savedPrefix : (isTablet ? 'T-' : '');
+
             const maxId = list.reduce((max, t) => {
                 if (!typeKeyword || (t.type && t.type.includes(typeKeyword))) {
-                    const num = parseInt(t.invoiceId, 10);
+                    let raw = String(t.invoiceId || '');
+                    if (devPrefix && raw.startsWith(devPrefix)) {
+                        raw = raw.slice(devPrefix.length);
+                    }
+                    const num = parseInt(raw, 10);
                     if (!isNaN(num) && num > max) return num;
                 }
                 return max;
             }, 0);
-            return maxId + 1;
+            const nextNum = maxId + 1;
+            return devPrefix ? `${devPrefix}${nextNum}` : nextNum;
         }
 
         // --- مراقبة حالة الاتصال (Offline/Online) المباشرة والدورية ---
@@ -994,29 +1003,41 @@
 
             const proceedDelete = async () => {
                 try {
-                    // قبل الحذف، ننقلهم للسلة
                     const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
-                    for (const id of targetIds) {
-                        const item = productsDB.find(p => p.id === id);
-                        if (item && typeof trashManager !== 'undefined' && trashManager.moveToTrash) {
+                    const targetSet = new Set(targetIds.map(Number));
+                    const itemsToDelete = productsDB.filter(p => targetSet.has(Number(p.id)));
+
+                    // 1. نقل جماعي فوري دفعة واحدة إلى سلة المحذوفات فائق السرعة
+                    if (typeof trashManager !== 'undefined' && trashManager.bulkMoveToTrash) {
+                        await trashManager.bulkMoveToTrash(itemsToDelete, 'product', activeWH);
+                    } else if (typeof trashManager !== 'undefined' && trashManager.moveToTrash) {
+                        for (const item of itemsToDelete) {
                             await trashManager.moveToTrash(item, 'product', item.name, item.warehouse || activeWH);
                         }
                     }
 
-                    // حذف جماعي من قاعدة البيانات
+                    // 2. تسجيل المعرفات المحذوفة لمنع عودتها كأصناف زومبي نهائياً
+                    if (!window.deletedItemIds) window.deletedItemIds = {};
+                    if (!window.deletedItemIds.products) window.deletedItemIds.products = [];
+                    window.deletedItemIds.products.push(...targetIds);
+
+                    // 3. حذف جماعي فوري من قاعدة بيانات Dexie
                     await db.products.bulkDelete(targetIds);
 
-                    // تحديث المصفوفة المحلية
-                    productsDB = productsDB.filter(x => !targetIds.includes(x.id));
+                    // 4. تحديث المصفوفة المحلية فوراً
+                    productsDB = productsDB.filter(x => !targetSet.has(Number(x.id)));
 
                     if (targetIds.includes(selectedInventoryId)) selectedInventoryId = null;
                     if (window.selectedInventoryIds) {
-                        targetIds.forEach(id => window.selectedInventoryIds.delete(id));
+                        window.selectedInventoryIds.clear();
                     }
+
+                    // 5. حفظ وحيد فوري ومزامنة مركزية لكامل العملية دفعة واحدة
+                    if (typeof saveData === 'function') await saveData();
 
                     renderInventoryTable();
                     if (typeof updateInventorySelectionUI === 'function') updateInventorySelectionUI();
-                    showToast(`✅ تم نقل ${targetIds.length} أصناف إلى سلة المحذوفات بنجاح`, "success");
+                    showToast(`⚡ تم حذف ونقل (${targetIds.length}) صنف إلى سلة المحذوفات بنجاح فوراً!`, "success");
                 } catch (err) {
                     console.error("Error in bulk delete:", err);
                     if (typeof showCustomAlert === 'function') {
@@ -1522,32 +1543,37 @@
 
         // ================= استعلام الأصناف والمنتجات السريع =================
         function handleInquirySearch(query) {
-            query = (query || '').trim().toLowerCase();
+            const rawQuery = (query || '').trim().toLowerCase();
+            const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+            const q = cleanAr(query);
             const productListEl = document.getElementById('inquiryProductList');
             if (!productListEl) return;
 
-            if (!query) {
+            if (!q) {
                 renderInquiryProductList(productsDB);
                 return;
             }
 
             const filtered = productsDB.filter(p => {
-                const nameMatch = p.name && p.name.toLowerCase().includes(query);
-                const codeMatch = p.code && p.code.toLowerCase().includes(query);
-                const barcodeMatch = p.barcode && p.barcode.toLowerCase() === query;
-                const barcodeInclude = p.barcode && p.barcode.toLowerCase().includes(query);
-                const unitBarcodeMatch = p.units && p.units.some(u => u.unitBarcode && u.unitBarcode.toLowerCase() === query);
-                const unitBarcodeInclude = p.units && p.units.some(u => u.unitBarcode && u.unitBarcode.toLowerCase().includes(query));
+                const nameMatch = p.name && cleanAr(p.name).includes(q);
+                const codeMatch = p.code && (cleanAr(p.code).includes(q) || String(p.code).toLowerCase().includes(rawQuery));
+                const barcodeMatch = p.barcode && (cleanAr(p.barcode) === q || String(p.barcode).toLowerCase() === rawQuery);
+                const barcodeInclude = p.barcode && (cleanAr(p.barcode).includes(q) || String(p.barcode).toLowerCase().includes(rawQuery));
+                const unitBarcodeMatch = p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || String(u.unitBarcode).toLowerCase() === rawQuery));
+                const unitBarcodeInclude = p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode).includes(q) || String(u.unitBarcode).toLowerCase().includes(rawQuery)));
+                const variantBarcodeMatch = p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQuery));
+                const variantBarcodeInclude = p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode).includes(q) || String(v.barcode).trim().toLowerCase().includes(rawQuery)));
 
-                return nameMatch || codeMatch || barcodeMatch || barcodeInclude || unitBarcodeMatch || unitBarcodeInclude;
+                return nameMatch || codeMatch || barcodeMatch || barcodeInclude || unitBarcodeMatch || unitBarcodeInclude || variantBarcodeMatch || variantBarcodeInclude;
             });
 
             renderInquiryProductList(filtered);
 
-            // اختيار تلقائي للصنف إذا كان هناك تطابق تام للباركود
+            // اختيار تلقائي للصنف إذا كان هناك تطابق تام للباركود (شامل باركود المقاسات والألوان)
             const exactMatch = filtered.find(p => 
-                (p.barcode && p.barcode.toLowerCase() === query) || 
-                (p.units && p.units.some(u => u.unitBarcode && u.unitBarcode.toLowerCase() === query))
+                (p.barcode && (cleanAr(p.barcode) === q || p.barcode.toLowerCase() === rawQuery)) || 
+                (p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || u.unitBarcode.toLowerCase() === rawQuery))) ||
+                (p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQuery)))
             );
             if (exactMatch) {
                 selectProductForInquiry(exactMatch.id);
@@ -1611,17 +1637,31 @@
 
             // الأسعار
             document.getElementById('inquiryPriceRetail').textContent = parseFloat(product.price || 0).toFixed(2);
-            document.getElementById('inquiryPriceWholesale').textContent = parseFloat(product.wholesale || 0).toFixed(2);
 
+            const wholesaleCard = document.getElementById('inquiryWholesaleCard');
             const costCard = document.getElementById('inquiryCostCard');
             const posSettings = JSON.parse(getStore('pos_settings') || '{}');
             const allowInquiryCost = posSettings.showInquiryCostPrice !== undefined ? !!posSettings.showInquiryCostPrice : false;
+            const canViewWholesaleAndCost = allowInquiryCost && (typeof checkPermission === 'function' ? checkPermission('docs_purchase_price') : true);
 
-            if (allowInquiryCost && checkPermission('docs_purchase_price')) {
-                costCard.style.display = 'flex';
-                document.getElementById('inquiryPriceCost').textContent = parseFloat(product.cost || product.cost_price || 0).toFixed(2);
-            } else {
-                costCard.style.display = 'none';
+            if (wholesaleCard) {
+                if (canViewWholesaleAndCost) {
+                    wholesaleCard.style.display = 'flex';
+                    document.getElementById('inquiryPriceWholesale').textContent = parseFloat(product.wholesale || 0).toFixed(2);
+                } else {
+                    wholesaleCard.style.display = 'none';
+                }
+            } else if (document.getElementById('inquiryPriceWholesale')) {
+                document.getElementById('inquiryPriceWholesale').textContent = parseFloat(product.wholesale || 0).toFixed(2);
+            }
+
+            if (costCard) {
+                if (canViewWholesaleAndCost) {
+                    costCard.style.display = 'flex';
+                    document.getElementById('inquiryPriceCost').textContent = parseFloat(product.cost || product.cost_price || 0).toFixed(2);
+                } else {
+                    costCard.style.display = 'none';
+                }
             }
 
             // توليد الباركود
@@ -1690,6 +1730,7 @@
 
             // جدول تشكيلات المقاسات والألوان (Variants Matrix)
             const variantsContainer = document.getElementById('inquiryVariantsContainer');
+            const variantsTableHead = document.getElementById('inquiryVariantsTableHead');
             const variantsTableBody = document.getElementById('inquiryVariantsTableBody');
             const variantsCountBadge = document.getElementById('inquiryVariantsCountBadge');
             
@@ -1699,26 +1740,86 @@
                     variantsContainer.style.display = 'block';
                     if (variantsCountBadge) variantsCountBadge.textContent = `${variants.length} تشكيلة`;
                     
+                    let allWarehouses = (window.warehouses && window.warehouses.length > 0) ? window.warehouses.map(w => w.name) : [];
+                    if (allWarehouses.length === 0 && typeof warehouses !== 'undefined' && Array.isArray(warehouses) && warehouses.length > 0) {
+                        allWarehouses = warehouses.map(w => w.name);
+                    } else if (allWarehouses.length === 0 && typeof getStore === 'function' && getStore('pos_warehouses')) {
+                        try {
+                            const parsedWh = JSON.parse(getStore('pos_warehouses'));
+                            if (Array.isArray(parsedWh)) allWarehouses = parsedWh.map(w => w.name);
+                        } catch(e) {}
+                    }
+                    if (!allWarehouses.includes('المخزن الرئيسي')) allWarehouses.unshift('المخزن الرئيسي');
+
+                    const mainStoreName = 'المخزن الرئيسي';
+                    const branches = allWarehouses.filter(w => w !== mainStoreName);
+                    
+                    if (variantsTableHead) {
+                        let thHtml = `
+                            <tr>
+                                <th style="width: 35px; padding: 8px 4px;">#</th>
+                                <th style="padding: 8px;">المقاس</th>
+                                <th style="padding: 8px;">اللون</th>
+                                <th style="padding: 8px; background: rgba(255,255,255,0.1); border-right: 1px solid rgba(255,255,255,0.2);">${mainStoreName}</th>
+                        `;
+                        branches.forEach(b => {
+                            thHtml += `<th style="padding: 8px; background: rgba(255,255,255,0.05);">${b}</th>`;
+                        });
+                        thHtml += `
+                                <th style="padding: 8px; background: rgba(255,255,255,0.15); border-left: 1px solid rgba(255,255,255,0.2);">إجمالي الفروع</th>
+                                <th style="padding: 8px; background: #166534;">الرصيد الكلي</th>
+                                <th style="padding: 8px;">سعر القطاعي</th>
+                                ${allowInquiryCost ? '<th style="padding: 8px;">سعر الجملة</th>' : ''}
+                                <th style="padding: 8px;">الباركود الفريد</th>
+                            </tr>
+                        `;
+                        variantsTableHead.innerHTML = thHtml;
+                    }
+                    
                     variantsTableBody.innerHTML = variants.map((v, idx) => {
-                        const stockVal = parseFloat(v.stock !== undefined ? v.stock : 0);
                         const vRetail = parseFloat(v.price !== undefined ? v.price : product.price) || 0;
                         const vWs = parseFloat(v.wholesale !== undefined ? v.wholesale : product.wholesale) || 0;
                         
-                        let stockBadge = '';
-                        if (stockVal <= 0) {
-                            stockBadge = '<span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 10px; font-weight: 800; font-size: 0.78rem;">0 (نفذ)</span>';
+                        let mainStock = 0;
+                        let branchesStockTotal = 0;
+                        let totalStock = 0;
+                        
+                        let branchesCells = '';
+                        
+                        if (v.warehouseStocks && typeof v.warehouseStocks === 'object') {
+                            mainStock = parseFloat(v.warehouseStocks[mainStoreName]) || 0;
+                            totalStock = mainStock;
+                            
+                            branches.forEach(b => {
+                                const bStock = parseFloat(v.warehouseStocks[b]) || 0;
+                                branchesStockTotal += bStock;
+                                totalStock += bStock;
+                                branchesCells += `<td style="padding: 8px; font-weight: 800; color: ${bStock > 0 ? '#0f766e' : '#94a3b8'}; background: #f8fafc;">${bStock > 0 ? bStock : '-'}</td>`;
+                            });
                         } else {
-                            stockBadge = `<span style="background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 10px; font-weight: 900; font-size: 0.85rem;">${stockVal}</span>`;
+                            totalStock = parseFloat(v.stock !== undefined ? v.stock : 0);
+                            mainStock = totalStock; 
+                            branches.forEach(b => {
+                                branchesCells += `<td style="padding: 8px; font-weight: 800; color: #94a3b8; background: #f8fafc;">-</td>`;
+                            });
                         }
+
+                        const formatStockBadge = (qty, bgOk = '#dcfce7', colorOk = '#15803d') => {
+                            if (qty <= 0) return `<span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 10px; font-weight: 800; font-size: 0.78rem;">0</span>`;
+                            return `<span style="background: ${bgOk}; color: ${colorOk}; padding: 2px 8px; border-radius: 10px; font-weight: 900; font-size: 0.85rem;">${qty}</span>`;
+                        };
 
                         return `
                             <tr style="border-bottom: 1px solid #f1f5f9;">
                                 <td style="padding: 8px; font-weight: 800; color: #64748b;">${idx + 1}</td>
                                 <td style="padding: 8px;"><span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 6px; font-weight: 900;">${v.size || 'قياسي'}</span></td>
                                 <td style="padding: 8px;"><span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 6px; font-weight: 900;">${v.color || 'موحد'}</span></td>
-                                <td style="padding: 8px;">${stockBadge}</td>
+                                <td style="padding: 8px; border-right: 1px solid #e2e8f0; background: #f1f5f9;">${formatStockBadge(mainStock)}</td>
+                                ${branchesCells}
+                                <td style="padding: 8px; border-left: 1px solid #e2e8f0; background: #f1f5f9;">${formatStockBadge(branchesStockTotal, '#e0f2fe', '#0369a1')}</td>
+                                <td style="padding: 8px; background: #ecfdf5;">${formatStockBadge(totalStock, '#dcfce7', '#15803d')}</td>
                                 <td style="padding: 8px; font-weight: 900; color: #1e3a8a;">${vRetail.toFixed(2)} ج.م</td>
-                                <td style="padding: 8px; font-weight: 800; color: #166534;">${vWs.toFixed(2)} ج.م</td>
+                                ${allowInquiryCost ? `<td style="padding: 8px; font-weight: 800; color: #166534;">${vWs.toFixed(2)} ج.م</td>` : ''}
                                 <td style="padding: 8px; font-family: monospace; font-weight: bold; color: #475569;">${v.barcode || '---'}</td>
                             </tr>
                         `;

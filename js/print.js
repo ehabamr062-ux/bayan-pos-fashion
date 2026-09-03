@@ -134,6 +134,8 @@ function printInvoice(invoiceData) {
     const dueDate       = invoiceData.dueDate       || '';
     const cashier       = invoiceData.cashier       || '';
     const customer      = invoiceData.customer      || invoiceData.partnerName || '';
+    const warehouse     = invoiceData.warehouse     || (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) || 'المخزن الرئيسي';
+    const terminal      = invoiceData.terminal      || ((window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'));
     const items         = invoiceData.items         || [];
 
     const totalAmount = parseFloat(invoiceData.totalAmount !== undefined ? invoiceData.totalAmount : (invoiceData.invoiceAmount !== undefined ? invoiceData.invoiceAmount : (invoiceData.total || 0)));
@@ -171,23 +173,34 @@ function printInvoice(invoiceData) {
             ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit)
             : (item.unit || 'قطعة');
             
-        // تفاصيل المقاس واللون للملابس والفاشون
-        const sizeTag = (item.size || item.selectedSize) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#1e293b; background:#f1f5f9; padding:1px 4px; border-radius:4px; font-weight:bold;">مقاس: ${escapePrintHtml(item.size || item.selectedSize)}</span>` : '';
-        const colorTag = (item.color || item.selectedColor) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#1e293b; background:#f1f5f9; padding:1px 4px; border-radius:4px; font-weight:bold;">لون: ${escapePrintHtml(item.color || item.selectedColor)}</span>` : '';
-        const fashionDetails = (sizeTag || colorTag) ? `<div style="margin-top:2px; font-size:0.85em;">${sizeTag} ${colorTag}</div>` : '';
+        // تفاصيل المقاس واللون للملابس والفاشون (حجم صغير مضغوط بدون هوامش زائدة، بحبر أسود فاحم صريح)
+        const sVal = String(item.size || item.selectedSize || (item.selectedVariant && item.selectedVariant.size) || '').trim();
+        const cVal = String(item.color || item.selectedColor || (item.selectedVariant && item.selectedVariant.color) || '').trim();
+        let fashionText = '';
+        if (sVal && sVal !== '-' && sVal !== 'عام' && cVal && cVal !== '-' && cVal !== 'عام') {
+            fashionText = `(مقاس: ${escapePrintHtml(sVal)} | لون: ${escapePrintHtml(cVal)})`;
+        } else if (sVal && sVal !== '-' && sVal !== 'عام') {
+            fashionText = `(مقاس: ${escapePrintHtml(sVal)})`;
+        } else if (cVal && cVal !== '-' && cVal !== 'عام') {
+            fashionText = `(لون: ${escapePrintHtml(cVal)})`;
+        }
+        const fashionDetails = fashionText ? `<div style="font-size:0.82em; color:#000000 !important; font-weight:900; line-height:1.1; margin-top:1px;">${fashionText}</div>` : '';
 
         return `<tr>
-            <td style="text-align:right; padding:3px 5px; border:1px solid #000;">
-                <div style="font-weight:900;">${escapePrintHtml(item.name || item.product || '')}</div>
+            <td style="text-align:right; padding:2px 4px; border:1px solid #000;">
+                <div style="font-weight:900; line-height:1.2;">${escapePrintHtml(item.name || item.product || '')}</div>
                 ${fashionDetails}
             </td>
-            <td style="text-align:center; padding:3px 4px; border:1px solid #000;">${qty} ${escapePrintHtml(unitName)}</td>
-            <td style="text-align:center; padding:3px 4px; border:1px solid #000;">${price.toFixed(2)}</td>
-            <td style="text-align:center; padding:3px 4px; border:1px solid #000;">${lineTotal}</td>
+            <td style="text-align:center; padding:2px 1px; border:1px solid #000; font-weight:900; color:#000; font-size:11px; word-break:break-word; overflow-wrap:break-word; line-height:1.15;">
+                <div style="font-weight:900; font-size:11.5px; line-height:1.1;">${qty}</div>
+                ${unitName ? `<div style="font-size:9px; font-weight:bold; line-height:1.1; color:#000;">${escapePrintHtml(unitName)}</div>` : ''}
+            </td>
+            <td style="text-align:center; padding:2px 1px; border:1px solid #000; font-weight:900; color:#000; font-size:10.5px; white-space:nowrap;">${price.toFixed(2)}</td>
+            <td style="text-align:center; padding:2px 1px; border:1px solid #000; font-weight:900; color:#000; font-size:10.5px; white-space:nowrap;">${lineTotal}</td>
         </tr>`;
     }).join('');
 
-    // صفوف الأصناف - النسخة المضغوطة (مع المقاس واللون)
+    // صفوف الأصناف - النسخة المضغوطة (بحجم صغير مضغوط وحبر أسود واضح)
     const itemsRowsCompact = items.map(item => {
         const qty       = parseFloat(item.qty   || 0);
         const price     = parseFloat(item.price || 0);
@@ -197,17 +210,28 @@ function printInvoice(invoiceData) {
             : (item.unit || 'قطعة');
             
         // تفاصيل المقاس واللون للملابس والفاشون
-        const sizeTag = (item.size || item.selectedSize) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#334155; font-weight:bold;">[${escapePrintHtml(item.size || item.selectedSize)}]</span>` : '';
-        const colorTag = (item.color || item.selectedColor) ? `<span style="display:inline-block; margin-right:4px; font-size:0.85em; color:#334155; font-weight:bold;">(${escapePrintHtml(item.color || item.selectedColor)})</span>` : '';
-        const fashionDetails = (sizeTag || colorTag) ? `<div style="font-size:0.85em; color:#475569;">${sizeTag} ${colorTag}</div>` : '';
+        const sVal = String(item.size || item.selectedSize || (item.selectedVariant && item.selectedVariant.size) || '').trim();
+        const cVal = String(item.color || item.selectedColor || (item.selectedVariant && item.selectedVariant.color) || '').trim();
+        let fashionText = '';
+        if (sVal && sVal !== '-' && sVal !== 'عام' && cVal && cVal !== '-' && cVal !== 'عام') {
+            fashionText = `(مقاس: ${escapePrintHtml(sVal)} | لون: ${escapePrintHtml(cVal)})`;
+        } else if (sVal && sVal !== '-' && sVal !== 'عام') {
+            fashionText = `(مقاس: ${escapePrintHtml(sVal)})`;
+        } else if (cVal && cVal !== '-' && cVal !== 'عام') {
+            fashionText = `(لون: ${escapePrintHtml(cVal)})`;
+        }
+        const fashionDetails = fashionText ? `<div style="font-size:0.80em; color:#000000 !important; font-weight:900; line-height:1.1;">${fashionText}</div>` : '';
 
         return `<tr>
             <td style="text-align:right; padding:2px 4px; border-bottom:1px solid #ccc; font-weight:900;">
-                <div>${escapePrintHtml(item.name || item.product || '')}</div>
+                <div style="line-height:1.2;">${escapePrintHtml(item.name || item.product || '')}</div>
                 ${fashionDetails}
             </td>
-            <td style="text-align:center; padding:2px 4px; border-bottom:1px solid #ccc; font-weight:900;">${qty} ${escapePrintHtml(unitName)}</td>
-            <td style="text-align:center; padding:2px 4px; border-bottom:1px solid #ccc; font-weight:900;">${lineTotal}</td>
+            <td style="text-align:center; padding:2px 1px; border-bottom:1px solid #ccc; font-weight:900; color:#000; font-size:11px; word-break:break-word; overflow-wrap:break-word; line-height:1.15;">
+                <div style="font-weight:900; font-size:11.5px; line-height:1.1;">${qty}</div>
+                ${unitName ? `<div style="font-size:9px; font-weight:bold; line-height:1.1; color:#000;">${escapePrintHtml(unitName)}</div>` : ''}
+            </td>
+            <td style="text-align:center; padding:2px 4px; border-bottom:1px solid #ccc; font-weight:900; color:#000;">${lineTotal}</td>
         </tr>`;
     }).join('');
 
@@ -219,7 +243,7 @@ function printInvoice(invoiceData) {
 
     const d = {
         shopName, shopAddress, shopPhone, footerMsg, socialQrLink, docTitle,
-        invoiceNumber, invoiceType, date, time, dueDate, cashier, customer,
+        invoiceNumber, invoiceType, date, time, dueDate, cashier, customer, warehouse, terminal,
         totalAmount, paid, deferred, prevBalance, currentBalance, docType,
         itemsRowsFull, itemsRowsCompact, discount, subTotal, tax, taxLabel, globalTax
     };
@@ -583,23 +607,24 @@ function build80mmStandard(d) {
                 <span>الوقت: ${d.time}</span>
             </div>
             ${!isCashBuyer && d.customer ? `<div style="border-top:1px dashed #ccc; margin-top:3px; padding-top:2px; padding-right:2px;">العميل: ${d.customer}</div>` : ''}
-            ${d.cashier  ? `<div style="padding-right:2px;">الكاشير: ${d.cashier}</div>`  : ''}
+            ${d.cashier  ? `<div style="display:flex; justify-content:space-between; padding:0 2px;"><span>الكاشير: ${d.cashier}</span><span>الفرع: ${d.warehouse}</span></div>`  : `<div style="padding-right:2px;">الفرع: ${d.warehouse}</div>`}
+            ${d.terminal ? `<div style="padding-right:2px; font-size:10px; color:#333;">الجهاز: ${d.terminal}</div>` : ''}
             ${d.dueDate  ? `<div style="padding-right:2px;">تاريخ الاستحقاق: ${d.dueDate}</div>`  : ''}
         </div>
 
         <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px; border:1px solid #000; font-weight:bold; table-layout:fixed; box-sizing:border-box;">
             <colgroup>
-                <col style="width:40%;">
-                <col style="width:18%;">
-                <col style="width:18%;">
+                <col style="width:36%;">
+                <col style="width:15%;">
                 <col style="width:24%;">
+                <col style="width:25%;">
             </colgroup>
             <thead>
                 <tr style="border-bottom:2px solid #000; background:#f5f5f5;">
                     <th style="text-align:right; padding:4px 3px; border:1px solid #000; font-size:11px; overflow:hidden;">الصنف</th>
-                    <th style="text-align:center; padding:4px 3px; border:1px solid #000; font-size:11px;">الكمية</th>
-                    <th style="text-align:center; padding:4px 3px; border:1px solid #000; font-size:11px;">السعر</th>
-                    <th style="text-align:center; padding:4px 3px; border:1px solid #000; font-size:11px;">الإجمالي</th>
+                    <th style="text-align:center; padding:4px 1px; border:1px solid #000; font-size:11px;">الكمية</th>
+                    <th style="text-align:center; padding:4px 1px; border:1px solid #000; font-size:11px;">السعر</th>
+                    <th style="text-align:center; padding:4px 1px; border:1px solid #000; font-size:11px;">الإجمالي</th>
                 </tr>
             </thead>
             <tbody>${cleanItemsRows}</tbody>
