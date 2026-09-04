@@ -405,6 +405,20 @@ async function handlePurchaseSearchEnter(query, event, forceAdd = false) {
 
     if (!query || query.trim() === "") return;
 
+    // إذا كان مسح باركود تم بواسطة السكانر المركزي للتو، نتجاهل ضغطة Enter الزائدة
+    if (typeof window.isBayanRecentScan === 'function' && window.isBayanRecentScan()) {
+        const pInp = document.getElementById('purchaseSearch');
+        if (pInp) pInp.value = '';
+        const rDiv = document.getElementById('purchaseSearchResults');
+        if (rDiv) rDiv.style.display = 'none';
+        return;
+    }
+
+    // فحص الباركود الدقيق التلقائي فوراً
+    if (typeof window.dispatchSearchBarcode === 'function') {
+        if (window.dispatchSearchBarcode(cleanQuery, 'purchase')) return;
+    }
+
     // 1. بحث فوري دقيق في باركود تشكيلات المقاسات والألوان (Variant Barcode Match)
     let matchingVariant = null;
     let pMatch = productsDB.find(p => {
@@ -1787,7 +1801,7 @@ async function savePurchase(force = false, accountChecked = false) {
                 invoiceTaxType: (idx === 0) ? (document.getElementById('purchaseTaxType')?.value || 'val') : 'val',
 
                 warehouse: activeWH,
-                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'),
+                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱'),
 
                 editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل بواسطة: ${(typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'مجهول'})` : '-'
 

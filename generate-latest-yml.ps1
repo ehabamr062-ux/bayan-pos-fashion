@@ -1,6 +1,6 @@
 param (
-    [string]$ExePath = "dist\Bayan POS Setup 1.0.5.exe",
-    [string]$Version = "1.0.5"
+    [string]$ExePath = "dist\Bayan POS Setup 1.0.3.exe",
+    [string]$Version = "1.0.3"
 )
 
 if (-not (Test-Path $ExePath)) {

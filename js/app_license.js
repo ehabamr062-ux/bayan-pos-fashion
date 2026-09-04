@@ -20,7 +20,7 @@
                 const uniqueIds = new Set(ops.map(t => t.invoiceId));
                 invoiceCount = uniqueIds.size;
             }
-            const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : localStorage.getItem('bayan_trial_max_invoices')) || '0', 10);
+            const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : null) || '0', 10);
             invoiceCount = Math.max(invoiceCount, storedMax);
 
             const trialCountEl = document.getElementById('trialInvoicesCount');
@@ -525,7 +525,7 @@ window.isSubscriptionValid = function(actionType = 'invoice') {
             count = uniqueIds.size;
         }
         
-        const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : localStorage.getItem('bayan_trial_max_invoices')) || '0', 10);
+        const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : null) || '0', 10);
         const effectiveCount = Math.max(count, storedMax);
         if (count > storedMax && typeof setStore === 'function') {
             setStore('bayan_trial_max_invoices', String(count));
@@ -628,10 +628,9 @@ window.registerTrialInvoiceCreation = function() {
                 const uniqueIds = new Set(ops.map(t => t.invoiceId));
                 count = uniqueIds.size;
             }
-            const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : localStorage.getItem('bayan_trial_max_invoices')) || '0', 10);
+            const storedMax = parseInt((typeof getStore === 'function' ? getStore('bayan_trial_max_invoices') : null) || '0', 10);
             const newMax = Math.max(count, storedMax + 1);
             if (typeof setStore === 'function') setStore('bayan_trial_max_invoices', String(newMax));
-            try { localStorage.setItem('bayan_trial_max_invoices', String(newMax)); } catch(e) {}
 
             // تنبيهات مبكرة عند الاقتراب من الحد النهائي
             if (newMax === 180 || newMax === 195) {

@@ -15,6 +15,50 @@
     let currentInquiryTab = 'general'; // 'general' | 'history' | 'specs'
     let selectedInquirySize = 'all';
     let selectedInquiryColor = 'all';
+    let selectedInquiryWarehouse = 'all'; // 'all' | warehouseName (تحديد المخزن لعرض تفاصيل أرصدته بالجدول أدناه)
+    let isColCustomizerOpen = false;
+
+    // الإعدادات الافتراضية لأعمدة جدول التشكيلات التفصيلي
+    const defaultInquiryCols = {
+        index: true,          // # (م)
+        size: true,           // المقاس
+        color: true,          // اللون
+        whStock: true,        // رصيد المخزن المحدد / المخازن
+        branchesTotal: true,  // إجمالي الفروع
+        totalStock: true,     // الرصيد الكلي
+        retailPrice: true,    // سعر القطاعي
+        wholesalePrice: true, // سعر الجملة
+        barcode: true,        // الباركود الفريد
+        action: true          // إضافة
+    };
+
+    /**
+     * جلب إعدادات رؤية الأعمدة المحفوظة
+     */
+    function getInquiryColsSettings() {
+        try {
+            const raw = (typeof getStore === 'function') ? getStore('pos_inquiry_variants_cols') : null;
+            if (raw && raw !== 'undefined' && raw !== 'null') {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                    return Object.assign({}, defaultInquiryCols, parsed);
+                }
+            }
+        } catch (e) {}
+        return Object.assign({}, defaultInquiryCols);
+    }
+
+    /**
+     * حفظ إعدادات رؤية الأعمدة في النظام عبر IndexedDB
+     */
+    function saveInquiryColsSettings(settings) {
+        try {
+            const raw = JSON.stringify(settings);
+            if (typeof setStore === 'function') {
+                setStore('pos_inquiry_variants_cols', raw);
+            }
+        } catch (e) {}
+    }
 
     let inquirySearchResults = [];
     let inquirySearchActiveIndex = -1;
@@ -119,6 +163,9 @@
             selectedInquiryColor = 'all';
         }
 
+        selectedInquiryWarehouse = 'all';
+        isColCustomizerOpen = false;
+
         currentInquiryTab = 'general';
         renderInquiryModal();
     };
@@ -141,6 +188,8 @@
             `;
             document.body.appendChild(modal);
         }
+
+        const prevScroll = document.getElementById('inquiryTabContentContainer')?.scrollTop || 0;
 
         // 🌟 في حالة عدم اختيار صنف مسبقاً (فتح شاشة البحث الفوري الخضراء الأنيقة)
         if (!currentInquiryProduct) {
@@ -218,7 +267,16 @@
                                     </span>
                                 </div>
                                 <div style="font-size: 0.84rem; color: #f0fdf4; margin-top: 3px; font-weight: 700;">
-                                    باركود: <b style="color: #ffffff; font-family: monospace; background: rgba(0,0,0,0.25); padding: 1px 6px; border-radius: 4px;">${p.barcode || '-'}</b> | 
+                                    باركود: <b style="color: #ffffff; font-family: monospace; background: rgba(0,0,0,0.25); padding: 1px 6px; border-radius: 4px;">${p.barcode || '-'}</b>
+                                    ${(p.barcode && p.barcode !== '-') ? `
+                                        <button type="button" onclick="event.stopPropagation(); window.copyInquiryBarcode('${String(p.barcode).replace(/'/g, "\\'")}', this);" 
+                                            title="نسخ باركود الصنف"
+                                            style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; padding: 1px 7px; cursor: pointer; font-size: 0.75rem; font-weight: 800; color: #ffffff; line-height: 1.2; vertical-align: middle; margin-right: 4px; transition: 0.15s;"
+                                            onmouseover="this.style.background='rgba(255,255,255,0.35)';"
+                                            onmouseout="this.style.background='rgba(255,255,255,0.2)';">
+                                            📋 نسخ
+                                        </button>
+                                    ` : ''} | 
                                     التصنيف: <b style="color: #fed7aa; background: rgba(0,0,0,0.2); padding: 1px 6px; border-radius: 4px;">${p.category || 'عام'}</b> | 
                                     الوحدة: <b style="color: #a7f3d0; background: rgba(0,0,0,0.2); padding: 1px 6px; border-radius: 4px;">${p.unit || 'قطعة'}</b>
                                 </div>
@@ -258,7 +316,7 @@
                 </div>
 
                 <!-- 2. محتوى التبويب النشط -->
-                <div style="flex: 1; min-height: 380px; max-height: calc(92vh - 170px); overflow-y: auto; overflow-x: hidden; padding: 16px 20px;" class="fast-scrollbar">
+                <div id="inquiryTabContentContainer" style="flex: 1; min-height: 380px; max-height: calc(92vh - 170px); overflow-y: auto; overflow-x: hidden; padding: 16px 20px;" class="fast-scrollbar">
                     ${getInquiryTabContent(p, variants, allSizes, allColors)}
                 </div>
 
@@ -289,6 +347,10 @@
         `;
 
         modal.style.display = 'flex';
+        const curScroll = document.getElementById('inquiryTabContentContainer');
+        if (curScroll && prevScroll > 0) {
+            curScroll.scrollTop = prevScroll;
+        }
     }
 
     /**
@@ -387,19 +449,30 @@
         // 🌟 الترتيب التنازلي الحاسم: المخزن صاحب أعلى كمية يظهر في البداية
         whRowsData.sort((a, b) => b.qty - a.qty);
 
-        // بناء صفوف جدول المخازن
+        // بناء صفوف جدول المخازن مع عمود التحديد
         const whTableRowsHtml = whRowsData.map((row, idx) => {
             const hasPositiveStock = row.qty > 0;
             const bgBadge = hasPositiveStock ? '#ecfdf5' : '#f8fafc';
             const colorBadge = hasPositiveStock ? '#047857' : '#94a3b8';
             const borderBadge = hasPositiveStock ? '#a7f3d0' : '#e2e8f0';
             const hasReserved = row.reservedQty > 0;
+            const isSelected = selectedInquiryWarehouse === row.warehouse;
+            const safeWh = String(row.warehouse || '').replace(/'/g, "\\'");
 
             return `
-                <tr style="border-bottom: 1px solid #f1f5f9; ${idx % 2 === 1 ? 'background: #fafafa;' : ''}">
-                    <td style="padding: 10px 12px; font-weight: 800; color: #64748b; text-align: center;">${idx + 1}</td>
-                    <td style="padding: 10px 14px; font-weight: 900; color: #1e293b; text-align: right;">
-                        🏢 ${row.warehouse}
+                <tr onclick="window.setInquirySelectedWarehouse('${safeWh}')"
+                    title="انقر لتحديد (${row.warehouse}) وعرض أرصدته بالجدول أدناه"
+                    style="border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: all 0.15s; ${isSelected ? 'background: #ecfdf5; outline: 2px solid #10b981;' : (idx % 2 === 1 ? 'background: #fafafa;' : 'background: #ffffff;')}"
+                    onmouseover="if(!${isSelected}) this.style.background='#f0fdf4';"
+                    onmouseout="if(!${isSelected}) this.style.background='${idx % 2 === 1 ? '#fafafa' : '#ffffff'}';">
+                    <td style="padding: 8px 6px; text-align: center;" onclick="event.stopPropagation(); window.setInquirySelectedWarehouse('${safeWh}');">
+                        <input type="radio" name="inquiryWarehouseRadio" value="${safeWh}" 
+                            ${isSelected ? 'checked' : ''} 
+                            style="cursor: pointer; width: 17px; height: 17px; accent-color: #059669; vertical-align: middle;">
+                    </td>
+                    <td style="padding: 10px 10px; font-weight: 800; color: #64748b; text-align: center;">${idx + 1}</td>
+                    <td style="padding: 10px 14px; font-weight: 900; color: ${isSelected ? '#065f46' : '#1e293b'}; text-align: right;">
+                        🏢 ${row.warehouse} ${isSelected ? '<span style="color: #047857; font-size: 0.76rem; font-weight: 900; background: #dcfce7; border: 1px solid #86efac; padding: 1px 7px; border-radius: 6px; margin-right: 6px;">✓ محدد</span>' : ''}
                     </td>
                     <td style="padding: 10px 12px; text-align: center; font-weight: 900; font-size: 1.05rem;">
                         <span style="background: ${bgBadge}; color: ${colorBadge}; border: 1.5px solid ${borderBadge}; padding: 3px 14px; border-radius: 8px; display: inline-block; min-width: 60px;">
@@ -469,122 +542,268 @@
 
         let variantsTableHtml = '';
         if (hasVariants) {
+            const cols = getInquiryColsSettings();
+            const isSingleWh = selectedInquiryWarehouse !== 'all';
             const mainStoreName = 'المخزن الرئيسي';
             const branches = whList.filter(w => w !== mainStoreName);
             const showCost = shouldShowInquiryCostsAndWholesale();
             
-            let thHtml = `
-                <tr>
-                    <th style="padding: 8px 6px; width: 35px; text-align: center;">#</th>
-                    ${allSizes.length > 0 ? `<th style="padding: 8px 6px; text-align: center;">المقاس</th>` : ''}
-                    ${allColors.length > 0 ? `<th style="padding: 8px 6px; text-align: center;">اللون</th>` : ''}
-                    <th style="padding: 8px 6px; text-align: center; background: rgba(0,0,0,0.03);">${mainStoreName}</th>
-            `;
-            branches.forEach(b => {
-                thHtml += `<th style="padding: 8px 6px; text-align: center; background: rgba(0,0,0,0.02);">${b}</th>`;
-            });
-            thHtml += `
-                    <th style="padding: 8px 6px; text-align: center; background: #e0f2fe; color: #0369a1;">إجمالي الفروع</th>
-                    <th style="padding: 8px 6px; text-align: center; background: #f0fdf4; color: #166534;">الرصيد الكلي</th>
-                    <th style="padding: 8px 6px; text-align: center;">سعر القطاعي</th>
-                    ${showCost ? `<th style="padding: 8px 6px; text-align: center;">سعر الجملة</th>` : ''}
-                    <th style="padding: 8px 6px; text-align: center;">الباركود الفريد</th>
-                    <th style="padding: 8px 6px; text-align: center; width: 75px;">إضافة</th>
-                </tr>
-            `;
+            let thHtml = '<tr>';
+            if (cols.index) {
+                thHtml += `<th style="padding: 8px 6px; width: 35px; text-align: center;">#</th>`;
+            }
+            if (cols.size && allSizes.length > 0) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center;">المقاس</th>`;
+            }
+            if (cols.color && allColors.length > 0) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center;">اللون</th>`;
+            }
 
-            const trsHtml = matchedVars.map((v, idx) => {
-                let mainStock = 0;
-                let branchesStockTotal = 0;
-                let totalStock = 0;
-                let branchesCells = '';
-                
-                if (v.warehouseStocks && typeof v.warehouseStocks === 'object') {
-                    mainStock = parseFloat(v.warehouseStocks[mainStoreName]) || 0;
-                    branches.forEach(b => {
-                        const bStock = parseFloat(v.warehouseStocks[b]) || 0;
-                        branchesStockTotal += bStock;
-                        const isCurrent = b === currentUserWh;
-                        const cellBg = isCurrent ? '#fef08a' : (bStock > 0 ? '#f8fafc' : '#ffffff');
-                        branchesCells += `<td style="padding: 6px; text-align: center; font-weight: 800; background: ${cellBg}; color: ${bStock > 0 ? '#0f766e' : '#94a3b8'};">${bStock > 0 ? bStock : '-'}</td>`;
-                    });
-                    totalStock = mainStock + branchesStockTotal;
+            if (cols.whStock) {
+                if (isSingleWh) {
+                    thHtml += `<th style="padding: 8px 10px; text-align: center; background: #fef08a; color: #854d0e; font-weight: 900; border-right: 1.5px solid #fde047; border-left: 1.5px solid #fde047;">رصيد (${selectedInquiryWarehouse})</th>`;
                 } else {
-                    totalStock = parseFloat(v.stock !== undefined ? v.stock : 0);
-                    mainStock = totalStock; 
+                    thHtml += `<th style="padding: 8px 6px; text-align: center; background: rgba(0,0,0,0.03);">${mainStoreName}</th>`;
                     branches.forEach(b => {
-                        const isCurrent = b === currentUserWh;
-                        branchesCells += `<td style="padding: 6px; text-align: center; font-weight: 800; color: #94a3b8; background: ${isCurrent ? '#fef08a' : '#ffffff'};">-</td>`;
+                        thHtml += `<th style="padding: 8px 6px; text-align: center; background: rgba(0,0,0,0.02);">${b}</th>`;
                     });
                 }
+            }
 
-                const formatStockBadge = (qty) => {
-                    if (qty <= 0) return `<span style="background: #fee2e2; color: #ef4444; padding: 2px 6px; border-radius: 8px; font-weight: 900; font-size: 0.8rem;">0</span>`;
-                    return `<span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 8px; font-weight: 900; font-size: 0.85rem;">${qty}</span>`;
-                };
+            if (cols.branchesTotal && !isSingleWh && branches.length > 0) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center; background: #e0f2fe; color: #0369a1;">إجمالي الفروع</th>`;
+            }
 
-                const mainIsCurrent = mainStoreName === currentUserWh;
-                
-                const safeSize = (v.size || 'قياسي').replace(/'/g, "\\'");
-                const safeColor = (v.color || 'موحد').replace(/'/g, "\\'");
+            if (cols.totalStock) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center; background: #f0fdf4; color: #166534;">الرصيد الكلي</th>`;
+            }
 
-                // حساب الكمية المحجوزة في السلة لهذا المقاس واللون تحديداً
-                const vInCart = cartItemsForProduct
-                    .filter(item => {
-                        const itemSize = item.selectedVariant ? item.selectedVariant.size : (item.selectedSize || '');
-                        const itemColor = item.selectedVariant ? item.selectedVariant.color : (item.selectedColor || '');
-                        const cleanVSize = (v.size === 'قياسي') ? '' : (v.size || '');
-                        const cleanVColor = (v.color === 'موحد') ? '' : (v.color || '');
-                        const sizeOk = !cleanVSize || itemSize === cleanVSize;
-                        const colorOk = !cleanVColor || itemColor === cleanVColor;
-                        return sizeOk && colorOk;
-                    })
-                    .reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+            if (cols.retailPrice) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center;">سعر القطاعي</th>`;
+            }
 
-                const vInCartBadge = (vInCart > 0 && mainIsCurrent)
-                    ? `<div style="font-size: 0.72rem; color: #b45309; font-weight: 800; margin-top: 2px;">(بالسلة: ${vInCart})</div>`
-                    : '';
-                
-                // حساب أسعار وباركود التشكيلة
-                const vRetail = parseFloat(v.price !== undefined ? v.price : retailPrice) || 0;
-                const vWs = parseFloat(v.wholesale !== undefined ? v.wholesale : wholesalePrice) || 0;
-                const vBarcode = v.barcode || '---';
+            if (cols.wholesalePrice && showCost) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center;">سعر الجملة</th>`;
+            }
 
-                const actualVariantIndex = (p.variants && Array.isArray(p.variants)) ? p.variants.indexOf(v) : -1;
-                let addBtn = '';
-                if (totalStock > 0 || (v.allowOversell)) {
-                    addBtn = `<button onclick="window.addInquiryVariantByIndex(${actualVariantIndex})" style="background: #10b981; color: white; border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.82rem; font-weight: bold; box-shadow: 0 2px 6px rgba(16,185,129,0.3); transition: 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">➕ سلة</button>`;
-                } else {
-                    addBtn = `<button disabled style="background: #e2e8f0; color: #94a3b8; border: none; border-radius: 6px; padding: 4px 10px; font-size: 0.82rem; font-weight: bold; cursor: not-allowed;">نفذ</button>`;
-                }
+            if (cols.barcode) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center;">الباركود الفريد</th>`;
+            }
 
-                return `
-                    <tr style="border-bottom: 1px solid #e2e8f0;">
-                        <td style="padding: 6px; text-align: center; color: #64748b; font-weight: bold;">${idx + 1}</td>
-                        ${allSizes.length > 0 ? `<td style="padding: 6px; text-align: center; font-weight: 900; color: #047857;"><span style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 1px 6px; border-radius: 6px;">${v.size || 'قياسي'}</span></td>` : ''}
-                        ${allColors.length > 0 ? `<td style="padding: 6px; text-align: center; font-weight: 900; color: #1d4ed8;"><span style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1px 6px; border-radius: 6px;">${v.color || 'موحد'}</span></td>` : ''}
-                        <td style="padding: 6px; text-align: center; background: ${mainIsCurrent ? '#fef08a' : 'rgba(0,0,0,0.02)'};">${formatStockBadge(mainStock)}${vInCartBadge}</td>
-                        ${branchesCells}
-                        <td style="padding: 6px; text-align: center; font-weight: 900; color: #0369a1; background: #f0f9ff;">${branchesStockTotal > 0 ? branchesStockTotal : '-'}</td>
-                        <td style="padding: 6px; text-align: center; background: #f0fdf4;">${formatStockBadge(totalStock)}</td>
-                        <td style="padding: 6px; text-align: center; font-weight: bold; color: #15803d;">${vRetail.toFixed(2)}</td>
-                        ${showCost ? `<td style="padding: 6px; text-align: center; font-weight: bold; color: #1d4ed8;">${vWs.toFixed(2)}</td>` : ''}
-                        <td style="padding: 6px; text-align: center; font-size: 0.8rem; font-family: monospace; color: #475569;">${vBarcode}</td>
-                        <td style="padding: 6px; text-align: center;">${addBtn}</td>
-                    </tr>
-                `;
-            }).join('');
+            if (cols.action) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center; width: 75px;">إضافة</th>`;
+            }
+
+            thHtml += '</tr>';
+
+            let trsHtml = '';
+            if (matchedVars.length === 0) {
+                trsHtml = `<tr><td colspan="15" style="padding: 20px; text-align: center; color: #94a3b8; font-weight: 800;">لا توجد تشكيلات مطابقة للمقاس واللون المحددين</td></tr>`;
+            } else {
+                trsHtml = matchedVars.map((v, idx) => {
+                    let mainStock = 0;
+                    let branchesStockTotal = 0;
+                    let totalStock = 0;
+                    let branchesCells = '';
+                    let selectedWhStock = 0;
+                    
+                    if (v.warehouseStocks && typeof v.warehouseStocks === 'object') {
+                        mainStock = parseFloat(v.warehouseStocks[mainStoreName]) || 0;
+                        branches.forEach(b => {
+                            const bStock = parseFloat(v.warehouseStocks[b]) || 0;
+                            branchesStockTotal += bStock;
+                            const isCurrent = b === currentUserWh;
+                            const cellBg = isCurrent ? '#fef08a' : (bStock > 0 ? '#f8fafc' : '#ffffff');
+                            branchesCells += `<td style="padding: 6px; text-align: center; font-weight: 800; background: ${cellBg}; color: ${bStock > 0 ? '#0f766e' : '#94a3b8'};">${bStock > 0 ? bStock : '-'}</td>`;
+                        });
+                        totalStock = mainStock + branchesStockTotal;
+
+                        if (isSingleWh) {
+                            if (v.warehouseStocks[selectedInquiryWarehouse] !== undefined) {
+                                selectedWhStock = parseFloat(v.warehouseStocks[selectedInquiryWarehouse]) || 0;
+                            } else if (selectedInquiryWarehouse === mainStoreName) {
+                                selectedWhStock = parseFloat(v.stock !== undefined ? v.stock : 0) || 0;
+                            }
+                        }
+                    } else {
+                        totalStock = parseFloat(v.stock !== undefined ? v.stock : 0);
+                        mainStock = totalStock; 
+                        branches.forEach(b => {
+                            const isCurrent = b === currentUserWh;
+                            branchesCells += `<td style="padding: 6px; text-align: center; font-weight: 800; color: #94a3b8; background: ${isCurrent ? '#fef08a' : '#ffffff'};">-</td>`;
+                        });
+
+                        if (isSingleWh) {
+                            selectedWhStock = (selectedInquiryWarehouse === mainStoreName) ? totalStock : 0;
+                        }
+                    }
+
+                    const formatStockBadge = (qty) => {
+                        if (qty <= 0) return `<span style="background: #fee2e2; color: #ef4444; padding: 2px 6px; border-radius: 8px; font-weight: 900; font-size: 0.8rem;">0</span>`;
+                        return `<span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 8px; font-weight: 900; font-size: 0.85rem;">${qty}</span>`;
+                    };
+
+                    const mainIsCurrent = mainStoreName === currentUserWh;
+
+                    // حساب الكمية المحجوزة في السلة لهذا المقاس واللون تحديداً
+                    const vInCart = cartItemsForProduct
+                        .filter(item => {
+                            const itemSize = item.selectedVariant ? item.selectedVariant.size : (item.selectedSize || '');
+                            const itemColor = item.selectedVariant ? item.selectedVariant.color : (item.selectedColor || '');
+                            const cleanVSize = (v.size === 'قياسي') ? '' : (v.size || '');
+                            const cleanVColor = (v.color === 'موحد') ? '' : (v.color || '');
+                            const sizeOk = !cleanVSize || itemSize === cleanVSize;
+                            const colorOk = !cleanVColor || itemColor === cleanVColor;
+                            return sizeOk && colorOk;
+                        })
+                        .reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+
+                    const isWhMatchCart = isSingleWh ? (selectedInquiryWarehouse === currentUserWh) : mainIsCurrent;
+                    const vInCartBadge = (vInCart > 0 && isWhMatchCart)
+                        ? `<div style="font-size: 0.72rem; color: #b45309; font-weight: 800; margin-top: 2px;">(بالسلة: ${vInCart})</div>`
+                        : '';
+                    
+                    // أسعار وباركود التشكيلة
+                    const vRetail = parseFloat(v.price !== undefined ? v.price : retailPrice) || 0;
+                    const vWs = parseFloat(v.wholesale !== undefined ? v.wholesale : wholesalePrice) || 0;
+                    const vBarcode = v.barcode || '---';
+
+                    const actualVariantIndex = (p.variants && Array.isArray(p.variants)) ? p.variants.indexOf(v) : -1;
+                    let addBtn = '';
+                    if (totalStock > 0 || (v.allowOversell)) {
+                        addBtn = `<button onclick="window.addInquiryVariantByIndex(${actualVariantIndex})" style="background: #10b981; color: white; border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.82rem; font-weight: bold; box-shadow: 0 2px 6px rgba(16,185,129,0.3); transition: 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">➕ سلة</button>`;
+                    } else {
+                        addBtn = `<button disabled style="background: #e2e8f0; color: #94a3b8; border: none; border-radius: 6px; padding: 4px 10px; font-size: 0.82rem; font-weight: bold; cursor: not-allowed;">نفذ</button>`;
+                    }
+
+                    let rowTds = '';
+                    if (cols.index) {
+                        rowTds += `<td style="padding: 6px; text-align: center; color: #64748b; font-weight: bold;">${idx + 1}</td>`;
+                    }
+                    if (cols.size && allSizes.length > 0) {
+                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: 900; color: #047857;"><span style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 1px 6px; border-radius: 6px;">${v.size || 'قياسي'}</span></td>`;
+                    }
+                    if (cols.color && allColors.length > 0) {
+                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: 900; color: #1d4ed8;"><span style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1px 6px; border-radius: 6px;">${v.color || 'موحد'}</span></td>`;
+                    }
+
+                    if (cols.whStock) {
+                        if (isSingleWh) {
+                            rowTds += `<td style="padding: 6px; text-align: center; font-weight: 900; background: #fef9c3; border-right: 1.5px solid #fde047; border-left: 1.5px solid #fde047;">${formatStockBadge(selectedWhStock)}${vInCartBadge}</td>`;
+                        } else {
+                            rowTds += `<td style="padding: 6px; text-align: center; background: ${mainIsCurrent ? '#fef08a' : 'rgba(0,0,0,0.02)'};">${formatStockBadge(mainStock)}${vInCartBadge}</td>`;
+                            rowTds += branchesCells;
+                        }
+                    }
+
+                    if (cols.branchesTotal && !isSingleWh && branches.length > 0) {
+                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: 900; color: #0369a1; background: #f0f9ff;">${branchesStockTotal > 0 ? branchesStockTotal : '-'}</td>`;
+                    }
+
+                    if (cols.totalStock) {
+                        rowTds += `<td style="padding: 6px; text-align: center; background: #f0fdf4;">${formatStockBadge(totalStock)}</td>`;
+                    }
+
+                    if (cols.retailPrice) {
+                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: bold; color: #15803d;">${vRetail.toFixed(2)}</td>`;
+                    }
+
+                    if (cols.wholesalePrice && showCost) {
+                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: bold; color: #1d4ed8;">${vWs.toFixed(2)}</td>`;
+                    }
+
+                    if (cols.barcode) {
+                        const safeBarcode = String(v.barcode || '').replace(/'/g, "\\'");
+                        const hasBarcode = Boolean(v.barcode && String(v.barcode).trim() && v.barcode !== '---');
+                        const barcodeHtml = `
+                            <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                                <span style="font-family: monospace; font-size: 0.82rem; font-weight: 700; color: #334155; background: #f1f5f9; padding: 2px 7px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                    ${vBarcode}
+                                </span>
+                                ${hasBarcode ? `
+                                    <button type="button" onclick="event.stopPropagation(); window.copyInquiryBarcode('${safeBarcode}', this);" 
+                                        title="نسخ الباركود"
+                                        style="background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 0.8rem; line-height: 1; color: #475569; transition: all 0.15s; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"
+                                        onmouseover="this.style.borderColor='#059669'; this.style.color='#047857'; this.style.background='#ecfdf5';"
+                                        onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='#ffffff';">
+                                        📋
+                                    </button>
+                                ` : ''}
+                            </div>
+                        `;
+                        rowTds += `<td style="padding: 6px; text-align: center;">${barcodeHtml}</td>`;
+                    }
+
+                    if (cols.action) {
+                        rowTds += `<td style="padding: 6px; text-align: center;">${addBtn}</td>`;
+                    }
+
+                    return `<tr style="border-bottom: 1px solid #e2e8f0;">${rowTds}</tr>`;
+                }).join('');
+            }
+
+            const renderColCheckbox = (key, label, isChecked) => `
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 800; color: #334155; cursor: pointer; padding: 4px 6px; border-radius: 6px; transition: 0.15s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
+                    <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.toggleInquiryColVisibility('${key}', this.checked)" style="width: 16px; height: 16px; accent-color: #059669; cursor: pointer;">
+                    <span>${label}</span>
+                </label>
+            `;
 
             variantsTableHtml = `
-                <!-- 1.5 جدول التشكيلات التفصيلي للفاشون -->
-                <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
-                    <div style="background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 10px 16px; border-bottom: 1.5px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
-                            <span>👕</span> تفاصيل الأرصدة ${matchedVars.length !== variants.length ? '(المفلترة)' : ''} للمقاسات والألوان (المخزن الحالي مميز بالأصفر)
-                        </span>
+                <!-- 1.5 جدول التشكيلات التفصيلي للفاشون مع دعم تخصيص الأعمدة وتحديد المخزن -->
+                <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: visible; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+                    <div style="background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 10px 16px; border-bottom: 1.5px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-radius: 14px 14px 0 0; position: relative;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <span style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+                                <span>👕</span> تفاصيل الأرصدة ${matchedVars.length !== variants.length ? '(المفلترة)' : ''} للمقاسات والألوان
+                            </span>
+                            ${isSingleWh ? `
+                                <span style="background: #fef08a; color: #854d0e; border: 1.5px solid #fde047; padding: 2px 10px; border-radius: 8px; font-weight: 900; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
+                                    🏢 المخزن المحدد: ${selectedInquiryWarehouse}
+                                    <button type="button" onclick="window.setInquirySelectedWarehouse('all')" title="إلغاء التحديد وعرض كل المخازن" style="background: #ffffff; border: 1px solid #fde047; color: #b45309; font-weight: 900; cursor: pointer; border-radius: 4px; padding: 0 5px; font-size: 0.72rem; line-height: 1.4;">✕ إظهار الكل</button>
+                                </span>
+                            ` : `
+                                <span style="background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; padding: 2px 10px; border-radius: 8px; font-weight: 800; font-size: 0.78rem;">
+                                    🏢 كل المخازن والفروع (المخزن الحالي مميز بالأصفر)
+                                </span>
+                            `}
+                        </div>
+
+                        <!-- زر وقائمة تخصيص الأعمدة -->
+                        <div style="position: relative;">
+                            <button type="button" id="inquiryColCustomizerBtn" onclick="window.toggleInquiryColCustomizer(event)" 
+                                style="background: #ffffff; color: #334155; border: 1.5px solid #cbd5e1; padding: 5px 12px; border-radius: 8px; font-weight: 800; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: 0.2s;"
+                                onmouseover="this.style.borderColor='#059669'; this.style.color='#047857';"
+                                onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#334155';">
+                                <span>⚙️</span> تخصيص الأعمدة
+                            </button>
+
+                            <div id="inquiryColDropdown" style="display: ${isColCustomizerOpen ? 'block' : 'none'}; position: absolute; left: 0; top: 38px; background: #ffffff; border: 2px solid #cbd5e1; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); padding: 12px 14px; min-width: 230px; z-index: 1000; text-align: right;" onclick="event.stopPropagation();">
+                                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 8px;">
+                                    <span style="font-weight: 900; color: #0f172a; font-size: 0.85rem;">⚙️ تخصيص الأعمدة</span>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <button type="button" onclick="window.resetInquiryColsToDefault()" style="background: none; border: none; color: #059669; font-size: 0.75rem; font-weight: 800; cursor: pointer; text-decoration: underline;">الافتراضي</button>
+                                        <button type="button" onclick="window.toggleInquiryColCustomizer(event)" style="background: none; border: none; color: #64748b; font-size: 0.95rem; font-weight: bold; cursor: pointer; padding: 0 4px;">✕</button>
+                                    </div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 250px; overflow-y: auto;" class="fast-scrollbar">
+                                    ${renderColCheckbox('index', 'م (#)', cols.index)}
+                                    ${allSizes.length > 0 ? renderColCheckbox('size', 'المقاس', cols.size) : ''}
+                                    ${allColors.length > 0 ? renderColCheckbox('color', 'اللون', cols.color) : ''}
+                                    ${renderColCheckbox('whStock', 'رصيد المخزن المحدد / المخازن', cols.whStock)}
+                                    ${!isSingleWh ? renderColCheckbox('branchesTotal', 'إجمالي الفروع', cols.branchesTotal) : ''}
+                                    ${renderColCheckbox('totalStock', 'الرصيد الكلي', cols.totalStock)}
+                                    ${renderColCheckbox('retailPrice', 'سعر القطاعي', cols.retailPrice)}
+                                    ${showCost ? renderColCheckbox('wholesalePrice', 'سعر الجملة', cols.wholesalePrice) : ''}
+                                    ${renderColCheckbox('barcode', 'الباركود الفريد', cols.barcode)}
+                                    ${renderColCheckbox('action', 'زر الإضافة (سلة)', cols.action)}
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div style="max-height: 260px; overflow-y: auto; overflow-x: auto;" class="fast-scrollbar">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 650px; white-space: nowrap;">
+
+                    <div style="max-height: 260px; overflow-y: auto; overflow-x: auto; border-radius: 0 0 14px 14px;" class="fast-scrollbar">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 600px; white-space: nowrap;">
                             <thead style="background: #f8fafc; color: #475569; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem;">
                                 ${thHtml}
                             </thead>
@@ -607,10 +826,19 @@
                     
                     <!-- 1. جدول كمية الصنف في المخازن (مطابق للصورة 3) -->
                     <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
-                        <div style="background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 10px 16px; border-bottom: 1.5px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
-                                <span>🏢</span> كمية الصنف في المخازن (مرتبة بالأعلى رصيداً)
-                            </span>
+                        <div style="background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 10px 16px; border-bottom: 1.5px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+                                    <span>🏢</span> كمية الصنف في المخازن (مرتبة بالأعلى رصيداً)
+                                </span>
+                                ${selectedInquiryWarehouse !== 'all' ? `
+                                    <button type="button" onclick="window.setInquirySelectedWarehouse('all')" 
+                                        title="إلغاء تحديد المخزن وإظهار كافة المخازن بالجدول التفصيلي"
+                                        style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; padding: 2px 9px; border-radius: 6px; font-weight: 800; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                        ✕ إظهار كل المخازن
+                                    </button>
+                                ` : ''}
+                            </div>
                             <span style="background: #0f172a; color: #fbbf24; padding: 2px 10px; border-radius: 6px; font-weight: 900; font-size: 0.8rem;">
                                 إجمالي كل الفروع: ${grandTotalStock.toFixed(2).replace(/\.00$/, '')} ${p.unit || 'قطعة'}
                             </span>
@@ -620,6 +848,7 @@
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
                                 <thead style="background: #f8fafc; color: #475569; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid #e2e8f0;">
                                     <tr>
+                                        <th style="padding: 8px 6px; width: 60px; text-align: center; color: #047857; font-weight: 900;">تحديد</th>
                                         <th style="padding: 8px 12px; width: 40px; text-align: center;">م</th>
                                         <th style="padding: 8px 14px; text-align: right;">المخزن / الفرع</th>
                                         <th style="padding: 8px 12px; text-align: center; width: 140px;">الكمية المتاحة</th>
@@ -896,7 +1125,18 @@
 
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px;">
                         <span style="font-size: 0.8rem; color: #64748b; font-weight: 800;">الباركود الدولي:</span>
-                        <div style="font-size: 1rem; font-weight: 900; color: #0f172a; font-family: monospace; margin-top: 4px;">${p.barcode || 'غير مسجل'}</div>
+                        <div style="font-size: 1rem; font-weight: 900; color: #0f172a; font-family: monospace; margin-top: 4px; display: flex; align-items: center; justify-content: space-between;">
+                            <span>${p.barcode || 'غير مسجل'}</span>
+                            ${(p.barcode && p.barcode !== 'غير مسجل') ? `
+                                <button type="button" onclick="event.stopPropagation(); window.copyInquiryBarcode('${String(p.barcode).replace(/'/g, "\\'")}', this);" 
+                                    title="نسخ الباركود"
+                                    style="background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 0.78rem; font-weight: 800; color: #334155; display: inline-flex; align-items: center; gap: 4px; transition: 0.15s;"
+                                    onmouseover="this.style.borderColor='#059669'; this.style.color='#047857'; this.style.background='#ecfdf5';"
+                                    onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#334155'; this.style.background='#ffffff';">
+                                    <span>📋</span> نسخ
+                                </button>
+                            ` : ''}
+                        </div>
                     </div>
 
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px;">
@@ -956,6 +1196,111 @@
             selectedInquiryColor = value;
         }
         renderInquiryModal();
+    };
+
+    /**
+     * تحديد المخزن لعرض أرصدته بالجدول التفصيلي أدناه
+     */
+    window.setInquirySelectedWarehouse = function (whName) {
+        if (selectedInquiryWarehouse === whName) {
+            selectedInquiryWarehouse = 'all';
+        } else {
+            selectedInquiryWarehouse = whName;
+        }
+        renderInquiryModal();
+    };
+
+    /**
+     * فتح وإغلاق قائمة تخصيص الأعمدة
+     */
+    window.toggleInquiryColCustomizer = function (e) {
+        if (e) e.stopPropagation();
+        isColCustomizerOpen = !isColCustomizerOpen;
+        const dropdown = document.getElementById('inquiryColDropdown');
+        if (dropdown) {
+            dropdown.style.display = isColCustomizerOpen ? 'block' : 'none';
+        }
+    };
+
+    /**
+     * إظهار أو إخفاء عمود معين وحفظه في الإعدادات
+     */
+    window.toggleInquiryColVisibility = function (colKey, isChecked) {
+        const cols = getInquiryColsSettings();
+        cols[colKey] = !!isChecked;
+        saveInquiryColsSettings(cols);
+        renderInquiryModal();
+        setTimeout(() => {
+            isColCustomizerOpen = true;
+            const dropdown = document.getElementById('inquiryColDropdown');
+            if (dropdown) dropdown.style.display = 'block';
+        }, 10);
+    };
+
+    /**
+     * استعادة الأعمدة الافتراضية بالكامل
+     */
+    window.resetInquiryColsToDefault = function () {
+        saveInquiryColsSettings(defaultInquiryCols);
+        renderInquiryModal();
+        setTimeout(() => {
+            isColCustomizerOpen = true;
+            const dropdown = document.getElementById('inquiryColDropdown');
+            if (dropdown) dropdown.style.display = 'block';
+        }, 10);
+    };
+
+    /**
+     * 📋 نسخ باركود الصنف أو التشكيلة إلى الحافظة مع إشعار وتأكيد فوري
+     */
+    window.copyInquiryBarcode = function (barcodeText, btnElement) {
+        if (!barcodeText || barcodeText === '---') return;
+        const textToCopy = String(barcodeText).trim();
+
+        const onSuccess = () => {
+            if (btnElement) {
+                const originalHtml = btnElement.innerHTML;
+                btnElement.innerHTML = '✅';
+                btnElement.style.borderColor = '#10b981';
+                btnElement.style.background = '#dcfce7';
+                setTimeout(() => {
+                    btnElement.innerHTML = originalHtml;
+                    btnElement.style.borderColor = '#cbd5e1';
+                    btnElement.style.background = '#ffffff';
+                }, 1200);
+            }
+            if (typeof showToast === 'function') {
+                showToast(`📋 تم نسخ الباركود (${textToCopy}) بنجاح!`, 'success');
+            }
+        };
+
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(textToCopy).then(onSuccess).catch(() => {
+                fallbackCopy(textToCopy, onSuccess);
+            });
+        } else {
+            fallbackCopy(textToCopy, onSuccess);
+        }
+
+        function fallbackCopy(text, cb) {
+            try {
+                const tempInput = document.createElement('textarea');
+                tempInput.value = text;
+                tempInput.style.position = 'fixed';
+                tempInput.style.left = '-9999px';
+                tempInput.style.top = '0';
+                document.body.appendChild(tempInput);
+                tempInput.focus();
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                if (cb) cb();
+            } catch (e) {
+                if (typeof showToast === 'function') {
+                    showToast(`الباركود: ${text}`, 'info');
+                }
+            }
+        }
     };
 
     /**
@@ -1113,6 +1458,8 @@
             currentInquiryProduct = prod;
             selectedInquirySize = 'all';
             selectedInquiryColor = 'all';
+            selectedInquiryWarehouse = 'all';
+            isColCustomizerOpen = false;
 
             // 🎯 إذا تم تحديد باركود تشكيلة، نقوم بفلترة المقاس واللون تلقائياً
             if (variantBarcode && prod.variants && prod.variants.length > 0) {
@@ -1282,11 +1629,29 @@
             e.preventDefault();
             window.openFastItemInquiryModal();
         } else if (e.key === 'Escape') {
+            if (isColCustomizerOpen) {
+                e.preventDefault();
+                isColCustomizerOpen = false;
+                const dropdown = document.getElementById('inquiryColDropdown');
+                if (dropdown) dropdown.style.display = 'none';
+                return;
+            }
             const modal = document.getElementById('bayanFastInquiryModal');
             if (modal && modal.style.display === 'flex') {
                 e.preventDefault();
                 window.closeFastItemInquiryModal();
             }
+        }
+    });
+
+    // 🎯 إغلاق قائمة تخصيص الأعمدة تلقائياً عند النقر في أي مكان خارجها
+    document.addEventListener('click', function (e) {
+        if (!isColCustomizerOpen) return;
+        const dropdown = document.getElementById('inquiryColDropdown');
+        const btn = document.getElementById('inquiryColCustomizerBtn');
+        if (dropdown && !dropdown.contains(e.target) && btn && !btn.contains(e.target)) {
+            isColCustomizerOpen = false;
+            dropdown.style.display = 'none';
         }
     });
 

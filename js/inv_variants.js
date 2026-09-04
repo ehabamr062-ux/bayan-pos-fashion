@@ -634,10 +634,15 @@ function addVariantRow(size = '', color = '', barcode = '', stock = 1, price = n
                 style="height: 32px; font-weight: bold; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; color: #d97706;">
         </td>
         <td style="white-space: nowrap; padding: 4px;">
+            <button type="button" onclick="printSingleVariantBarcode(this, event)" title="🖨️ طباعة باركود هذا المقاس واللون فقط (Shift+نقر لتحديد عدد النسخ)"
+                style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 6px; padding: 4px 6px; cursor: pointer; font-weight: bold; margin-left: 3px;"
+                onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">🖨️</button>
             <button type="button" onclick="restoreSingleVariantRow(this)" title="استعادة القيم الأصلية لهذا الصف"
-                style="background: #f0fdf4; color: #166534; border: 1px solid #86efac; border-radius: 6px; padding: 4px 6px; cursor: pointer; font-weight: bold; margin-left: 3px;">🔄</button>
+                style="background: #f0fdf4; color: #166534; border: 1px solid #86efac; border-radius: 6px; padding: 4px 6px; cursor: pointer; font-weight: bold; margin-left: 3px;"
+                onmouseover="this.style.background='#dcfce7'" onmouseout="this.style.background='#f0fdf4'">🔄</button>
             <button type="button" onclick="this.closest('tr').remove(); updateVariantsCountBadge(); renderSmartMatrixView();"
-                style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-weight: bold;" title="حذف هذا الصف">✕</button>
+                style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-weight: bold;"
+                onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fef2f2'" title="حذف هذا الصف">✕</button>
         </td>
     `;
     tbody.appendChild(tr);
@@ -1033,6 +1038,59 @@ function syncMatrixInputToDetailedRow(rowIndex, newStock) {
     }
     renderSmartMatrixView();
 }
+
+// طباعة تيكت باركود فردي لصف محدد في جدول التشكيلات
+window.printSingleVariantBarcode = async function(btn, event) {
+    const tr = btn.closest('tr');
+    if (!tr) return;
+
+    const prodName = document.getElementById('newItemName')?.value?.trim() || 'صنف فاشون';
+    const size = tr.querySelector('.var-size-input')?.value?.trim() || '';
+    const color = tr.querySelector('.var-color-input')?.value?.trim() || '';
+    const barcode = tr.querySelector('.var-barcode-input')?.value?.trim() || tr.dataset.origBarcode || '';
+    const priceInput = tr.querySelector('.var-price-input');
+    const price = (priceInput && priceInput.value !== '') ? parseFloat(priceInput.value) : (parseFloat(document.getElementById('newItemPrice')?.value) || 0);
+    const code = document.getElementById('newItemCode')?.value?.trim() || document.getElementById('newItemSysCode')?.value?.trim() || barcode;
+
+    if (!barcode) {
+        if (typeof showToast === 'function') {
+            showToast('⚠️ لا يوجد باركود محدد لهذا الصف للطباعة!', 'warning');
+        }
+        return;
+    }
+
+    let copies = 1;
+    const evt = event || (typeof window !== 'undefined' ? window.event : null);
+    if (evt && (evt.shiftKey || evt.ctrlKey)) {
+        if (typeof showCustomPrompt === 'function') {
+            const inputCopies = await showCustomPrompt("🏷️ كم عدد الملصقات المطلوب طباعتها لهذا المقاس؟", "1");
+            if (!inputCopies) return;
+            copies = Math.max(1, parseInt(inputCopies) || 1);
+        }
+    }
+
+    const singleItem = {
+        name: prodName,
+        size: size,
+        color: color,
+        code: code,
+        barcode: barcode,
+        price: price,
+        copies: copies
+    };
+
+    if (typeof executePrinting === 'function') {
+        executePrinting([singleItem], copies);
+        if (typeof showToast === 'function') {
+            const desc = [size, color].filter(Boolean).join(' - ');
+            showToast(`🖨️ جاري طباعة ملصق الباركود: ${barcode}${desc ? ' (' + desc + ')' : ''}`, 'success');
+        }
+    } else {
+        if (typeof showToast === 'function') {
+            showToast('⚠️ دالة طباعة الباركود غير متاحة حالياً', 'error');
+        }
+    }
+};
 
 // استعادة القيم الأصلية لصف واحد في جدول التشكيلات
 window.restoreSingleVariantRow = function(btn) {

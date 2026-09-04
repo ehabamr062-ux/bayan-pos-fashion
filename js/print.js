@@ -4,7 +4,7 @@
  * تدعم:
  *  - 5 أنواع مستندات: مبيعات، شراء، سندات مالية، تقارير مخزن، عام
  *  - 5 قوالب طباعة: 80mm Standard, 80mm Compact, 57mm Mobile, A4 Professional, A5 Modern
- *  - حفظ القالب المختار في localStorage
+ *  - حفظ القالب المختار في IndexedDB (setStore)
  * 
  * invoiceData = {
  *   invoiceNumber, invoiceType, date, time, dueDate,
@@ -135,7 +135,7 @@ function printInvoice(invoiceData) {
     const cashier       = invoiceData.cashier       || '';
     const customer      = invoiceData.customer      || invoiceData.partnerName || '';
     const warehouse     = invoiceData.warehouse     || (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) || 'المخزن الرئيسي';
-    const terminal      = invoiceData.terminal      || ((window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'));
+    const terminal      = invoiceData.terminal      || ((window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱'));
     const items         = invoiceData.items         || [];
 
     const totalAmount = parseFloat(invoiceData.totalAmount !== undefined ? invoiceData.totalAmount : (invoiceData.invoiceAmount !== undefined ? invoiceData.invoiceAmount : (invoiceData.total || 0)));

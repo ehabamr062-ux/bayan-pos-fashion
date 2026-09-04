@@ -263,12 +263,6 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             }
         }
 
-        // تم تنظيف بوابة السحابة للعمل محلياً بالكامل 100%
-        async function checkDevAccess() {
-            switchSection('dev-dashboard-section');
-            showToast("مرحباً بك.. بوابة التحكم مفتوحة.");
-        }
-
         // دالة نسخ النصوص للحافظة
         function showPLReport() {
             let totalSales = 0;
@@ -808,7 +802,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '1.0.2';
+            const version = window.appVersion || '1.0.3';
 
             const message = `السلام عليكم\nأريد الاشتراك في Bayan POS\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة: ${plan}\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ.`;
             
@@ -1187,16 +1181,6 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             if (show) editor.classList.remove('hidden');
             else editor.classList.add('hidden');
         }
-
-        // --- وظائف لوحة التحكم وإدارة النظام المحلي ---
-        window.checkDevAccess = async function() {
-            if (typeof switchSection === 'function') switchSection('dev-dashboard-section');
-            if (typeof showToast === 'function') showToast("مرحباً بك.. بوابة التحكم مفتوحة.");
-        };
-
-        window.updateRemoteIndex = async function() {
-            if (typeof showToast === 'function') showToast("ℹ️ النظام يعمل في الوضع المحلي المستقل بالكامل 💻", "info");
-        };
 
         window.registerOnCloud = async function() {
             const shopName = document.getElementById('shopName')?.value?.trim();

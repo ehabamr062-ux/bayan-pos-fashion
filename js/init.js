@@ -36,7 +36,7 @@ loadData().then(async () => {
     // 4. صمام الأمان الفولاذي: إنشاء نسخة احتياطية تلقائية وفورية في الخلفية عند الترقية لإصدار جديد
     try {
         const lastVer = getStore('bayan_last_run_version');
-        const curVer = window.appVersion || '1.0.2';
+        const curVer = window.appVersion || '1.0.3';
         if (lastVer && lastVer !== curVer) {
             console.log(`🛡️ [Safety Shield] Version upgrade detected (${lastVer} ➔ ${curVer}). Creating automatic background backup...`);
             if (typeof window.executeAutoBackupToFile === 'function') {

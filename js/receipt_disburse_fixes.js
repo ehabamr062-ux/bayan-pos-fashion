@@ -2,7 +2,7 @@
  * Bayan POS - Receipt & Disbursement Fixes & Improvements
  * - Replaces native browser alert() with the custom modern modal alert.
  * - Restores checkbox functionality for "Print Automatically" and "Close Tab" in Receipt/Disbursement.
- * - Persists checkbox states using localStorage.
+ * - Persists checkbox states using IndexedDB (bayanDB.settings via getStore/setStore).
  */
 
 // 1. Override window.alert globally to use the modern custom alert system

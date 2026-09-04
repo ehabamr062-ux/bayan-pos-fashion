@@ -75,7 +75,7 @@
                                 wSelect.title = '';
                                 wSelect.style.background = '';
                                 wSelect.style.cursor = '';
-                                const savedWH = localStorage.getItem('bayan_terminal_warehouse');
+                                const savedWH = (typeof getStore === 'function') ? getStore('bayan_terminal_warehouse') : null;
                                 if (savedWH && warehouses.some(w => w.name === savedWH)) {
                                     wSelect.value = savedWH;
                                 }
@@ -88,7 +88,7 @@
 
             if (wSelect) {
                 wSelect.innerHTML = warehouses.map(w => '<option value="' + w.name + '">' + w.name + '</option>').join('');
-                const savedTerminalWH = localStorage.getItem('bayan_terminal_warehouse');
+                const savedTerminalWH = (typeof getStore === 'function') ? getStore('bayan_terminal_warehouse') : null;
                 if (savedTerminalWH && warehouses.some(w => w.name === savedTerminalWH)) {
                     wSelect.value = savedTerminalWH;
                 }
@@ -190,14 +190,16 @@
                     } else if (foundUser.warehouseScope === 'specific' && foundUser.assignedWarehouse) {
                         whName = foundUser.assignedWarehouse;
                     }
-                    try {
-                        localStorage.setItem('bayan_terminal_warehouse', whName);
-                    } catch(e) {}
+                    if (typeof setStore === 'function') {
+                        setStore('bayan_terminal_warehouse', whName);
+                    }
 
-                    // ✅ أمان: نحفظ في IndexedDB - الدور والصلاحيات تُحمَّل من DB لا من localStorage
+                    // ✅ أمان: نحفظ في IndexedDB حصراً - الدور والصلاحيات تُحمَّل من DB
                     currentUser = { ...foundUser, warehouseName: whName };
-                    // نحفظ فقط pin + warehouseName في localStorage (لا نحفظ role أو permissions)
-                    setStore('pos_session_user', JSON.stringify({ pin: foundUser.pin, warehouseName: whName }));
+                    // نحفظ فقط pin + warehouseName في IndexedDB (لا نحفظ role أو permissions)
+                    if (typeof setStore === 'function') {
+                        setStore('pos_session_user', JSON.stringify({ pin: foundUser.pin, warehouseName: whName }));
+                    }
 
                     document.getElementById('loginModal').classList.add('hidden');
                     document.body.classList.remove('is-logged-out'); // إظهار عناصر البرنامج
@@ -299,9 +301,9 @@
             } else if (foundUser.warehouseScope === 'specific' && foundUser.assignedWarehouse) {
                 whName = foundUser.assignedWarehouse;
             }
-            try {
-                localStorage.setItem('bayan_terminal_warehouse', whName);
-            } catch(e) {}
+            if (typeof setStore === 'function') {
+                setStore('bayan_terminal_warehouse', whName);
+            }
 
             currentUser = { ...foundUser, warehouseName: whName };
             if (typeof setStore === 'function') {

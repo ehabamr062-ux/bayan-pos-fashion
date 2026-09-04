@@ -160,8 +160,8 @@
         function getNextSequence(typeKeyword) {
             const list = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
             const isTablet = (typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer);
-            const savedPrefix = localStorage.getItem('bayan_device_prefix');
-            const devPrefix = (savedPrefix !== null) ? savedPrefix : (isTablet ? 'T-' : '');
+            const savedPrefix = (typeof getStore === 'function') ? getStore('bayan_device_prefix') : null;
+            const devPrefix = (savedPrefix !== null && savedPrefix !== undefined) ? savedPrefix : (isTablet ? 'T-' : '');
 
             const maxId = list.reduce((max, t) => {
                 if (!typeKeyword || (t.type && t.type.includes(typeKeyword))) {

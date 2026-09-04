@@ -43,6 +43,7 @@ function handleHistorySearch(query, event) {
 
     historySearchActiveIndex = -1;
     resultsDiv.innerHTML = '';
+    window.historyRenderLimit = 500;
 
     if (!query || !query.trim()) { 
         resultsDiv.style.display = 'none'; 
@@ -134,9 +135,21 @@ function applyHistoryColumnVisibility() {
     }
 }
 
-// متخصص لفلترة الفترة في صفحة الحركة
+// متغيرات نظام التصفح والتحميل الذكي لسجل الحركات
+window.historyRenderLimit = 500;
 
+window.loadMoreHistory = function(step) {
+    if (step === 0) {
+        window.historyRenderLimit = Infinity;
+    } else {
+        window.historyRenderLimit = (window.historyRenderLimit || 500) + step;
+    }
+    renderHistoryTable();
+};
+
+// متخصص لفلترة الفترة في صفحة الحركة
 function applyHistoryPeriodFilter(period) {
+    window.historyRenderLimit = 500;
 
     const fromInput = document.getElementById('historyDateFrom');
 
@@ -387,8 +400,13 @@ function renderHistoryTable(filterName = null) {
     }
     if (amtCardEl) amtCardEl.innerHTML = `${totalAmountSum.toFixed(2)} <span style="font-size:0.75rem;">ج.م</span>`;
 
+    const totalMatchingCount = data.length;
+    const limit = window.historyRenderLimit || 500;
+    const displayedData = data.slice(0, limit);
+    const hasMore = totalMatchingCount > displayedData.length;
+
     let rowsHtml = '';
-    data.forEach(t => {
+    displayedData.forEach(t => {
         const isSelected = (selectedHistoryIndex === t.originalIndex);
 
         const sSize = t.size || t.selectedSize || '';
@@ -445,16 +463,39 @@ function renderHistoryTable(filterName = null) {
             </tr>`;
     });
 
+    if (hasMore) {
+        rowsHtml += `
+            <tr id="historyLoadMoreRow" style="background: linear-gradient(135deg, #f8fafc, #f1f5f9); text-align: center;">
+                <td colspan="12" style="padding: 16px; border-top: 2px dashed #cbd5e1;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;">
+                        <span style="font-weight: 800; color: #475569; font-size: 0.92rem;">
+                            📊 تم عرض <strong style="color: #7c3aed; font-size: 1.05rem;">${displayedData.length}</strong> من إجمالي <strong style="color: #1e293b; font-size: 1.05rem;">${totalMatchingCount}</strong> حركة
+                        </span>
+                        <button type="button" onclick="loadMoreHistory(500)" style="background: linear-gradient(135deg, #7c3aed, #6d28d9); color: white; border: none; padding: 7px 18px; border-radius: 8px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(124,58,237,0.3); font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                            ➕ عرض 500 أخرى
+                        </button>
+                        <button type="button" onclick="loadMoreHistory(0)" style="background: white; color: #475569; border: 1.5px solid #cbd5e1; padding: 7px 16px; border-radius: 8px; font-weight: 800; cursor: pointer; font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                            ⚡ عرض الكل (${totalMatchingCount})
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+    }
+
     tbody.innerHTML = rowsHtml || `<tr><td colspan="12" style="text-align:center; padding:20px;">لا توجد حركات مسجلة</td></tr>`;
 
-    if (document.getElementById('historyBadgeCount')) document.getElementById('historyBadgeCount').innerText = 'عدد: ' + data.length;
+    if (document.getElementById('historyBadgeCount')) {
+        document.getElementById('historyBadgeCount').innerText = hasMore
+            ? `معروض ${displayedData.length} من ${totalMatchingCount}`
+            : 'عدد: ' + totalMatchingCount;
+    }
 
     if (typeof applyHistoryColumnVisibility === 'function') {
         applyHistoryColumnVisibility();
     }
 }
 
-// متغيرات للتحكم في ظهور الأعمدة مع الحفظ في localStorage
+// متغيرات للتحكم في ظهور الأعمدة مع الحفظ في IndexedDB (getStore)
 
 let invoicesColumnVisibility = JSON.parse(getStore('pos_inv_cols_visible') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true,"12":true,"13":true}');
 

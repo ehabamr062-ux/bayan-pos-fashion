@@ -40,11 +40,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '1.0.2';
-window.APP_VERSION = '1.0.2';
+window.appVersion = '1.0.3';
+window.APP_VERSION = '1.0.3';
 
 async function fetchAppVersion() {
-    let version = '1.0.2';
+    let version = '1.0.3';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -58,7 +58,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '1.0.2';
+    if (!version) version = window.appVersion || '1.0.3';
     window.appVersion = version;
     window.APP_VERSION = version;
 
@@ -254,7 +254,7 @@ if (getStore('bayan_inventory_categories')) {
 
 }
 
-// --- نظام الحفظ والاسترجاع (LocalStorage) ---
+// --- نظام الحفظ والاسترجاع (IndexedDB) ---
 
 // --- نظام الحسابات والديناميكية ---
 
@@ -342,7 +342,7 @@ async function loadData() {
     window.warehouses = warehouses;
 
 
-    // تحميل أسباب الخصم والإضافة التلقائية (من localStorage للمحافظة على التوافق حالياً)
+    // تحميل أسباب الخصم والإضافة التلقائية من IndexedDB
 
     if (getStore('pos_discount_reasons')) discountReasons = JSON.parse(getStore('pos_discount_reasons'));
 
@@ -561,17 +561,25 @@ async function saveData() {
                 }
             }
 
-            // 5. حفظ المهملات
+            // 5. حفظ المهملات (مع إدارة السعة وحفظ سريع بدون مسح دوري مكرر)
             if (Array.isArray(trashBin)) {
-                await db.trash.clear();
+                if (trashBin.length > 500) {
+                    trashBin = trashBin.slice(-500);
+                    window.trashBin = trashBin;
+                    await db.trash.clear();
+                }
                 if (trashBin.length > 0) {
                     await db.trash.bulkPut(trashBin);
                 }
             }
 
-            // 6. حفظ سجل النظام
+            // 6. حفظ سجل التدقيق (الاحتفاظ بأحدث 1000 سجل لمنع تضخم قاعدة البيانات وتسريع الحفظ الفوري)
             if (Array.isArray(auditLogs)) {
-                await db.auditLogs.clear();
+                if (auditLogs.length > 1000) {
+                    auditLogs = auditLogs.slice(-1000);
+                    window.auditLogs = auditLogs;
+                    await db.auditLogs.clear();
+                }
                 if (auditLogs.length > 0) {
                     await db.auditLogs.bulkPut(auditLogs);
                 }
@@ -594,7 +602,7 @@ async function saveData() {
         }
     }
 
-    // استمرار دعم localStorage لبعض الإعدادات السريعة
+    // حفظ الإعدادات السريعة في IndexedDB عبر setStore
     setStore('pos_warehouses', JSON.stringify(warehouses));
     setStore('pos_discount_reasons', JSON.stringify(discountReasons));
     setStore('pos_tax_reasons', JSON.stringify(taxReasons));

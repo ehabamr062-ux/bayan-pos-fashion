@@ -293,7 +293,22 @@
         }
         window.getGroupedTransactions = getGroupedTransactions;
 
-        function renderInvoicesTable() {
+        // نظام التصفح والتحميل الذكي لفواتير العمليات
+        window.invoicesRenderLimit = 500;
+
+        window.loadMoreInvoices = function(step) {
+            if (step === 0) {
+                window.invoicesRenderLimit = Infinity;
+            } else {
+                window.invoicesRenderLimit = (window.invoicesRenderLimit || 500) + step;
+            }
+            renderInvoicesTable(true);
+        };
+
+        function renderInvoicesTable(isLoadMore = false) {
+            if (!isLoadMore) {
+                window.invoicesRenderLimit = window.invoicesRenderLimit || 500;
+            }
 
             const tbody = document.getElementById('invoicesTableBody');
 
@@ -433,7 +448,16 @@
 
             });
 
-            if (document.getElementById('invSumCount')) document.getElementById('invSumCount').innerText = finalData.length;
+            const totalMatchingInvoices = finalData.length;
+            const limit = window.invoicesRenderLimit || 500;
+            const displayedInvoices = finalData.slice(0, limit);
+            const hasMore = totalMatchingInvoices > displayedInvoices.length;
+
+            if (document.getElementById('invSumCount')) {
+                document.getElementById('invSumCount').innerHTML = hasMore
+                    ? `${displayedInvoices.length} <small style="font-size:0.7rem; opacity:0.85;">من ${totalMatchingInvoices}</small>`
+                    : totalMatchingInvoices;
+            }
 
             if (document.getElementById('invSumTotal')) document.getElementById('invSumTotal').innerText = sumTotal.toFixed(2);
 
@@ -468,7 +492,7 @@
             });
 
             let rowsHtml = '';
-            finalData.forEach((t) => {
+            displayedInvoices.forEach((t) => {
                 const isSelected = (selectedInvoiceIndex === t.originalIndex);
 
                 // حساب وتنسيق عرض الربح للمرتجعات في الجدول بالسالب وباللون المناسب
@@ -604,6 +628,25 @@
                     </tr>
                 `;
             });
+
+            if (hasMore) {
+                rowsHtml += `
+                    <tr id="invoicesLoadMoreRow" style="background: linear-gradient(135deg, #f8fafc, #f1f5f9); text-align: center;">
+                        <td colspan="14" style="padding: 16px; border-top: 2px dashed #cbd5e1;">
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;">
+                                <span style="font-weight: 800; color: #475569; font-size: 0.92rem;">
+                                    📊 تم عرض <strong style="color: #2563eb; font-size: 1.05rem;">${displayedInvoices.length}</strong> من إجمالي <strong style="color: #1e293b; font-size: 1.05rem;">${totalMatchingInvoices}</strong> فاتورة
+                                </span>
+                                <button type="button" onclick="loadMoreInvoices(500)" style="background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; border: none; padding: 7px 18px; border-radius: 8px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(37,99,235,0.3); font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                                    ➕ عرض 500 أخرى
+                                </button>
+                                <button type="button" onclick="loadMoreInvoices(0)" style="background: white; color: #475569; border: 1.5px solid #cbd5e1; padding: 7px 16px; border-radius: 8px; font-weight: 800; cursor: pointer; font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                                    ⚡ عرض الكل (${totalMatchingInvoices})
+                                </button>
+                            </div>
+                        </td>
+                    </tr>`;
+            }
 
             tbody.innerHTML = rowsHtml || '<tr><td colspan="13" style="text-align:center; padding:20px;">لا توجد بيانات تطابق البحث</td></tr>';
         }

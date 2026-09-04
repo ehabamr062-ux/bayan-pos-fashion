@@ -670,19 +670,26 @@
             const footerMsg   = document.getElementById('printFooterMsg')?.value || 'شكراً لزيارتكم!';
             const activeWH    = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
 
-            let totalQty = 0;
-            let totalValue = 0;
+            let totalCountedQty = 0;
+            let totalDiffQty = 0;
+            let totalDiffValue = 0;
 
             let rows = window.adjCart.map((item, idx) => {
-                const qty = parseFloat(item.qty) || 0;
+                const factor = parseFloat(item.unitFactor) || 1;
+                const counted = (parseFloat(item.qty) || 0) * factor;
+                const book = parseFloat(item.stock) || 0;
+                const diff = counted - book;
                 const price = parseFloat(item.price) || 0;
-                const lineTotal = qty * price;
-                totalQty += qty;
-                totalValue += lineTotal;
+                const diffTotal = diff * price;
+
+                totalCountedQty += counted;
+                totalDiffQty += diff;
+                totalDiffValue += diffTotal;
 
                 const sSize = item.size || item.selectedSize || '-';
                 const sColor = item.color || item.selectedColor || '-';
                 const unitName = item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (item.unit || 'قطعة');
+                const diffLabel = diff < 0 ? `عجز (${Math.abs(diff)})` : (diff > 0 ? `زيادة (+${diff})` : 'مطابق (0)');
 
                 return `
                     <tr>
@@ -690,9 +697,11 @@
                         <td style="text-align:right; padding: 6px 10px; border: 1px solid #000; font-weight:bold;">${item.name}</td>
                         <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#047857;">${sSize}</td>
                         <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:#1d4ed8;">${sColor}</td>
-                        <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${qty} ${unitName}</td>
+                        <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; background:#f8fafc;">${book}</td>
+                        <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; background:#eff6ff;">${counted} ${unitName}</td>
+                        <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold; color:${diff < 0 ? '#dc2626' : (diff > 0 ? '#16a34a' : '#000')};">${diffLabel}</td>
                         <td style="padding: 6px 8px; border: 1px solid #000;">${price.toFixed(2)}</td>
-                        <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${lineTotal.toFixed(2)}</td>
+                        <td style="padding: 6px 8px; border: 1px solid #000; font-weight:bold;">${diffTotal.toFixed(2)}</td>
                         <td style="padding: 6px 8px; border: 1px solid #000; font-size:11px;">${item.notes || '-'}</td>
                     </tr>
                 `;
@@ -710,7 +719,7 @@
                         ${shopAddress ? `<div style="font-size:12px; color:#555; margin-top:2px;">${shopAddress}</div>` : ''}
                         ${shopPhone ? `<div style="font-size:12px; color:#555; margin-top:2px;">هاتف: ${shopPhone}</div>` : ''}
 
-                        <h2 style="margin:5px 0; background:#000; color:#fff; display:inline-block; padding:5px 20px; border-radius:5px;">إذن تسوية مخزنية</h2>
+                        <h2 style="margin:5px 0; background:#000; color:#fff; display:inline-block; padding:5px 20px; border-radius:5px;">إذن جرد وتسوية مخزنية</h2>
 
                     </div>
 
@@ -727,9 +736,11 @@
                                 <th style="padding: 8px; border: 1px solid #000; text-align:right;">الصنف</th>
                                 <th style="padding: 8px; border: 1px solid #000;">المقاس</th>
                                 <th style="padding: 8px; border: 1px solid #000;">اللون</th>
-                                <th style="padding: 8px; border: 1px solid #000;">الكمية الفعلية</th>
-                                <th style="padding: 8px; border: 1px solid #000;">السعر</th>
-                                <th style="padding: 8px; border: 1px solid #000;">الإجمالي</th>
+                                <th style="padding: 8px; border: 1px solid #000;">الدفتري</th>
+                                <th style="padding: 8px; border: 1px solid #000;">الفعلي</th>
+                                <th style="padding: 8px; border: 1px solid #000;">الفرق</th>
+                                <th style="padding: 8px; border: 1px solid #000;">التكلفة</th>
+                                <th style="padding: 8px; border: 1px solid #000;">قيمة الفرق</th>
                                 <th style="padding: 8px; border: 1px solid #000;">الملاحظات</th>
                             </tr>
                         </thead>
@@ -739,9 +750,11 @@
                         <tfoot>
                             <tr style="font-weight:bold; background:#f0f0f0;">
                                 <td colspan="4" style="padding: 8px; border: 1px solid #000;">الإجمالي الكلي</td>
-                                <td style="padding: 8px; border: 1px solid #000;">${totalQty}</td>
                                 <td style="padding: 8px; border: 1px solid #000;">-</td>
-                                <td style="padding: 8px; border: 1px solid #000;">${totalValue.toFixed(2)}</td>
+                                <td style="padding: 8px; border: 1px solid #000;">${totalCountedQty}</td>
+                                <td style="padding: 8px; border: 1px solid #000; color:${totalDiffQty < 0 ? '#dc2626' : (totalDiffQty > 0 ? '#16a34a' : '#000')};">${totalDiffQty >= 0 ? '+' : ''}${totalDiffQty}</td>
+                                <td style="padding: 8px; border: 1px solid #000;">-</td>
+                                <td style="padding: 8px; border: 1px solid #000;">${totalDiffValue.toFixed(2)}</td>
                                 <td style="padding: 8px; border: 1px solid #000;">-</td>
                             </tr>
                         </tfoot>

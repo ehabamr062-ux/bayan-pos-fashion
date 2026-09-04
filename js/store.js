@@ -1,18 +1,18 @@
 /**
- * Bayan POS - Store Manager
- * نظام وسيط لإدارة الإعدادات والبيانات الخفيفة في الذاكرة ومزامنتها مع IndexedDB (Dexie)
- * استبدالاً لـ localStorage لتحسين الأداء وتوحيد قاعدة البيانات.
+ * Bayan POS - Store Manager (IndexedDB Pure System)
+ * نظام وسيط لإدارة الإعدادات والبيانات في الذاكرة ومزامنتها لحظياً ومباشرة مع IndexedDB (Dexie)
+ * تم إلغاء localStorage بالكامل والاعتماد بنسبة 100% على IndexedDB.
  */
 
 window.AppStore = {};
 window.bayanDB = null;
 let isAppStoreInitialized = false;
 
-// دالة التهيئة الأولية (تستدعى مرة واحدة عند بدء التطبيق)
+// دالة التهيئة الأولية (تستدعى عند بدء التطبيق لتحميل كافة الإعدادات من IndexedDB إلى الذاكرة)
 async function initAppStore() {
     if (isAppStoreInitialized && window.bayanDB) return;
     isAppStoreInitialized = true;
-    console.log("🔄 جاري تهيئة نظام Store...");
+    console.log("🔄 جاري تهيئة نظام Store عبر IndexedDB...");
     
     // ضمان وجود الداتابيز أو إنشائها وتوحيد المرجع مع window.db
     if (typeof window.db !== 'undefined' && window.db) {
@@ -23,7 +23,7 @@ async function initAppStore() {
             products: "++id, name, barcode, category",
             transactions: "++id, dateISO, type, partner, invoiceId",
             accounts: "++id, name, type, code",
-            settings: "id", // سيتم حفظ المفاتيح هنا كـ id والقيمة في حقل value
+            settings: "id", // حفظ المفاتيح كـ id والقيمة في حقل value
             trash: "++id, type, deletedAt",
             users: "++id, name, pin",
             auditLogs: "++id, timestamp, action",
@@ -40,93 +40,87 @@ async function initAppStore() {
         }
     }
 
-    if (window.bayanDB) {
+    if (window.bayanDB && window.bayanDB.settings) {
         try {
-            // جلب كافة الإعدادات المحفوظة من IndexedDB إلى الذاكرة
+            // جلب كافة الإعدادات المحفوظة من IndexedDB إلى الذاكرة السريعة
             const allSettings = await window.bayanDB.settings.toArray();
-            let hasMigrated = false;
-
             allSettings.forEach(item => {
-                window.AppStore[item.id] = item.value;
+                if (item && item.id) {
+                    window.AppStore[item.id] = item.value;
+                }
             });
 
-            // عملية التهجير (Migration) من localStorage إلى IndexedDB لمرة واحدة
-            if (Object.keys(localStorage).length > 0) {
-                console.log("📦 يتم الآن مزامنة البيانات بين localStorage و IndexedDB...");
+            // تفريغ وترحيل أي بيانات متبقية قديمة من localStorage إلى IndexedDB لمرة واحدة ونهائية
+            if (typeof localStorage !== 'undefined' && Object.keys(localStorage).length > 0) {
+                console.log("📦 ترحيل أي بيانات قديمة متبقية من localStorage إلى IndexedDB وتنظيفها نهائياً...");
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     const value = localStorage.getItem(key);
-                    
-                    window.AppStore[key] = value; // إضافتها للذاكرة
-                    
-                    // حفظها في IndexedDB
-                    await window.bayanDB.settings.put({ id: key, value: value });
+                    if (key && window.AppStore[key] === undefined) {
+                        window.AppStore[key] = value;
+                        await window.bayanDB.settings.put({ id: key, value: value });
+                    }
                 }
+                try {
+                    localStorage.clear(); // تفريغ تام لمنع استخدام localStorage
+                    console.log("🧹 تم مسح وتفريغ localStorage بنجاح والاعتماد 100% على IndexedDB.");
+                } catch (e) {}
             }
 
-            console.log("✅ تم تجهيز الـ Store بنجاح:", Object.keys(window.AppStore).length, "عنصر محمل.");
+            console.log("✅ تم تجهيز الـ Store عبر IndexedDB بنجاح:", Object.keys(window.AppStore).length, "عنصر محمل.");
         } catch (error) {
-            console.error("❌ خطأ أثناء تهيئة الـ Store أو تهجير البيانات:", error);
+            console.error("❌ خطأ أثناء تهيئة الـ Store من IndexedDB:", error);
         }
     } else {
-        console.error("❌ مكتبة Dexie غير متوفرة. الـ Store لن يعمل بشكل صحيح.");
+        console.error("❌ جدول settings في IndexedDB غير متوفر.");
     }
 }
 
-// دالة قراءة (متزامنة)
+// دالة قراءة متزامنة فائقة السرعة من الذاكرة (المحمّلة والمطابقة 100% مع IndexedDB)
 function getStore(key) {
     if (window.AppStore && window.AppStore.hasOwnProperty(key) && window.AppStore[key] !== null && window.AppStore[key] !== undefined) {
         return window.AppStore[key];
     }
-    try {
-        const val = localStorage.getItem(key);
-        if (val !== null && val !== undefined) {
-            if (!window.AppStore) window.AppStore = {};
-            window.AppStore[key] = val;
-            return val;
-        }
-    } catch(e) {}
     return null;
 }
 
-// دالة كتابة (تحفظ في الذاكرة فوراً وفي IndexedDB و localStorage)
+// دالة كتابة (تحفظ في الذاكرة فوراً وتُسجّل في قاعدة بيانات IndexedDB دون لمس localStorage مطلقاً)
 function setStore(key, value) {
     if (!window.AppStore) window.AppStore = {};
     window.AppStore[key] = value;
-    try {
-        localStorage.setItem(key, String(value));
-    } catch(e) {}
-    if (window.bayanDB) {
-        window.bayanDB.settings.put({ id: key, value: String(value) }).catch(err => {
-            console.error(`❌ خطأ في حفظ الإعداد [${key}]:`, err);
+    
+    const dbInstance = window.bayanDB || window.db;
+    if (dbInstance && dbInstance.settings) {
+        dbInstance.settings.put({ id: key, value: String(value) }).catch(err => {
+            console.error(`❌ خطأ في حفظ الإعداد [${key}] داخل IndexedDB:`, err);
         });
     }
 }
 
-// دالة مسح إعداد
+// دالة مسح إعداد من IndexedDB والذاكرة
 function removeStore(key) {
-    // 1. المسح من الذاكرة
-    if (window.AppStore.hasOwnProperty(key)) {
+    if (window.AppStore && window.AppStore.hasOwnProperty(key)) {
         delete window.AppStore[key];
     }
     
-    // 2. المسح من القاعدة
-    if (window.bayanDB) {
-        window.bayanDB.settings.delete(key).catch(err => {
-            console.error(`❌ خطأ في حذف الإعداد [${key}]:`, err);
+    const dbInstance = window.bayanDB || window.db;
+    if (dbInstance && dbInstance.settings) {
+        dbInstance.settings.delete(key).catch(err => {
+            console.error(`❌ خطأ في حذف الإعداد [${key}] من IndexedDB:`, err);
         });
     }
 }
 
-// دالة تنظيف كاملة للإعدادات
+// دالة تنظيف كاملة للإعدادات من IndexedDB
 async function clearStore() {
     window.AppStore = {};
-    if (window.bayanDB) {
+    const dbInstance = window.bayanDB || window.db;
+    if (dbInstance && dbInstance.settings) {
         try {
-            await window.bayanDB.settings.clear();
-            console.log("🗑️ تم مسح كافة الإعدادات بنجاح.");
+            await dbInstance.settings.clear();
+            console.log("🗑️ تم مسح كافة الإعدادات من IndexedDB بنجاح.");
         } catch (error) {
-            console.error("❌ خطأ في مسح الإعدادات:", error);
+            console.error("❌ خطأ في مسح الإعدادات من IndexedDB:", error);
         }
     }
 }

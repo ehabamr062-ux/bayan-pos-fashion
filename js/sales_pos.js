@@ -341,49 +341,24 @@ async function handleSearch(query) {
 
     searchSelectedIndex = -1; // إعادة تصغير المؤشر عند كل كتابة جديدة
 
-    // منع قص النوافذ المنبثقة الجديدة وإلغاء القيود القديمة للفئة search-results
     resultsDiv.style.setProperty('overflow', 'visible', 'important');
     resultsDiv.style.setProperty('max-height', 'none', 'important');
     resultsDiv.style.setProperty('border', 'none', 'important');
     resultsDiv.style.setProperty('background', 'transparent', 'important');
     resultsDiv.style.setProperty('box-shadow', 'none', 'important');
 
-    if (!query) {
-
-        resultsDiv.innerHTML = '';
-
-        resultsDiv.style.display = 'none';
-
+    // إذا تمت معالجة مسح باركود للتو عبر السكانر، نتجاهل كود البحث هنا لمنع الازدواجية
+    if (typeof window.isBayanRecentScan === 'function' && window.isBayanRecentScan()) {
+        if (resultsDiv) resultsDiv.style.display = 'none';
+        const sInp = document.getElementById('productSearch');
+        if (sInp) sInp.value = '';
         return;
-
     }
 
-    // 1. فحص باركود أو كود (تطابق تام صريح)
-    if (query.length >= 8) {
-        // فحص سريع في باركود التشكيلات (المقاس واللون) أولاً
-        for (const p of productsDB) {
-            if (p.variants && Array.isArray(p.variants)) {
-                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === query.trim());
-                if (vFound) {
-                    addToCart(p.id, null, vFound);
-                    if (resultsDiv) resultsDiv.style.display = 'none';
-                    const sInp = document.getElementById('productSearch');
-                    if (sInp) sInp.value = '';
-                    return;
-                }
-            }
-        }
-
-        if (typeof db !== 'undefined' && db.products) {
-            try {
-                let exact = await db.products.where('barcode').equals(query).first();
-                if (!exact) exact = await db.products.where('code').equals(query).first();
-                if (exact) {
-                    selectProductToHeader(exact.id);
-                    return;
-                }
-            } catch (e) { console.warn('DB Search error:', e); }
-        }
+    if (!query) {
+        resultsDiv.innerHTML = '';
+        resultsDiv.style.display = 'none';
+        return;
     }
 
     // 2. البحث الحي (Live Search)
@@ -577,6 +552,14 @@ function fillSalesHeaderWithUnit(product, unit) {
 }
 
 async function handleSearchEnter(query, event, forceAdd = false) {
+    // إذا كان مسح باركود تم بواسطة السكانر المركزي للتو، نتجاهل ضغطة Enter الزائدة
+    if (typeof window.isBayanRecentScan === 'function' && window.isBayanRecentScan()) {
+        const sInp = document.getElementById('productSearch');
+        if (sInp) sInp.value = '';
+        const rDiv = document.getElementById('searchResults');
+        if (rDiv) rDiv.style.display = 'none';
+        return;
+    }
 
     const cleanQuery = String(query || '').trim();
 
@@ -595,6 +578,11 @@ async function handleSearchEnter(query, event, forceAdd = false) {
     }
 
     if (!query || query.trim() === "") return;
+
+    // فحص الباركود الدقيق التلقائي فوراً
+    if (typeof window.dispatchSearchBarcode === 'function') {
+        if (window.dispatchSearchBarcode(cleanQuery, 'sales')) return;
+    }
 
     const resultsDiv = document.getElementById('searchResults');
 
@@ -2434,7 +2422,7 @@ async function saveBill(force = false, accountChecked = false) {
 
         const terminalName = (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer)
             ? 'الجهاز الرئيسي 💻'
-            : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱');
+            : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱');
 
         cart.forEach((cartItem, idx) => {
 

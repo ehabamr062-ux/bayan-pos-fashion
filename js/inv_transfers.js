@@ -8,12 +8,9 @@
             }
             if (!tType) {
                 try {
-                    const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || localStorage.getItem('pos_settings') || '{}');
+                    const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || '{}');
                     tType = settingsObj.transferPriceType;
                 } catch(e) {}
-            }
-            if (!tType) {
-                tType = localStorage.getItem('transferPriceType');
             }
             return tType || 'cost';
         };
@@ -828,12 +825,26 @@
                 updateTransferSearchSelection(items);
 
             } else if (e.key === 'Enter') {
+                if (typeof window.isBayanRecentScan === 'function' && window.isBayanRecentScan()) {
+                    e.preventDefault();
+                    e.target.value = '';
+                    resultsDiv.classList.add('hidden');
+                    return;
+                }
                 if (transferSearchSelectedIndex > -1) {
                     e.preventDefault();
                     items[transferSearchSelectedIndex].click();
                 } else {
                     const query = e.target.value.trim();
                     if (query) {
+                        // فحص الباركود الدقيق التلقائي فوراً
+                        if (typeof window.dispatchSearchBarcode === 'function') {
+                            if (window.dispatchSearchBarcode(query, 'transfer')) {
+                                e.preventDefault();
+                                return;
+                            }
+                        }
+
                         // 1. بحث فوري في باركود التشكيلات (Variant Barcode Match)
                         let matchingVariant = null;
                         let match = productsDB.find(p => {
@@ -1470,13 +1481,10 @@
             if (typeof transactions === 'undefined' || !Array.isArray(transactions)) return;
             if (document.getElementById('incomingTransferApprovalModal')) return; // لا تكرار للنافذة إذا كانت مفتوحة
 
-            // تنظيف أي مفاتيح قديمة كانت متزامنة عبر الشبكة وتمنع ظهور الإشعار في الأجهزة الأخرى
+            // تنظيف أي مفاتيح قديمة كانت متزامنة عبر الذاكرة وتمنع ظهور الإشعار في الأجهزة الأخرى
             try {
                 if (typeof window.AppStore !== 'undefined' && window.AppStore.bayan_alerted_transfers) {
                     delete window.AppStore.bayan_alerted_transfers;
-                }
-                if (localStorage.getItem('bayan_alerted_transfers')) {
-                    localStorage.removeItem('bayan_alerted_transfers');
                 }
             } catch(e) {}
 

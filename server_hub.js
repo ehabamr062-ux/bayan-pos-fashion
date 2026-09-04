@@ -89,10 +89,29 @@ try {
     console.warn('[ServerHub] Load master db error:', e.message);
 }
 
+let isSavingMasterDb = false;
+let pendingSaveMasterDb = false;
+
 function saveMasterDb() {
+    if (isSavingMasterDb) {
+        pendingSaveMasterDb = true;
+        return;
+    }
+    isSavingMasterDb = true;
     try {
-        fs.writeFileSync(masterDbFile, JSON.stringify(masterDbData), 'utf8');
+        const jsonStr = JSON.stringify(masterDbData);
+        fs.writeFile(masterDbFile, jsonStr, 'utf8', (err) => {
+            isSavingMasterDb = false;
+            if (err) {
+                console.error('[ServerHub] Save master db error:', err.message);
+            }
+            if (pendingSaveMasterDb) {
+                pendingSaveMasterDb = false;
+                saveMasterDb();
+            }
+        });
     } catch (e) {
+        isSavingMasterDb = false;
         console.error('[ServerHub] Save master db error:', e.message);
     }
 }

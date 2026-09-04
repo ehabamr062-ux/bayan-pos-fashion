@@ -770,7 +770,7 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                 product: item.name,
 
                 warehouse: activeWH,
-                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'),
+                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱'),
 
                 unit: item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (item.unit || 'قطعة'),
 
@@ -1344,7 +1344,7 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                 product: item.name,
 
                 warehouse: activeWH,
-                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (localStorage.getItem('bayan_device_name') || 'جهاز فرعي 📱'),
+                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱'),
 
                 unit: item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (p ? p.unit : 'قطعة'),
 
@@ -1475,11 +1475,8 @@ async function handleReturnSearch(query, type) {
     const resultsDiv = document.getElementById(type === 'sales' ? 'returnSearchResults' : 'purReturnSearchResults');
 
     if (!query || query.trim() === "") {
-
         if (resultsDiv) resultsDiv.style.display = 'none';
-
         return;
-
     }
 
     const queryLower = query.toLowerCase();
@@ -1756,6 +1753,12 @@ async function handleReturnSearchEnter(query, event, type, forceAdd = false) {
     }
 
     if (!query || query.trim() === "") return;
+
+    // فحص الباركود الدقيق التلقائي فوراً
+    const retContext = (type === 'sales') ? 'salesReturn' : 'purReturn';
+    if (typeof window.dispatchSearchBarcode === 'function') {
+        if (window.dispatchSearchBarcode(cleanQuery, retContext)) return;
+    }
 
     let pInDB = productsDB.find(p => String(p.barcode) === String(query) || String(p.code) === String(query));
 

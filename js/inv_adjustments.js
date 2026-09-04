@@ -114,7 +114,22 @@ function fillAdjustmentHeaderWithUnit(product, unit) {
 
 function handleAdjSearchEnter(query, event) {
     if (!query || query.trim() === "") return;
+
+    // إذا كان مسح باركود تم بواسطة السكانر المركزي للتو، نتجاهل ضغطة Enter الزائدة
+    if (typeof window.isBayanRecentScan === 'function' && window.isBayanRecentScan()) {
+        const aInp = document.getElementById('adjSearch');
+        if (aInp) aInp.value = '';
+        const rDiv = document.getElementById('adjSearchResults');
+        if (rDiv) rDiv.style.display = 'none';
+        return;
+    }
+
     const cleanQuery = String(query).trim();
+
+    // فحص الباركود الدقيق التلقائي فوراً
+    if (typeof window.dispatchSearchBarcode === 'function') {
+        if (window.dispatchSearchBarcode(cleanQuery, 'adj')) return;
+    }
 
     let pMatch = null;
     let matchingVariant = null;
@@ -134,6 +149,7 @@ function handleAdjSearchEnter(query, event) {
             return false;
         });
     }
+    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
 
     if (pMatch && matchingVariant) {
         if (!window.adjCart) window.adjCart = [];
@@ -143,6 +159,12 @@ function handleAdjSearchEnter(query, event) {
         if (existing) {
             existing.qty = (parseFloat(existing.qty) || 0) + 1;
         } else {
+            let liveStock = 0;
+            if (matchingVariant.warehouseStocks && typeof matchingVariant.warehouseStocks === 'object' && matchingVariant.warehouseStocks[activeWH] !== undefined) {
+                liveStock = parseFloat(matchingVariant.warehouseStocks[activeWH]) || 0;
+            } else if (activeWH === 'المخزن الرئيسي' || !matchingVariant.warehouseStocks) {
+                liveStock = parseFloat(matchingVariant.stock) || 0;
+            }
             window.adjCart.push({
                 ...pMatch,
                 id: pMatch.id,
@@ -152,7 +174,7 @@ function handleAdjSearchEnter(query, event) {
                 selectedColor: vColor,
                 size: vSize,
                 color: vColor,
-                stock: matchingVariant.stock !== undefined ? matchingVariant.stock : (parseFloat(pMatch.stock) || 0),
+                stock: liveStock,
                 qty: 1,
                 price: parseFloat(matchingVariant.cost) || parseFloat(pMatch.cost) || 0,
                 notes: '',
@@ -166,7 +188,7 @@ function handleAdjSearchEnter(query, event) {
         const sEl = document.getElementById('adjSearch');
         if (sEl) sEl.value = '';
         if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(true);
-        if (typeof showToast === 'function') showToast(`✅ [تسوية سريعة] +1 ${pMatch.name} (مقاس: ${vSize} - لون: ${vColor})`, 'success');
+        if (typeof showToast === 'function') showToast(`✅ [جرد وتسويه] +1 ${pMatch.name} (مقاس: ${vSize} - لون: ${vColor})`, 'success');
         return;
     }
 
@@ -200,6 +222,45 @@ function handleAdjSearchEnter(query, event) {
                 showVariantSelectionModal(pMatch, 'adj');
                 return;
             }
+        } else {
+            // صنف عام بدون تشكيلات ينزل مباشرة في الجرد بالسكانر
+            if (!window.adjCart) window.adjCart = [];
+            const existing = window.adjCart.find(it => it.id === pMatch.id && !it.selectedSize && !it.selectedColor);
+            if (existing) {
+                existing.qty = (parseFloat(existing.qty) || 0) + 1;
+            } else {
+                let liveStock = 0;
+                if (pMatch.warehouseStocks && typeof pMatch.warehouseStocks === 'object' && pMatch.warehouseStocks[activeWH] !== undefined) {
+                    liveStock = parseFloat(pMatch.warehouseStocks[activeWH]) || 0;
+                } else if (activeWH === 'المخزن الرئيسي' || !pMatch.warehouseStocks) {
+                    liveStock = parseFloat(pMatch.stock) || 0;
+                }
+                const defUnit = (pMatch.units && pMatch.units.length > 0) ? pMatch.units[0] : null;
+                window.adjCart.push({
+                    ...pMatch,
+                    id: pMatch.id,
+                    name: pMatch.name,
+                    code: pMatch.barcode || pMatch.code || pMatch.id,
+                    selectedSize: '',
+                    selectedColor: '',
+                    size: '',
+                    color: '',
+                    stock: liveStock,
+                    qty: 1,
+                    price: parseFloat(pMatch.cost) || 0,
+                    notes: '',
+                    unitFactor: defUnit ? (defUnit.factor || 1) : 1,
+                    selectedUnit: defUnit || null
+                });
+            }
+            renderAdjTable();
+            const resultsDiv = document.getElementById('adjSearchResults');
+            if (resultsDiv) resultsDiv.style.display = 'none';
+            const sEl = document.getElementById('adjSearch');
+            if (sEl) sEl.value = '';
+            if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(true);
+            if (typeof showToast === 'function') showToast(`✅ [جرد وتسويه] +1 ${pMatch.name}`, 'success');
+            return;
         }
         fillAdjustmentHeaderWithUnit(pMatch, (pMatch.units && pMatch.units.length > 0) ? pMatch.units[0] : { unitName: pMatch.unit || 'قطعة', factor: 1, cost: pMatch.cost });
         const resultsDiv = document.getElementById('adjSearchResults');
@@ -295,18 +356,65 @@ function handleAdjSearch(query) {
 
 function addAdjItem() {
     if (!window.selectedAdjItem) return alert("يرجى اختيار صنف أولاً");
-    const qty = parseFloat(document.getElementById('adjQty').value);
-    const price = parseFloat(document.getElementById('adjPrice').value) || window.selectedAdjItem.cost;
+    const qty = Math.max(0, parseFloat(document.getElementById('adjQty').value) || 0);
+    const price = parseFloat(document.getElementById('adjPrice').value) || window.selectedAdjItem.cost || 0;
     const notes = document.getElementById('adjNotes') ? document.getElementById('adjNotes').value.trim() : '';
 
-    window.adjCart.push({ 
-        ...window.selectedAdjItem, 
-        qty: qty, 
-        price: price,
-        notes: notes,
-        unitFactor: currentAdjHeaderUnit ? parseFloat(currentAdjHeaderUnit.factor) : 1,
-        selectedUnit: currentAdjHeaderUnit 
-    });
+    if (!window.adjCart) window.adjCart = [];
+    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+
+    const sSize = window.selectedAdjItem.selectedSize || window.selectedAdjItem.size || '';
+    const sColor = window.selectedAdjItem.selectedColor || window.selectedAdjItem.color || '';
+
+    const existing = window.adjCart.find(it => 
+        it.id === window.selectedAdjItem.id && 
+        ((it.size || it.selectedSize || '') === sSize) && 
+        ((it.color || it.selectedColor || '') === sColor)
+    );
+
+    if (existing) {
+        existing.qty = qty;
+        existing.price = price;
+        if (notes) existing.notes = notes;
+    } else {
+        let liveStock = 0;
+        const p = productsDB.find(x => x.id === window.selectedAdjItem.id);
+        if (p) {
+            if (p.variants && Array.isArray(p.variants)) {
+                const v = p.variants.find(va => (va.size || '') === sSize && (va.color || '') === sColor);
+                if (v) {
+                    if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[activeWH] !== undefined) {
+                        liveStock = parseFloat(v.warehouseStocks[activeWH]) || 0;
+                    } else if (activeWH === 'المخزن الرئيسي' || !v.warehouseStocks) {
+                        liveStock = parseFloat(v.stock) || 0;
+                    }
+                }
+            }
+            if (liveStock === 0 && (!p.variants || p.variants.length === 0)) {
+                if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[activeWH] !== undefined) {
+                    liveStock = parseFloat(p.warehouseStocks[activeWH]) || 0;
+                } else if (activeWH === 'المخزن الرئيسي' || !p.warehouseStocks) {
+                    liveStock = parseFloat(p.stock) || 0;
+                }
+            }
+        }
+        window.adjCart.push({ 
+            ...window.selectedAdjItem, 
+            id: window.selectedAdjItem.id,
+            name: window.selectedAdjItem.name,
+            code: window.selectedAdjItem.barcode || window.selectedAdjItem.code || window.selectedAdjItem.id,
+            selectedSize: sSize,
+            selectedColor: sColor,
+            size: sSize,
+            color: sColor,
+            stock: liveStock,
+            qty: qty, 
+            price: price,
+            notes: notes,
+            unitFactor: currentAdjHeaderUnit ? parseFloat(currentAdjHeaderUnit.factor) : 1,
+            selectedUnit: currentAdjHeaderUnit 
+        });
+    }
     renderAdjTable();
 
     document.getElementById('adjSearch').value = '';
@@ -323,23 +431,47 @@ function renderAdjTable() {
     if (!tbody) return;
     tbody.innerHTML = '';
     if (!window.adjCart || window.adjCart.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding: 20px; color: #7f8c8d;">ابدأ بالبحث عن صنف بالاسم أو بالباركود</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; padding: 25px; color: #7f8c8d; font-weight: bold; font-size: 0.95rem;">ابدأ بمسح باركود الصنف بالسكانر أو البحث بالاسم</td></tr>';
         if (document.getElementById('adjItemsCount')) document.getElementById('adjItemsCount').innerText = '0';
         if (document.getElementById('adjTotalQty')) document.getElementById('adjTotalQty').innerText = '0';
+        if (document.getElementById('headerAdjTotalQty')) document.getElementById('headerAdjTotalQty').innerText = '0';
+        if (document.getElementById('adjShortageQty')) document.getElementById('adjShortageQty').innerText = '0';
+        if (document.getElementById('adjShortageVal')) document.getElementById('adjShortageVal').innerText = '0.00';
+        if (document.getElementById('adjSurplusQty')) document.getElementById('adjSurplusQty').innerText = '0';
+        if (document.getElementById('adjSurplusVal')) document.getElementById('adjSurplusVal').innerText = '0.00';
         if (document.getElementById('adjGrandTotal')) document.getElementById('adjGrandTotal').innerText = '0.00';
+        if (document.getElementById('headerAdjGrandTotal')) document.getElementById('headerAdjGrandTotal').innerText = '0.00';
         return;
     }
-    let totalQty = 0, grandTotal = 0;
+
+    let totalCountedQty = 0;
+    let totalShortageQty = 0;
+    let totalShortageVal = 0;
+    let totalSurplusQty = 0;
+    let totalSurplusVal = 0;
+    let netDiffGrandTotal = 0;
+
     let rowsHtml = '';
     window.adjCart.forEach((item, idx) => {
-        const factor = item.unitFactor || 1;
-        const totalAdj = item.qty * factor;
+        const factor = parseFloat(item.unitFactor) || 1;
+        const countedQty = parseFloat(item.qty) || 0;
+        const baseCounted = countedQty * factor;
         const stockBefore = parseFloat(item.stock) || 0;
-        const stockAfter = stockBefore + totalAdj;
+        const diffQty = baseCounted - stockBefore;
+        const stockAfter = baseCounted;
 
-        const lineTotal = (item.qty * item.price);
-        totalQty += parseFloat(item.qty) || 0;
-        grandTotal += lineTotal;
+        const lineCost = parseFloat(item.price) || 0;
+        const diffTotal = diffQty * lineCost;
+
+        totalCountedQty += countedQty;
+        if (diffQty < 0) {
+            totalShortageQty += Math.abs(diffQty);
+            totalShortageVal += Math.abs(diffTotal);
+        } else if (diffQty > 0) {
+            totalSurplusQty += diffQty;
+            totalSurplusVal += diffTotal;
+        }
+        netDiffGrandTotal += diffTotal;
 
         const { sizeElement, colorElement } = (typeof renderVariantSelectElements === 'function') 
             ? renderVariantSelectElements(item, idx, 'adj') 
@@ -352,32 +484,55 @@ function renderAdjTable() {
             ).join('');
         }
 
+        let diffBadge = '';
+        if (diffQty < 0) {
+            diffBadge = `<span style="background: #fee2e2; color: #dc2626; border: 1.5px solid #ef4444; padding: 3px 8px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(220,38,38,0.15);" title="عجز بمقدار ${Math.abs(diffQty)} قطعة">🔻 عجز ${Math.abs(diffQty)}</span>`;
+        } else if (diffQty > 0) {
+            diffBadge = `<span style="background: #dcfce7; color: #15803d; border: 1.5px solid #22c55e; padding: 3px 8px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(34,197,94,0.15);" title="زيادة بمقدار ${diffQty} قطعة">🟢 زيادة +${diffQty}</span>`;
+        } else {
+            diffBadge = `<span style="background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1; padding: 3px 8px; border-radius: 8px; font-weight: 900; font-size: 0.86rem; display: inline-flex; align-items: center; gap: 4px;" title="الرصيد الفعلي مطابق تماماً للرصيد الدفتري بالمخزن">✔️ مطابق 0</span>`;
+        }
+
         rowsHtml += `
-            <tr>
-                <td>${idx + 1}</td>
-                <td>${item.code || item.id}</td>
-                <td style="font-weight:bold;">${item.name}</td>
+            <tr style="transition: background 0.15s ease;">
+                <td style="text-align: center; font-weight: bold; color: #64748b;">${idx + 1}</td>
+                <td style="font-family: monospace; font-weight: bold; color: #334155; font-size: 0.85rem;">${item.code || item.id}</td>
+                <td style="font-weight: 900; color: #1e293b;">${item.name}</td>
                 <td class="col-variant-size" style="text-align: center;">${sizeElement}</td>
                 <td class="col-variant-color" style="text-align: center;">${colorElement}</td>
-                <td style="background: rgba(52, 73, 94, 0.05); font-weight: 900; color: #34495e; font-size: 1.1rem;">${stockBefore}</td>
-                <td style="background: rgba(46, 134, 222, 0.05);">
-                    <input type="number" class="qty-input" value="${item.qty}" step="0.01"
-                        style="width: 80px; text-align: center; font-weight: 900; color: #2e86de; border: 2px solid #2e86de; border-radius: 8px; height: 32px; background: #fff;"
-                        onchange="window.adjCart[${idx}].qty=parseFloat(this.value)||0; renderAdjTable();" title="تعديل الكمية">
+                <td style="background: rgba(51, 65, 85, 0.05); text-align: center; font-weight: 900; color: #334155; font-size: 1.05rem;" title="الرصيد الدفتري المسجل في المخزن">${stockBefore}</td>
+                <td style="background: rgba(37, 99, 235, 0.05); text-align: center;">
+                    <div style="display: inline-flex; align-items: center; justify-content: center; gap: 3px;">
+                        <button type="button" onclick="adjustItemCountedQty(${idx}, -1)" 
+                            style="width: 26px; height: 30px; border: 1px solid #cbd5e1; background: #ffffff; border-radius: 6px; font-weight: 900; cursor: pointer; color: #475569; transition: 0.15s;" 
+                            title="إنقاص 1" onmouseover="this.style.background='#fee2e2'; this.style.color='#dc2626';" onmouseout="this.style.background='#ffffff'; this.style.color='#475569';">-</button>
+                        <input type="number" class="qty-input" value="${item.qty}" step="0.01" min="0"
+                            style="width: 65px; text-align: center; font-weight: 900; color: #1d4ed8; border: 2px solid #3b82f6; border-radius: 8px; height: 30px; background: #fff; font-size: 1rem;"
+                            onchange="window.adjCart[${idx}].qty = Math.max(0, parseFloat(this.value) || 0); renderAdjTable();" title="تعديل الكمية المجرودة الفعلية">
+                        <button type="button" onclick="adjustItemCountedQty(${idx}, 1)" 
+                            style="width: 26px; height: 30px; border: 1px solid #cbd5e1; background: #ffffff; border-radius: 6px; font-weight: 900; cursor: pointer; color: #475569; transition: 0.15s;" 
+                            title="زيادة 1" onmouseover="this.style.background='#dcfce7'; this.style.color='#15803d';" onmouseout="this.style.background='#ffffff'; this.style.color='#475569';">+</button>
+                    </div>
                 </td>
-                <td style="background: rgba(16, 185, 129, 0.08); font-weight: 900; color: #047857; font-size: 1.2rem;">${stockAfter}</td>
+                <td style="text-align: center; background: ${diffQty < 0 ? 'rgba(239, 68, 68, 0.04)' : (diffQty > 0 ? 'rgba(34, 197, 94, 0.04)' : 'transparent')};">${diffBadge}</td>
+                <td style="background: rgba(5, 150, 105, 0.08); text-align: center; font-weight: 900; color: #047857; font-size: 1.15rem;" title="الرصيد بعد اعتماد التسوية">${stockAfter}</td>
                 <td>
-                    <select class="unit-select" onchange="updateAdjItemUnit(${idx}, this.value)" style="width:100%; padding:2px; border-radius:4px; border:1px solid #ccc;">
+                    <select class="unit-select" onchange="updateAdjItemUnit(${idx}, this.value)" style="width: 100%; padding: 3px 4px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: bold; font-size: 0.82rem;">
                         ${unitOptions}
                     </select>
                 </td>
-                <td><input type="number" class="price-input" value="${parseFloat(item.price).toFixed(2)}" min="0" step="0.01"
-                    onchange="window.adjCart[${idx}].price=parseFloat(this.value)||0; renderAdjTable();" title="تعديل السعر"></td>
-                <td>${lineTotal.toFixed(2)}</td>
+                <td>
+                    <input type="number" class="price-input" value="${parseFloat(item.price).toFixed(2)}" min="0" step="0.01"
+                        style="width: 75px; text-align: center; padding: 3px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 0.85rem;"
+                        onchange="window.adjCart[${idx}].price = parseFloat(this.value) || 0; renderAdjTable();" title="سعر التكلفة">
+                </td>
+                <td style="text-align: center; font-weight: 900; font-size: 0.95rem; color: ${diffTotal < 0 ? '#dc2626' : (diffTotal > 0 ? '#16a34a' : '#64748b')}; direction: ltr;">
+                    ${(diffTotal > 0 ? '+' : '')}${diffTotal.toFixed(2)}
+                </td>
                 <td style="min-width: 120px;">
                     <input type="text" value="${item.notes || ''}" placeholder="ملاحظة..."
                         style="width: 100%; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; box-sizing: border-box;"
-                        onchange="window.adjCart[${idx}].notes=this.value;">
+                        onchange="window.adjCart[${idx}].notes = this.value;">
                 </td>
                 <td style="text-align: center; width: 40px;">
                     <button class="btn-delete-row" onclick="removeAdjItem(${idx})" title="حذف الصنف">❌</button>
@@ -385,10 +540,34 @@ function renderAdjTable() {
             </tr>`;
     });
     tbody.innerHTML = rowsHtml;
+
     if (document.getElementById('adjItemsCount')) document.getElementById('adjItemsCount').innerText = window.adjCart.length;
-    if (document.getElementById('adjTotalQty')) document.getElementById('adjTotalQty').innerText = totalQty;
-    if (document.getElementById('adjGrandTotal')) document.getElementById('adjGrandTotal').innerText = grandTotal.toFixed(2);
+    if (document.getElementById('adjTotalQty')) document.getElementById('adjTotalQty').innerText = totalCountedQty;
+    if (document.getElementById('headerAdjTotalQty')) document.getElementById('headerAdjTotalQty').innerText = totalCountedQty;
+    if (document.getElementById('adjShortageQty')) document.getElementById('adjShortageQty').innerText = totalShortageQty;
+    if (document.getElementById('adjShortageVal')) document.getElementById('adjShortageVal').innerText = totalShortageVal.toFixed(2);
+    if (document.getElementById('adjSurplusQty')) document.getElementById('adjSurplusQty').innerText = totalSurplusQty;
+    if (document.getElementById('adjSurplusVal')) document.getElementById('adjSurplusVal').innerText = totalSurplusVal.toFixed(2);
+
+    const grandTotalEl = document.getElementById('adjGrandTotal');
+    if (grandTotalEl) {
+        grandTotalEl.innerText = (netDiffGrandTotal > 0 ? '+' : '') + netDiffGrandTotal.toFixed(2);
+        grandTotalEl.style.color = netDiffGrandTotal < 0 ? '#dc2626' : (netDiffGrandTotal > 0 ? '#16a34a' : '#b45309');
+    }
+    const headerGrandTotalEl = document.getElementById('headerAdjGrandTotal');
+    if (headerGrandTotalEl) {
+        headerGrandTotalEl.innerText = (netDiffGrandTotal > 0 ? '+' : '') + netDiffGrandTotal.toFixed(2);
+    }
 }
+
+function adjustItemCountedQty(idx, delta) {
+    if (window.adjCart && window.adjCart[idx]) {
+        const cur = parseFloat(window.adjCart[idx].qty) || 0;
+        window.adjCart[idx].qty = Math.max(0, cur + delta);
+        renderAdjTable();
+    }
+}
+window.adjustItemCountedQty = adjustItemCountedQty;
 
 function updateAdjItemUnit(idx, unitName) {
     const item = window.adjCart[idx];
@@ -425,6 +604,60 @@ function removeAdjRow() {
         alert("لا توجد عناصر لحذفها");
     }
 }
+
+// دالة عرض الشرح والتوضيح التفاعلي لرؤوس أعمدة الجرد والتسوية
+function showAdjColumnHelp(colType) {
+    const helpData = {
+        book: {
+            title: '📦 الرصيد الدفتري (المخزني)',
+            msg: `<b>ما هو الرصيد الدفتري؟</b><br>
+هو رصيد الصنف المسجل حالياً في قاعدة بيانات النظام لهذا المخزن قبل البدء في عملية الجرد.<br><br>
+💡 <b>الفائدة:</b> يمثل هذا الرقم ما يتوقعه النظام وجوده فعلياً في الرفوف بناءً على فواتير البيع والشراء السابقة.`
+        },
+        actual: {
+            title: '🎯 الرصيد الفعلي (المجرود)',
+            msg: `<b>ما هو الرصيد الفعلي المجرود؟</b><br>
+هو عدد القطع الفعلي الموجود على أرض الواقع بعد عدّها في المحل/المخزن.<br><br>
+💡 <b>طريقة الاستخدام بالسكانر:</b><br>
+امسك السكانر واضرب القطع قطعة قطعة؛ كل ضربة باركود ستزيد هذا الرقم (+1) تلقائياً.<br>
+كما يمكنك كتابة العدد الإجمالي بيدك مباشرة في خانة الإدخال إذا قمت بعدّه مسبقاً، أو استخدام زري (+) و (-) للتعديل السريع.`
+        },
+        diff: {
+            title: '⚖️ فرق الجرد (عجز / زيادة)',
+            msg: `<b>ما هو فرق الجرد؟</b><br>
+هو ناتج المقارنة بين الرصيد الفعلي المجرود والرصيد الدفتري المسجل (<b>الفعلي - الدفتري</b>):<br><br>
+🔻 <b style="color:#dc2626;">عجز (أحمر)</b>: إذا كان الفعلي أقل من الدفتري (بضاعة مفقودة أو مسروقة أو غير مسجلة).<br>
+🟢 <b style="color:#16a34a;">زيادة (أخضر)</b>: إذا كان الفعلي أكبر من الدفتري (بضاعة متوفرة زائدة عن المسجل).<br>
+✔️ <b style="color:#475569;">مطابق (رمادي)</b>: الرصيد الفعلي مطابق 100% للرصيد الدفتري (لا يوجد عجز أو زيادة).`
+        },
+        after: {
+            title: '✅ الرصيد بعد التسوية',
+            msg: `<b>ما هو الرصيد بعد التسوية؟</b><br>
+هو الرصيد النهائي المعتمد الذي سيصبح رصيد المخزن الفعلي في النظام فور الضغط على زر <b>حفظ التسوية 💾</b>.<br><br>
+💡 <b>الفائدة:</b> يقوم النظام تلقائياً بتصحيح وتحديث رصيد المخزن ليصبح مساوياً تماماً للرصيد الفعلي الذي جرده المستخدم.`
+        },
+        diffVal: {
+            title: '💰 قيمة الفرق المالية',
+            msg: `<b>ما هي قيمة الفرق المالية؟</b><br>
+هي القيمة المالية الإجمالية بالجنيه للعجز أو الزيادة، محسوبة بضرب (فرق الجرد × سعر التكلفة).<br><br>
+💡 <b>الفائدة:</b> معرفة الخسارة المالية الناتجة عن العجز أو المكسب الناتج عن الزيادة بدقة محاسبية.`
+        }
+    };
+
+    const data = helpData[colType];
+    if (!data) return;
+
+    if (typeof showCustomAlert === 'function') {
+        showCustomAlert({
+            type: 'info',
+            titleText: data.title,
+            msg: data.msg
+        });
+    } else {
+        alert(`${data.title}\n\n${data.msg.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '')}`);
+    }
+}
+window.showAdjColumnHelp = showAdjColumnHelp;
 
 async function saveAdjustment() {
     if (typeof checkPermission === 'function' && !checkPermission('stock_edit')) return false;
@@ -468,28 +701,33 @@ async function saveAdjustment() {
         itemsToProcess.forEach(item => {
             const p = productsDB.find(x => x.id === item.id || x.name === item.name);
             if (p) {
-                const factor = item.unitFactor || 1;
-                const newBaseStock = item.qty * factor;
+                const factor = parseFloat(item.unitFactor) || 1;
+                const countedBase = (parseFloat(item.qty) || 0) * factor;
+                const stockBefore = parseFloat(item.stock) || 0;
+                // فرق الجرد: الرصيد الفعلي المجرود - الرصيد الدفتري المسجل بالمخزن
+                const diffStock = countedBase - stockBefore;
+                const newBaseStock = diffStock;
 
                 const prevPStock = parseFloat(p.stock) || 0;
-                p.stock = prevPStock + newBaseStock;
+                p.stock = Math.max(0, prevPStock + newBaseStock);
                 if (!p.warehouseStocks) p.warehouseStocks = {};
                 const currentPWhStock = (p.warehouseStocks[activeWH] !== undefined && !isNaN(parseFloat(p.warehouseStocks[activeWH])))
                     ? parseFloat(p.warehouseStocks[activeWH])
                     : (activeWH === 'المخزن الرئيسي' ? prevPStock : 0);
                 p.warehouseStocks[activeWH] = Math.max(0, currentPWhStock + newBaseStock);
 
+                let matchedVar = null;
                 if (p.variants && Array.isArray(p.variants)) {
                     const sVal = item.selectedSize || item.size || '';
                     const cVal = item.selectedColor || item.color || '';
-                    const matchedVar = p.variants.find(v => 
+                    matchedVar = p.variants.find(v => 
                         (v.size || '') === sVal && (v.color || '') === cVal
                     ) || p.variants.find(v => 
                         (!sVal || v.size === sVal) && (!cVal || v.color === cVal)
                     );
                     if (matchedVar) {
                         const prevVarStock = parseFloat(matchedVar.stock) || 0;
-                        matchedVar.stock = prevVarStock + newBaseStock;
+                        matchedVar.stock = Math.max(0, prevVarStock + newBaseStock);
                         if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                         const currentVarWhStock = (matchedVar.warehouseStocks[activeWH] !== undefined && !isNaN(parseFloat(matchedVar.warehouseStocks[activeWH])))
                             ? parseFloat(matchedVar.warehouseStocks[activeWH])
@@ -498,8 +736,12 @@ async function saveAdjustment() {
                     }
                 }
 
-                const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
+                const lineTotal = diffStock * (parseFloat(item.price) || 0);
                 grandTotal += lineTotal;
+
+                const diffDesc = diffStock < 0 ? `عجز (${Math.abs(diffStock)})` : (diffStock > 0 ? `زيادة (+${diffStock})` : 'مطابق (0)');
+                const customNotes = item.notes || (document.getElementById('adjNotes') ? document.getElementById('adjNotes').value.trim() : '');
+                const fullNotes = `جرد مخزن [${activeWH}]: دفتري ${stockBefore} | فعلي ${countedBase} | ${diffDesc}${customNotes ? ' - ' + customNotes : ''}`;
 
                 transactions.push({
                     date: dt.full,
@@ -512,13 +754,13 @@ async function saveAdjustment() {
                     unit: item.selectedUnit ? item.selectedUnit.unitName : (p.unit || 'قطعة'),
                     size: item.selectedSize || item.size || '',
                     color: item.selectedColor || item.color || '',
-                    qty: item.qty,
+                    qty: diffStock,
                     price: item.price,
-                    total: lineTotal,
+                    total: Math.abs(lineTotal),
                     partner: 'جرد',
                     warehouse: activeWH,
                     user: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : '-',
-                    notes: document.getElementById('adjNotes') ? document.getElementById('adjNotes').value.trim() : '',
+                    notes: fullNotes,
                     unitFactor: factor,
                     editDate: (typeof isEditMode !== 'undefined' && isEditMode) ? new Date().toLocaleString('ar-EG') : '-'
                 });

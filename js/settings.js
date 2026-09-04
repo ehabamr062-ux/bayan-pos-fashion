@@ -1206,7 +1206,7 @@ window.initTransferPriceTypeSetting = function() {
     if (!sel) return;
     const current = (typeof window.getTransferPriceType === 'function')
         ? window.getTransferPriceType()
-        : ((typeof getStore === 'function' ? getStore('transferPriceType') : localStorage.getItem('transferPriceType')) || 'cost');
+        : ((typeof getStore === 'function' ? getStore('transferPriceType') : null) || 'cost');
     sel.value = current;
 };
 
@@ -1215,13 +1215,11 @@ window.saveTransferPriceTypeSetting = async function(val) {
     if (typeof setStore === 'function') {
         setStore('transferPriceType', val);
     }
-    localStorage.setItem('transferPriceType', val);
 
     try {
-        const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || localStorage.getItem('pos_settings') || '{}');
+        const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || '{}');
         settingsObj.transferPriceType = val;
         if (typeof setStore === 'function') setStore('pos_settings', JSON.stringify(settingsObj));
-        localStorage.setItem('pos_settings', JSON.stringify(settingsObj));
     } catch(e) {}
 
     if (typeof saveData === 'function') {

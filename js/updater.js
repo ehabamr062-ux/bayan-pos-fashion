@@ -235,7 +235,7 @@
     // حالة نظام التحديث
     // =========================================================================
     const state = {
-        currentVersion: window.appVersion || '1.0.2',
+        currentVersion: window.appVersion || '1.0.3',
         latestVersion: null,
         releaseNotes: '',
         downloadUrl: '',
@@ -264,7 +264,7 @@
     }
 
     function getCurrentAppVersion() {
-        return window.appVersion || '1.0.2';
+        return window.appVersion || '1.0.3';
     }
 
     function fmtNotes(notes) {
@@ -466,6 +466,28 @@
                 }
             }
             return { hasUpdate: false, error: 'offline' };
+        }
+
+        // 🔒 فحص حالة تجميد/إيقاف التحديثات التلقائية مباشرة من قاعدة بيانات IndexedDB
+        let isAutoUpdateFrozen = false;
+        try {
+            if (typeof db !== 'undefined' && db && db.settings) {
+                const rec = await db.settings.get('pos_auto_updates_disabled');
+                if (rec && rec.value !== undefined) isAutoUpdateFrozen = (rec.value === 'true' || rec.value === true);
+                else {
+                    const main = await db.settings.get('main');
+                    if (main && main.pos_auto_updates_disabled !== undefined) isAutoUpdateFrozen = (main.pos_auto_updates_disabled === true);
+                }
+            } else if (window.AppStore && window.AppStore.pos_auto_updates_disabled !== undefined) {
+                isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
+            }
+        } catch (e) {
+            console.warn('[Updater] Could not check update freeze status from IndexedDB:', e);
+        }
+
+        if (isAutoUpdateFrozen && !isManual) {
+            console.log(`[Updater] 🔒 تم تجميد التحديثات التلقائية بناءً على إعدادات العميل في IndexedDB. البقاء على الإصدار v${state.currentVersion}`);
+            return { hasUpdate: false, frozen: true, version: state.currentVersion };
         }
 
         if (!IS_UPDATER_ENABLED) {
@@ -841,9 +863,130 @@
     }
 
     // =========================================================================
+    // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر IndexedDB حصراً
+    // =========================================================================
+    window.toggleAutoUpdatesPolicy = async function(isEnabled) {
+        const disabled = !isEnabled;
+
+        // 💾 الحفظ الصارم والمباشر في قاعدة بيانات IndexedDB (Dexie)
+        if (window.AppStore) {
+            window.AppStore['pos_auto_updates_disabled'] = disabled ? 'true' : 'false';
+        }
+        if (typeof db !== 'undefined' && db && db.settings) {
+            try {
+                await db.settings.put({ id: 'pos_auto_updates_disabled', value: disabled ? 'true' : 'false' });
+                const mainSettings = (await db.settings.get('main')) || { id: 'main' };
+                mainSettings.pos_auto_updates_disabled = disabled;
+                await db.settings.put(mainSettings);
+                console.log(`💾 [IndexedDB] تم حفظ سياسة التحديثات في IndexedDB: ${disabled ? 'مجمدة' : 'مفعلة'}`);
+            } catch (err) {
+                console.error('❌ خطأ أثناء حفظ حالة التحديثات في IndexedDB:', err);
+            }
+        }
+
+        const badge = document.getElementById('updatePolicyBadge');
+        const text = document.getElementById('toggleAutoUpdatesText');
+        const toggle = document.getElementById('toggleAutoUpdatesSwitch');
+
+        if (toggle) toggle.checked = isEnabled;
+
+        if (isEnabled) {
+            if (badge) {
+                badge.style.background = '#ecfdf5';
+                badge.style.color = '#059669';
+                badge.style.borderColor = '#a7f3d0';
+                badge.innerText = 'تلقائي نشط ⚡';
+            }
+            if (text) {
+                text.innerText = 'التحديثات مفعلة';
+                text.style.color = '#059669';
+            }
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    titleText: '✅ تم تفعيل التحديثات التلقائية',
+                    msg: 'تم حفظ الإعداد في قاعدة البيانات (IndexedDB).\nسيقوم النظام تلقائياً بفحص التحديثات وتنبيهك بأي ميزات أو تحسينات جديدة فور صدورها.',
+                    type: 'success'
+                });
+            } else if (typeof showToast === 'function') {
+                showToast('✅ تم تفعيل التحديثات التلقائية', 'success');
+            }
+        } else {
+            if (badge) {
+                badge.style.background = '#fef3c7';
+                badge.style.color = '#d97706';
+                badge.style.borderColor = '#fde68a';
+                badge.innerText = '🔒 التحديثات مجمدة';
+            }
+            if (text) {
+                text.innerText = 'التحديثات متوقفة';
+                text.style.color = '#d97706';
+            }
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    titleText: '🔒 تم تجميد التحديثات التلقائية',
+                    msg: 'تم حفظ الإعداد بنجاح في قاعدة البيانات (IndexedDB).\nتم إيقاف فحص التحديثات التلقائية، وسيظل البرنامج ثابتاً ومستقراً على نسختك الحالية v1.0.3 دون أي إشعارات أو ترقيات.',
+                    type: 'warning'
+                });
+            } else if (typeof showToast === 'function') {
+                showToast('🔒 تم تجميد التحديثات التلقائية', 'warning');
+            }
+        }
+    };
+
+    window.initAutoUpdatesPolicyUI = async function() {
+        let isAutoUpdateFrozen = false;
+        try {
+            if (typeof db !== 'undefined' && db && db.settings) {
+                const rec = await db.settings.get('pos_auto_updates_disabled');
+                if (rec && rec.value !== undefined) isAutoUpdateFrozen = (rec.value === 'true' || rec.value === true);
+                else {
+                    const main = await db.settings.get('main');
+                    if (main && main.pos_auto_updates_disabled !== undefined) isAutoUpdateFrozen = (main.pos_auto_updates_disabled === true);
+                }
+            } else if (window.AppStore && window.AppStore.pos_auto_updates_disabled !== undefined) {
+                isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
+            }
+        } catch (e) {
+            console.warn('[Updater] Could not load update policy from IndexedDB:', e);
+        }
+
+        const isEnabled = !isAutoUpdateFrozen;
+
+        const badge = document.getElementById('updatePolicyBadge');
+        const text = document.getElementById('toggleAutoUpdatesText');
+        const toggle = document.getElementById('toggleAutoUpdatesSwitch');
+
+        if (toggle) toggle.checked = isEnabled;
+        if (isEnabled) {
+            if (badge) {
+                badge.style.background = '#ecfdf5';
+                badge.style.color = '#059669';
+                badge.style.borderColor = '#a7f3d0';
+                badge.innerText = 'تلقائي نشط ⚡';
+            }
+            if (text) {
+                text.innerText = 'التحديثات مفعلة';
+                text.style.color = '#059669';
+            }
+        } else {
+            if (badge) {
+                badge.style.background = '#fef3c7';
+                badge.style.color = '#d97706';
+                badge.style.borderColor = '#fde68a';
+                badge.innerText = '🔒 التحديثات مجمدة';
+            }
+            if (text) {
+                text.innerText = 'التحديثات متوقفة';
+                text.style.color = '#d97706';
+            }
+        }
+    };
+
+    // =========================================================================
     // 🔔 التشغيل التلقائي عند فتح التطبيق (Auto Check on Startup)
     // =========================================================================
     const autoCheck = () => {
+        window.initAutoUpdatesPolicyUI();
         setTimeout(() => {
             window.checkGitHubReleases(false);
             window.checkCloudAnnouncements();

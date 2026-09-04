@@ -7,7 +7,7 @@
         isMasterServer: (typeof require !== 'undefined' && typeof process !== 'undefined' && process.versions && !!process.versions.electron) || 
                         (window.location.protocol === 'file:') || 
                         (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ||
-                        (localStorage.getItem('bayan_is_master_terminal') === 'true'),
+                        (typeof getStore === 'function' && getStore('bayan_is_master_terminal') === 'true'),
         isServerOnline: true,
         serverUrl: 'http://127.0.0.1:4545',
         deviceId: null,
@@ -16,8 +16,8 @@
         lastSyncedTimestamp: null,
 
         getServerUrl: function() {
-            // 1. رابط مخصص محفوظ مسبقاً في إعدادات التابلت
-            const stored = localStorage.getItem('bayan_local_server_url');
+            // 1. رابط مخصص محفوظ مسبقاً في إعدادات التابلت عبر IndexedDB
+            const stored = (typeof getStore === 'function') ? getStore('bayan_local_server_url') : null;
             if (stored && stored.startsWith('http')) return stored.trim().replace(/\/+$/, '');
 
             // 2. إذا تم فتح التطبيق مباشرة من عنوان السيرفر المحلي (IP:Port)
@@ -38,7 +38,7 @@
             if (!clean.includes(':4545') && !clean.includes(':') && !clean.includes('github.io')) {
                 clean += ':4545';
             }
-            localStorage.setItem('bayan_local_server_url', clean);
+            if (typeof setStore === 'function') setStore('bayan_local_server_url', clean);
             this.serverUrl = clean;
             return clean;
         },
@@ -355,6 +355,7 @@
                     // دمج ذكي للعمليات يمنع حذف أي حركة تمت في وضع الأوفلاين
                     const mergedTransactions = this.mergeTransactions(db.transactions || [], window.transactions || []);
                     const hasNewOfflineTransactions = mergedTransactions.length > (db.transactions ? db.transactions.length : 0);
+                    window.transactions = mergedTransactions;
 
                     // دمج سلة المحذوفات أولاً
                     const mergedTrash = this.mergeTrash(db.trash || [], window.trashBin || []);
@@ -421,12 +422,10 @@
                         }
                     }
 
-                    // حفظ في Dexie المحلي للتابلت لضمان السرعة والعمل حتى بدون نت
+                    // حفظ باقي الجداول في Dexie المحلي للتابلت لضمان السرعة والعمل حتى بدون نت
                     if (window.bayanDB) {
                         try {
-                            if (db.products && db.products.length > 0) await window.bayanDB.products.bulkPut(db.products);
-                            if (db.accounts && db.accounts.length > 0) await window.bayanDB.accounts.bulkPut(db.accounts);
-                            if (db.transactions && db.transactions.length > 0) await window.bayanDB.transactions.bulkPut(db.transactions);
+                            if (mergedTransactions && mergedTransactions.length > 0) await window.bayanDB.transactions.bulkPut(mergedTransactions);
                             if (db.users && db.users.length > 0) await window.bayanDB.users.bulkPut(db.users);
                             if (db.treasuryAudit && db.treasuryAudit.length > 0) await window.bayanDB.treasuryAudit.bulkPut(db.treasuryAudit);
                         } catch(dexErr) {}
@@ -458,14 +457,14 @@
         shownPairingRequestIds: new Set(),
 
         initDeviceId: function() {
-            let id = localStorage.getItem('bayan_client_device_id');
+            let id = (typeof getStore === 'function') ? getStore('bayan_client_device_id') : null;
             if (!id) {
                 id = 'DEV-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-                localStorage.setItem('bayan_client_device_id', id);
+                if (typeof setStore === 'function') setStore('bayan_client_device_id', id);
             }
             this.deviceId = id;
-            this.deviceToken = localStorage.getItem('bayan_client_device_token') || null;
-            const isSavedPaired = localStorage.getItem('bayan_client_is_paired') === 'true';
+            this.deviceToken = (typeof getStore === 'function' ? getStore('bayan_client_device_token') : null) || null;
+            const isSavedPaired = (typeof getStore === 'function' ? getStore('bayan_client_is_paired') : null) === 'true';
             this.isPaired = isSavedPaired || !!this.deviceToken || this.isMasterServer;
         },
 
@@ -493,17 +492,18 @@
                 
                 // تحديث البيانات عند وصول بوش من جهاز تابلت
                 ipcRenderer.on('sync-data-pushed', async (event, { db, sourceDeviceId }) => {
+                    // 1. صمام أمان لمنع الدوران المزدوج: إذا كان التحديث صادر من الماستر نفسه لا نعيد الحفظ والرسم
+                    if (sourceDeviceId === 'DEV-HOST') return;
+
                     if (db) {
                         const mergedTrash = this.mergeTrash(window.trashBin || [], db.trash || []);
                         window.trash = window.trashBin = mergedTrash;
                         const trashedKeys = this.getTrashedProductKeys(mergedTrash);
 
                         if (Array.isArray(db.products)) {
-                            if (this.isMasterServer) {
-                                window.productsDB = (window.productsDB || []).filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
-                            } else {
-                                window.productsDB = db.products.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
-                            }
+                            // دمج الأصناف وتحديث الأرصدة والتشكيلات القادمة من التابلت بدقة
+                            const mergedProd = this.mergeProducts(window.productsDB || [], db.products);
+                            window.productsDB = mergedProd.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
                         }
                         if (Array.isArray(db.accounts)) window.accounts = this.mergeAccounts(window.accounts || [], db.accounts);
                         if (Array.isArray(db.transactions)) window.transactions = this.mergeTransactions(window.transactions || [], db.transactions);
@@ -658,8 +658,10 @@
                 if (data.success && data.isPaired) {
                     this.isPaired = true;
                     this.deviceToken = data.token;
-                    localStorage.setItem('bayan_client_device_token', data.token);
-                    localStorage.setItem('bayan_client_is_paired', 'true');
+                    if (typeof setStore === 'function') {
+                        setStore('bayan_client_device_token', data.token);
+                        setStore('bayan_client_is_paired', 'true');
+                    }
                 } else if (data.requiresPin) {
                     this.showClientPinInputModal();
                 }
@@ -731,8 +733,10 @@
                 if (data.success) {
                     this.isPaired = true;
                     this.deviceToken = data.token;
-                    localStorage.setItem('bayan_client_device_token', data.token);
-                    localStorage.setItem('bayan_client_is_paired', 'true');
+                    if (typeof setStore === 'function') {
+                        setStore('bayan_client_device_token', data.token);
+                        setStore('bayan_client_is_paired', 'true');
+                    }
                     
                     const modal = document.getElementById('clientPinInputModal');
                     if (modal) modal.remove();
