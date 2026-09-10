@@ -56,7 +56,7 @@ function getInvSummaryMap(currentWH) {
         if (!type.includes('تحويل')) s.globalChange += change;
         if (tWH === currentWH) s.wStock += change;
 
-        if (type.includes('تحويل')) {
+        if (type.includes('تحويل') && t.transferStatus === 'received') {
             const parts = (t.partner || '').split(' -> ');
             if (parts.length === 2) {
                 if (parts[1].trim() === currentWH) s.wStock += qty;
@@ -99,6 +99,58 @@ window.getProductLastPurchasePrice = function(productName, fallbackCost = 0) {
     return pRef ? (parseFloat(pRef.cost) || parseFloat(fallbackCost) || 0) : (parseFloat(fallbackCost) || 0);
 };
 
+window.handleInventorySearchKeyDown = function(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const inp = document.getElementById('invSearchInput');
+        const query = (inp ? inp.value : '').trim();
+        if (!query) return;
+
+        const allProducts = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB : [];
+        const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+        const rawQ = query.toLowerCase();
+        const q = cleanAr(query);
+
+        // 1. فحص التطابق التام مع أي باركود (صنف، تشكيلة مقاس/لون، وحدة، كود ميزان، كود)
+        let matchedProduct = allProducts.find(p => {
+            if (p.barcode && (cleanAr(p.barcode) === q || String(p.barcode).trim().toLowerCase() === rawQ)) return true;
+            if (p.code && (cleanAr(p.code) === q || String(p.code).trim().toLowerCase() === rawQ)) return true;
+            if (p.scalePlu && (String(p.scalePlu).trim() === rawQ || cleanAr(p.scalePlu) === q)) return true;
+            if (p.sysCode && String(p.sysCode).trim().toLowerCase() === rawQ) return true;
+            if (p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || String(u.unitBarcode).trim().toLowerCase() === rawQ))) return true;
+            if (p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQ))) return true;
+            return false;
+        });
+
+        // 2. إذا لم يكن هناك تطابق تام، نختار أول سطر معروض حالياً في الجدول
+        if (!matchedProduct) {
+            const firstRow = document.querySelector('#inventoryTableBody tr[data-id]');
+            if (firstRow) {
+                const pid = Number(firstRow.getAttribute('data-id'));
+                if (pid) matchedProduct = allProducts.find(p => p.id === pid);
+            }
+        }
+
+        if (matchedProduct) {
+            if (window.selectedInventoryIds) {
+                window.selectedInventoryIds.clear();
+                window.selectedInventoryIds.add(matchedProduct.id);
+                window.selectedInventoryId = matchedProduct.id;
+            }
+            renderInventoryTable();
+
+            setTimeout(() => {
+                const targetRow = document.querySelector(`#inventoryTableBody tr[data-id="${matchedProduct.id}"]`);
+                if (targetRow) {
+                    targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetRow.classList.add('selected-row-gold');
+                }
+            }, 50);
+
+            if (inp) inp.select(); // تحديد النص ليكون السكانر جاهز للمسحة التالية فوراً
+        }
+    }
+};
 
 function renderInventoryTable() {
     const tbody = document.getElementById('inventoryTableBody');
@@ -110,10 +162,12 @@ function renderInventoryTable() {
     }
 
     const searchInput = document.getElementById('invSearchInput');
-    const search = searchInput ? searchInput.value.toLowerCase() : '';
+    const rawSearch = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+    const search = cleanAr(rawSearch);
     const catFilter = document.getElementById('invCategoryFilter')?.value || 'all';
 
-    if (search === '' && typeof updateCategoryFilterOptions === 'function') updateCategoryFilterOptions();
+    if (rawSearch === '' && typeof updateCategoryFilterOptions === 'function') updateCategoryFilterOptions();
 
     tbody.innerHTML = '';
     let totalStockSum = 0;
@@ -147,7 +201,20 @@ function renderInventoryTable() {
         const profitMargin = retail > 0 ? (((retail - avgCost) / retail) * 100).toFixed(1) : 0;
         const marginColor = profitMargin < 10 ? '#ef4444' : (profitMargin > 30 ? '#10b981' : '#f59e0b');
 
-        if (!p.name.toLowerCase().includes(search) && !(p.barcode && String(p.barcode).includes(search)) && !(p.code && String(p.code).includes(search))) return;
+        if (rawSearch) {
+            const nameMatch = p.name && cleanAr(p.name).includes(search);
+            const barcodeMatch = p.barcode && (cleanAr(p.barcode) === search || String(p.barcode).toLowerCase().includes(rawSearch));
+            const codeMatch = p.code && (cleanAr(p.code) === search || String(p.code).toLowerCase().includes(rawSearch));
+            const sysCodeMatch = (p.sysCode && String(p.sysCode).toLowerCase().includes(rawSearch)) || (String(p.id) === rawSearch);
+            const scalePluMatch = p.scalePlu && (String(p.scalePlu).trim() === rawSearch || cleanAr(p.scalePlu) === search);
+            const unitBarcodeMatch = p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === search || String(u.unitBarcode).toLowerCase().includes(rawSearch)));
+            const variantBarcodeMatch = p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode) === search || String(v.barcode).trim().toLowerCase().includes(rawSearch)));
+
+            if (!nameMatch && !barcodeMatch && !codeMatch && !sysCodeMatch && !scalePluMatch && !unitBarcodeMatch && !variantBarcodeMatch) {
+                return;
+            }
+        }
+
         if (catFilter !== 'all' && (p.category || '').trim() !== catFilter.trim()) return;
 
         const targetMinStock = parseFloat(p.minStock) || 5;
@@ -383,15 +450,38 @@ function updateCategoryFilterOptions() {
     }
 }
 
+window.getSafeWhClass = function(whName) {
+    if (!whName) return 'col-wh-unknown';
+    const safe = String(whName).trim().replace(/[^\w\u0600-\u06FF]/g, '_');
+    return 'col-wh-' + safe;
+};
+
 window.toggleWrColMenu = function(event) {
     if (event) event.stopPropagation();
     const menu = document.getElementById('wrColMenu');
     const overlay = document.getElementById('wrColOverlay');
     if (menu) menu.classList.toggle('hidden');
     if (overlay) overlay.classList.toggle('hidden');
+
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const canViewCost = (typeof hasPermission === 'function') ? hasPermission('docs_purchase_price') : true;
+
+    const optCost = document.getElementById('wrOptCost');
+    const optVal = document.getElementById('wrOptTotalVal');
+    const optWh = document.getElementById('wrOptProfitWh');
+    const optRt = document.getElementById('wrOptProfitRt');
+    if (optCost) optCost.style.display = canViewCost ? 'flex' : 'none';
+    if (optVal) optVal.style.display = canViewCost ? 'flex' : 'none';
+    if (optWh) optWh.style.display = canViewProfits ? 'flex' : 'none';
+    if (optRt) optRt.style.display = canViewProfits ? 'flex' : 'none';
 };
 
 window.toggleWrCol = function(colClass, isVisible) {
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const canViewCost = (typeof hasPermission === 'function') ? hasPermission('docs_purchase_price') : true;
+    if (!canViewCost && (colClass === 'col-wr-cost' || colClass === 'col-wr-total-val')) return;
+    if (!canViewProfits && (colClass === 'col-wr-profit-wh' || colClass === 'col-wr-profit-rt')) return;
+
     const settings = JSON.parse(getStore('wrColSettings') || '{}');
     settings[colClass] = isVisible;
     setStore('wrColSettings', JSON.stringify(settings));
@@ -399,16 +489,63 @@ window.toggleWrCol = function(colClass, isVisible) {
 };
 
 window.applyWrColVisibility = function() {
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const canViewCost = (typeof hasPermission === 'function') ? hasPermission('docs_purchase_price') : true;
+
     const settings = JSON.parse(getStore('wrColSettings') || '{"col-wr-cost":true,"col-wr-total-val":true,"col-wr-profit-wh":true,"col-wr-profit-rt":true}');
+    
+    // إخفاء أعمدة التكلفة والأرباح حتمياً إذا لم تكن الصلاحية ممنوحة
+    if (!canViewCost) {
+        settings['col-wr-cost'] = false;
+        settings['col-wr-total-val'] = false;
+    }
+    if (!canViewProfits) {
+        settings['col-wr-profit-wh'] = false;
+        settings['col-wr-profit-rt'] = false;
+    }
+
     Object.keys(settings).forEach(colClass => {
         const isVisible = settings[colClass];
-        document.querySelectorAll('.' + colClass).forEach(el => {
-            el.style.display = isVisible ? '' : 'none';
-        });
+        try {
+            document.querySelectorAll('.' + colClass).forEach(el => {
+                el.style.display = isVisible ? '' : 'none';
+            });
+        } catch (err) {
+            console.warn("Error applying column visibility for:", colClass, err);
+        }
 
-        const checkbox = document.querySelector(`input[onchange*="'${colClass}'"]`);
-        if (checkbox) checkbox.checked = isVisible;
+        try {
+            const checkbox = document.querySelector(`input[onchange*="'${colClass}'"]`);
+            if (checkbox) checkbox.checked = isVisible;
+        } catch (err) {}
     });
+
+    const optCost = document.getElementById('wrOptCost');
+    const optVal = document.getElementById('wrOptTotalVal');
+    const optWh = document.getElementById('wrOptProfitWh');
+    const optRt = document.getElementById('wrOptProfitRt');
+    if (optCost) optCost.style.display = canViewCost ? 'flex' : 'none';
+    if (optVal) optVal.style.display = canViewCost ? 'flex' : 'none';
+    if (optWh) optWh.style.display = canViewProfits ? 'flex' : 'none';
+    if (optRt) optRt.style.display = canViewProfits ? 'flex' : 'none';
+};
+
+window.toggleProductVariantsRow = function(productId, btn) {
+    const subRow = document.getElementById(`wr-variants-${productId}`);
+    if (!subRow) return;
+    const isHidden = subRow.style.display === 'none';
+    subRow.style.display = isHidden ? 'table-row' : 'none';
+    if (btn) {
+        if (isHidden) {
+            btn.innerHTML = btn.innerHTML.replace('▾', '▴');
+            btn.style.background = '#5e3370';
+            btn.style.color = '#ffffff';
+        } else {
+            btn.innerHTML = btn.innerHTML.replace('▴', '▾');
+            btn.style.background = '#e0e7ff';
+            btn.style.color = '#3730a3';
+        }
+    }
 };
 
 window.wrFilterState = window.wrFilterState || { startDate: null, endDate: null };
@@ -496,52 +633,83 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
     const body = document.getElementById('wrTableBody');
     const summaryContainer = document.getElementById('wrSummaryCards');
     const searchInput = document.getElementById('wrSearchInput');
-    const search = searchInput ? searchInput.value.trim().toLowerCase() : '';
     const settings = JSON.parse(getStore('wrColSettings') || '{}');
 
     if (!head || !body) return;
+
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const canViewCost = (typeof hasPermission === 'function') ? hasPermission('docs_purchase_price') : true;
+
+    if (!canViewCost) {
+        settings['col-wr-cost'] = false;
+        settings['col-wr-total-val'] = false;
+    }
+    if (!canViewProfits) {
+        settings['col-wr-profit-wh'] = false;
+        settings['col-wr-profit-rt'] = false;
+    }
 
     if (!window.wrRenderState || isSearchTrigger) {
         window.wrRenderState = { limit: 100 };
     }
 
-    const whToggles = document.getElementById('wrWarehouseToggles');
-    if (whToggles && whToggles.children.length <= 1 && typeof warehouses !== 'undefined') {
-        warehouses.forEach(w => {
-            const colClass = `col-wh-${w.name.replace(/\s+/g, '_')}`;
-            if (settings[colClass] === undefined) settings[colClass] = true;
+    const cleanAr = (text) => {
+        if (!text) return '';
+        return String(text)
+            .replace(/[أإآ]/g, 'ا')
+            .replace(/ة/g, 'ه')
+            .replace(/ى/g, 'ي')
+            .replace(/[\u064B-\u065F]/g, '')
+            .trim()
+            .toLowerCase();
+    };
 
-            const label = document.createElement('label');
-            label.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 8px 15px; background: #f1f5f9; border-radius: 10px; cursor: pointer; font-size: 0.85rem;";
-            label.innerHTML = `
-                <span style="font-weight: 700; color: #475569;">كمية ${w.name}</span>
-                <input type="checkbox" ${settings[colClass] !== false ? 'checked' : ''} onchange="toggleWrCol('${colClass}', this.checked)" style="accent-color: #5e3370;">
-            `;
-            whToggles.appendChild(label);
+    const whToggles = document.getElementById('wrWarehouseToggles');
+    if (whToggles && typeof warehouses !== 'undefined') {
+        const existingClasses = new Set(Array.from(whToggles.querySelectorAll('input[onchange]')).map(inp => {
+            const m = inp.getAttribute('onchange')?.match(/toggleWrCol\('([^']+)'/);
+            return m ? m[1] : null;
+        }).filter(Boolean));
+
+        let addedAny = false;
+        warehouses.forEach(w => {
+            const colClass = getSafeWhClass(w.name);
+            if (!existingClasses.has(colClass)) {
+                if (settings[colClass] === undefined) settings[colClass] = true;
+
+                const label = document.createElement('label');
+                label.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 8px 15px; background: #f1f5f9; border-radius: 10px; cursor: pointer; font-size: 0.85rem;";
+                label.innerHTML = `
+                    <span style="font-weight: 700; color: #475569;">كمية ${w.name}</span>
+                    <input type="checkbox" ${settings[colClass] !== false ? 'checked' : ''} onchange="toggleWrCol('${colClass}', this.checked)" style="accent-color: #5e3370;">
+                `;
+                whToggles.appendChild(label);
+                addedAny = true;
+            }
         });
-        setStore('wrColSettings', JSON.stringify(settings));
+        if (addedAny) setStore('wrColSettings', JSON.stringify(settings));
     }
 
     let headHTML = `
         <tr style="background: #f8fafc; color: #1e293b; border-bottom: 2px solid #e2e8f0;">
             <th style="width:50px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; border-radius: 12px 0 0 0;">#</th>
-            <th style="width:100px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0;">الكود</th>
+            <th style="width:110px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0;">الكود</th>
             <th style="padding: 15px; text-align: right; font-weight: 800; border: 1px solid #e2e8f0; padding-right: 20px;">اسم الصنف</th>
-            <th class="col-wr-cost" style="width:100px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0;">التكلفة</th>
+            <th class="col-wr-cost" style="width:100px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; ${!canViewCost ? 'display:none;' : ''}">التكلفة</th>
     `;
 
     if (typeof warehouses !== 'undefined') {
         warehouses.forEach(w => {
-            const colClass = `col-wh-${w.name.replace(/\s+/g, '_')}`;
+            const colClass = getSafeWhClass(w.name);
             headHTML += `<th class="${colClass}" style="min-width:110px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0;">كمية ${w.name}</th>`;
         });
     }
 
     headHTML += `
             <th style="width:110px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(212,175,55,0.05); color: #8c6a24;">إجمالي الكمية</th>
-            <th class="col-wr-total-val" style="width:130px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(33,115,70,0.05); color: #15803d;">إجمالي القيمة</th>
-            <th class="col-wr-profit-wh" style="width:120px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(39,174,96,0.05); color: #27ae60;">ربح الجملة</th>
-            <th class="col-wr-profit-rt" style="width:120px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(33,150,243,0.05); color: #2196f3; border-radius: 0 12px 0 0;">ربح التجزئة</th>
+            <th class="col-wr-total-val" style="width:130px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(33,115,70,0.05); color: #15803d; ${!canViewCost ? 'display:none;' : ''}">إجمالي القيمة</th>
+            <th class="col-wr-profit-wh" style="width:120px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(39,174,96,0.05); color: #27ae60; ${!canViewProfits ? 'display:none;' : ''}">ربح الجملة</th>
+            <th class="col-wr-profit-rt" style="width:120px; padding: 15px; text-align: center; font-weight: 800; border: 1px solid #e2e8f0; background: rgba(33,150,243,0.05); color: #2196f3; border-radius: 0 12px 0 0; ${!canViewProfits ? 'display:none;' : ''}">ربح التجزئة</th>
         </tr>
     `;
     head.innerHTML = headHTML;
@@ -553,12 +721,24 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
     let totalGlobalProfitRT = 0;
     let warehouseStats = (typeof warehouses !== 'undefined') ? warehouses.map(w => ({ name: w.name, qty: 0, val: 0, items: 0 })) : [];
 
-    const filteredProducts = productsDB.filter(p => 
-        !search || 
-        (p.name && p.name.toLowerCase().includes(search)) || 
-        (p.barcode && String(p.barcode).toLowerCase().includes(search)) ||
-        (p.code && String(p.code).toLowerCase().includes(search))
-    );
+    const searchRaw = searchInput ? searchInput.value.trim() : '';
+    const searchClean = cleanAr(searchRaw);
+
+    const filteredProducts = productsDB.filter(p => {
+        if (!p) return false;
+        if (!searchClean) return true;
+        if (cleanAr(p.name).includes(searchClean)) return true;
+        if (p.barcode && String(p.barcode).includes(searchRaw)) return true;
+        if (p.code && String(p.code).toLowerCase().includes(searchClean)) return true;
+        if (p.variants && Array.isArray(p.variants)) {
+            return p.variants.some(v => 
+                (v.barcode && String(v.barcode).includes(searchRaw)) ||
+                (v.size && cleanAr(v.size).includes(searchClean)) ||
+                (v.color && cleanAr(v.color).includes(searchClean))
+            );
+        }
+        return false;
+    });
 
     const sDate = (window.wrFilterState && window.wrFilterState.startDate) ? window.wrFilterState.startDate : null;
     const eDate = (window.wrFilterState && window.wrFilterState.endDate) ? window.wrFilterState.endDate : null;
@@ -596,6 +776,7 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
     // اقتطاع العرض التجزيئي (Chunked Limit) لسرعة الـ Rendering وتجنب إرهاق الـ DOM
     const visibleProducts = filteredProducts.slice(0, window.wrRenderState.limit);
     const htmlRows = [];
+    const totalCols = 7 + (typeof warehouses !== 'undefined' ? warehouses.length : 0);
 
     visibleProducts.forEach((p, idx) => {
         const cost = parseFloat(p.cost) || 0;
@@ -604,7 +785,7 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
 
         if (typeof warehouses !== 'undefined') {
             warehouses.forEach((w) => {
-                const colClass = `col-wh-${w.name.replace(/\s+/g, '_')}`;
+                const colClass = getSafeWhClass(w.name);
                 const st = getWarehouseStock(p.name, w.name, sDate, eDate);
                 rowQty += st;
 
@@ -619,24 +800,97 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
         const rowProfitWH = (wholesalePrice > 0) ? rowQty * (wholesalePrice - cost) : 0;
         const rowProfitRT = (retailPrice > 0) ? rowQty * (retailPrice - cost) : 0;
 
+        const hasVariants = p.variants && Array.isArray(p.variants) && p.variants.length > 0;
+        const variantBtn = hasVariants 
+            ? `<button type="button" onclick="window.toggleProductVariantsRow('${p.id}', this)" style="display:inline-flex; align-items:center; gap:4px; margin-right:8px; padding:2px 8px; background:#e0e7ff; color:#3730a3; border:1px solid #c7d2fe; border-radius:6px; font-size:0.75rem; font-weight:800; cursor:pointer; vertical-align:middle; transition:0.2s;" title="عرض تفاصيل المقاسات والألوان">👗 ${p.variants.length} مقاس/لون ▾</button>` 
+            : '';
+
         htmlRows.push(`
             <tr class="wr-table-row" style="border-bottom: 1px solid #f1f5f9;">
                 <td style="text-align:center; color:#94a3b8; font-size: 0.8rem;">${idx + 1}</td>
                 <td style="text-align:center; font-weight:bold; color:#5e3370;">${p.code || p.id}</td>
-                <td style="text-align:right; font-weight:800; color: #1e293b; padding-right: 20px;">${p.name}</td>
-                <td class="col-wr-cost num-cell" style="color:#64748b; font-weight: 700;">${cost.toFixed(2)}</td>
+                <td style="text-align:right; font-weight:800; color: #1e293b; padding-right: 20px;">
+                    ${p.name}
+                    ${variantBtn}
+                </td>
+                <td class="col-wr-cost num-cell" style="color:#64748b; font-weight: 700; ${!canViewCost ? 'display:none;' : ''}">${cost.toFixed(2)}</td>
                 ${warehouseCols}
                 <td class="num-cell" style="background:rgba(212,175,55,0.05); font-weight:900; color:#8c6a24; font-size: 1.1rem;">${rowQty}</td>
-                <td class="col-wr-total-val num-cell" style="background:rgba(33,115,70,0.05); font-weight:900; color:#15803d;">${rowValue.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                <td class="col-wr-profit-wh num-cell" style="background:rgba(39,174,96,0.02); font-weight:900; color:#27ae60;">${rowProfitWH.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                <td class="col-wr-profit-rt num-cell" style="background:rgba(33,150,243,0.02); font-weight:900; color:#2196f3;">${rowProfitRT.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                <td class="col-wr-total-val num-cell" style="background:rgba(33,115,70,0.05); font-weight:900; color:#15803d; ${!canViewCost ? 'display:none;' : ''}">${rowValue.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                <td class="col-wr-profit-wh num-cell" style="background:rgba(39,174,96,0.02); font-weight:900; color:#27ae60; ${!canViewProfits ? 'display:none;' : ''}">${rowProfitWH.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                <td class="col-wr-profit-rt num-cell" style="background:rgba(33,150,243,0.02); font-weight:900; color:#2196f3; ${!canViewProfits ? 'display:none;' : ''}">${rowProfitRT.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
             </tr>
         `);
+
+        if (hasVariants) {
+            let varSubRows = '';
+            p.variants.forEach((v, vIdx) => {
+                let vTotalQty = 0;
+                let vWhCols = '';
+                if (typeof warehouses !== 'undefined') {
+                    warehouses.forEach(w => {
+                        const colClass = getSafeWhClass(w.name);
+                        let vSt = 0;
+                        if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[w.name] !== undefined) {
+                            vSt = parseFloat(v.warehouseStocks[w.name]) || 0;
+                        } else if (w.name === 'المخزن الرئيسي') {
+                            vSt = parseFloat(v.stock) || 0;
+                        }
+                        vTotalQty += vSt;
+                        vWhCols += `<td class="${colClass}" style="padding:6px 10px; text-align:center; font-weight:800; color:${vSt > 0 ? '#10b981' : (vSt < 0 ? '#ef4444' : '#94a3b8')}; border:1px solid #e2e8f0;">${vSt}</td>`;
+                    });
+                }
+                varSubRows += `
+                    <tr style="border-bottom:1px dashed #cbd5e1;">
+                        <td style="padding:6px; text-align:center; color:#64748b; font-size:0.8rem; border:1px solid #e2e8f0;">${vIdx + 1}</td>
+                        <td style="padding:6px 10px; text-align:center; font-family:monospace; font-weight:bold; color:#5e3370; border:1px solid #e2e8f0;">${v.barcode || '-'}</td>
+                        <td style="padding:6px 10px; text-align:center; font-weight:800; color:#1e293b; border:1px solid #e2e8f0;">${v.size || v.name || '-'}</td>
+                        <td style="padding:6px 10px; text-align:center; font-weight:700; color:#475569; border:1px solid #e2e8f0;">${v.color || '-'}</td>
+                        ${vWhCols}
+                        <td style="padding:6px 10px; text-align:center; font-weight:900; color:#8c6a24; background:rgba(212,175,55,0.05); border:1px solid #e2e8f0;">${vTotalQty}</td>
+                    </tr>
+                `;
+            });
+
+            let vWhHeaders = '';
+            if (typeof warehouses !== 'undefined') {
+                warehouses.forEach(w => {
+                    const colClass = getSafeWhClass(w.name);
+                    vWhHeaders += `<th class="${colClass}" style="padding:6px; text-align:center; border:1px solid #cbd5e1;">${w.name}</th>`;
+                });
+            }
+
+            htmlRows.push(`
+                <tr id="wr-variants-${p.id}" class="wr-variant-subrow" style="display:none; background:#faf5ff;">
+                    <td colspan="${totalCols}" style="padding:12px 25px; border-bottom:2px solid #cbd5e1;">
+                        <div style="background:white; border-radius:10px; padding:12px; border:1px solid #e2e8f0; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+                            <div style="font-weight:900; font-size:0.85rem; color:#5e3370; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                                <span>👗 تفاصيل المقاسات والألوان للصنف: ${p.name}</span>
+                            </div>
+                            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                                <thead>
+                                    <tr style="background:#f1f5f9; color:#334155; font-size:0.8rem;">
+                                        <th style="padding:6px; text-align:center; width:35px; border:1px solid #cbd5e1;">#</th>
+                                        <th style="padding:6px; text-align:center; width:130px; border:1px solid #cbd5e1;">الباركود</th>
+                                        <th style="padding:6px; text-align:center; border:1px solid #cbd5e1;">المقاس</th>
+                                        <th style="padding:6px; text-align:center; border:1px solid #cbd5e1;">اللون</th>
+                                        ${vWhHeaders}
+                                        <th style="padding:6px; text-align:center; width:90px; border:1px solid #cbd5e1; background:rgba(212,175,55,0.1); color:#8c6a24;">الإجمالي</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${varSubRows}
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            `);
+        }
     });
 
     if (filteredProducts.length > window.wrRenderState.limit) {
         const remaining = filteredProducts.length - window.wrRenderState.limit;
-        const totalCols = 7 + (typeof warehouses !== 'undefined' ? warehouses.length : 0);
         htmlRows.push(`
             <tr id="wrLoadMoreRow" style="background: #f8fafc; text-align: center;">
                 <td colspan="${totalCols}" style="padding: 15px;">
@@ -657,28 +911,32 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
             <div class="summary-card-gold" style="padding: 12px 16px; background: linear-gradient(135deg, #1e293b, #0f172a); color: white; border-radius: 14px; box-shadow: 0 4px 15px rgba(15,23,42,0.15); border: 1px solid rgba(255,255,255,0.1); border-right: 5px solid #3b82f6; display: flex; flex-direction: column; justify-content: center; transition: 0.3s;">
                 <div style="font-size: 0.8rem; font-weight: 800; color: #93c5fd; margin-bottom: 4px;">📊 إجمالي المخزون (بكل الفروع)</div>
                 <div style="font-size: 1.35rem; font-weight: 900; color: white;">${totalGlobalQty.toLocaleString()} <span style="font-size: 0.75rem; color: #94a3b8; font-weight: normal;">قطعة</span></div>
-                <div style="font-size: 0.95rem; font-weight: 800; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 6px; padding-top: 4px; color: #60a5fa;">${totalGlobalValue.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.75rem;">ج.م</span></div>
-            </div>
-
-            <div class="summary-card-profit-wh" style="padding: 12px 16px; background: linear-gradient(135deg, #064e3b, #052e16); color: white; border-radius: 14px; box-shadow: 0 4px 15px rgba(6,78,59,0.15); border: 1px solid rgba(255,255,255,0.1); border-right: 5px solid #10b981; display: flex; flex-direction: column; justify-content: center; transition: 0.3s;">
-                <div style="font-size: 0.8rem; font-weight: 800; color: #6ee7b7; margin-bottom: 4px;">💵 إجمالي ربح الجملة</div>
-                <div style="font-size: 1.35rem; font-weight: 900; color: white;">${totalGlobalProfitWH.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.75rem;">ج.م</span></div>
-                <div style="font-size: 0.72rem; margin-top: 4px; color: #34d399; opacity: 0.9;">(بناءً على الأرصدة الحالية)</div>
-            </div>
-
-            <div class="summary-card-profit-rt" style="padding: 12px 16px; background: linear-gradient(135deg, #1e3a8a, #172554); color: white; border-radius: 14px; box-shadow: 0 4px 15px rgba(30,58,138,0.15); border: 1px solid rgba(255,255,255,0.1); border-right: 5px solid #60a5fa; display: flex; flex-direction: column; justify-content: center; transition: 0.3s;">
-                <div style="font-size: 0.8rem; font-weight: 800; color: #93c5fd; margin-bottom: 4px;">💎 إجمالي ربح التجزئة</div>
-                <div style="font-size: 1.35rem; font-weight: 900; color: white;">${totalGlobalProfitRT.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.75rem;">ج.م</span></div>
-                <div style="font-size: 0.72rem; margin-top: 4px; color: #93c5fd; opacity: 0.9;">(بناءً على الأرصدة الحالية)</div>
+                ${canViewCost ? `<div style="font-size: 0.95rem; font-weight: 800; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 6px; padding-top: 4px; color: #60a5fa;">${totalGlobalValue.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.75rem;">ج.م</span></div>` : ''}
             </div>
         `;
+
+        if (canViewProfits) {
+            cardsHTML += `
+                <div class="summary-card-profit-wh" style="padding: 12px 16px; background: linear-gradient(135deg, #064e3b, #052e16); color: white; border-radius: 14px; box-shadow: 0 4px 15px rgba(6,78,59,0.15); border: 1px solid rgba(255,255,255,0.1); border-right: 5px solid #10b981; display: flex; flex-direction: column; justify-content: center; transition: 0.3s;">
+                    <div style="font-size: 0.8rem; font-weight: 800; color: #6ee7b7; margin-bottom: 4px;">💵 إجمالي ربح الجملة</div>
+                    <div style="font-size: 1.35rem; font-weight: 900; color: white;">${totalGlobalProfitWH.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.75rem;">ج.م</span></div>
+                    <div style="font-size: 0.72rem; margin-top: 4px; color: #34d399; opacity: 0.9;">(بناءً على الأرصدة الحالية)</div>
+                </div>
+
+                <div class="summary-card-profit-rt" style="padding: 12px 16px; background: linear-gradient(135deg, #1e3a8a, #172554); color: white; border-radius: 14px; box-shadow: 0 4px 15px rgba(30,58,138,0.15); border: 1px solid rgba(255,255,255,0.1); border-right: 5px solid #60a5fa; display: flex; flex-direction: column; justify-content: center; transition: 0.3s;">
+                    <div style="font-size: 0.8rem; font-weight: 800; color: #93c5fd; margin-bottom: 4px;">💎 إجمالي ربح التجزئة</div>
+                    <div style="font-size: 1.35rem; font-weight: 900; color: white;">${totalGlobalProfitRT.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.75rem;">ج.م</span></div>
+                    <div style="font-size: 0.72rem; margin-top: 4px; color: #93c5fd; opacity: 0.9;">(بناءً على الأرصدة الحالية)</div>
+                </div>
+            `;
+        }
 
         warehouseStats.forEach(ws => {
             cardsHTML += `
                 <div class="summary-card-white" style="padding: 12px 16px; background: linear-gradient(135deg, #334155, #0f172a); color: white; border-radius: 14px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.1); border-right: 5px solid #f59e0b; display: flex; flex-direction: column; justify-content: center; transition: 0.3s;">
                     <div style="font-size: 0.8rem; color: #fcd34d; font-weight: 800; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">🏬 كمية ${ws.name}</div>
                     <div style="font-size: 1.25rem; font-weight: 900; color: white;">${ws.qty.toLocaleString()} <span style="font-size: 0.75rem; color: #94a3b8; font-weight: normal;">قطعة</span></div>
-                    <div style="font-size: 0.95rem; color: #34d399; font-weight: 800; margin-top: 2px;">${ws.val.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.65rem;">ج.م</span></div>
+                    ${canViewCost ? `<div style="font-size: 0.95rem; color: #34d399; font-weight: 800; margin-top: 2px;">${ws.val.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size: 0.65rem;">ج.م</span></div>` : ''}
                     <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 3px;">(${ws.items} صنف نشط)</div>
                 </div>
             `;
@@ -689,38 +947,170 @@ function renderWarehouseReportTable(isSearchTrigger = false) {
 
 function printWarehouseReport() {
     const shopName = document.getElementById('shopName')?.value || 'متجر بيان';
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const canViewCost = (typeof hasPermission === 'function') ? hasPermission('docs_purchase_price') : true;
 
-    const originalHead = document.getElementById('wrTableHead');
-    const originalBody = document.getElementById('wrTableBody');
+    const rawSettings = JSON.parse(getStore('wrColSettings') || '{"col-wr-cost":true,"col-wr-total-val":true,"col-wr-profit-wh":true,"col-wr-profit-rt":true}');
+    const settings = { ...rawSettings };
+    if (!canViewCost) {
+        settings['col-wr-cost'] = false;
+        settings['col-wr-total-val'] = false;
+    }
+    if (!canViewProfits) {
+        settings['col-wr-profit-wh'] = false;
+        settings['col-wr-profit-rt'] = false;
+    }
 
-    if (!originalHead || !originalBody) return alert("لا توجد بيانات للطباعة");
+    const sDate = (window.wrFilterState && window.wrFilterState.startDate) ? window.wrFilterState.startDate : null;
+    const eDate = (window.wrFilterState && window.wrFilterState.endDate) ? window.wrFilterState.endDate : null;
 
-    const headers = Array.from(originalHead.querySelectorAll('th')).map(th => th.innerText.replace(/📊|💵|💎|🏬|⚙️/g, '').trim());
-    const rows = Array.from(originalBody.querySelectorAll('tr')).filter(tr => tr.style.display !== 'none');
+    const cleanAr = (text) => {
+        if (!text) return '';
+        return String(text)
+            .replace(/[أإآ]/g, 'ا')
+            .replace(/ة/g, 'ه')
+            .replace(/ى/g, 'ي')
+            .replace(/[\u064B-\u065F]/g, '')
+            .trim()
+            .toLowerCase();
+    };
+
+    const searchRaw = document.getElementById('wrSearchInput')?.value.trim() || '';
+    const searchClean = cleanAr(searchRaw);
+
+    const filtered = productsDB.filter(p => {
+        if (!p) return false;
+        if (!searchClean) return true;
+        if (cleanAr(p.name).includes(searchClean)) return true;
+        if (p.barcode && String(p.barcode).includes(searchRaw)) return true;
+        if (p.code && String(p.code).toLowerCase().includes(searchClean)) return true;
+        if (p.variants && Array.isArray(p.variants)) {
+            return p.variants.some(v => 
+                (v.barcode && String(v.barcode).includes(searchRaw)) ||
+                (v.size && cleanAr(v.size).includes(searchClean)) ||
+                (v.color && cleanAr(v.color).includes(searchClean))
+            );
+        }
+        return false;
+    });
+
+    if (filtered.length === 0) return alert("لا توجد بيانات للطباعة وفقاً للبحث الحالي");
+
+    const headers = ["#", "كود الصنف", "اسم الصنف"];
+    if (settings['col-wr-cost'] !== false) headers.push("التكلفة");
+
+    const visibleWhs = [];
+    if (typeof warehouses !== 'undefined') {
+        warehouses.forEach(w => {
+            const colClass = getSafeWhClass(w.name);
+            if (settings[colClass] !== false) {
+                headers.push("كمية " + w.name);
+                visibleWhs.push(w);
+            }
+        });
+    }
+
+    headers.push("إجمالي الكمية");
+    if (settings['col-wr-total-val'] !== false) headers.push("إجمالي القيمة");
+    if (settings['col-wr-profit-wh'] !== false) headers.push("ربح الجملة");
+    if (settings['col-wr-profit-rt'] !== false) headers.push("ربح التجزئة");
+
+    let printGlobalQty = 0;
+    let printGlobalVal = 0;
+    let printGlobalProfitWH = 0;
+    let printGlobalProfitRT = 0;
+    const whTotals = visibleWhs.map(() => 0);
+
+    let rowsHtml = '';
+    filtered.forEach((p, idx) => {
+        const cost = parseFloat(p.cost) || 0;
+        const retailPrice = parseFloat(p.price) || 0;
+        const wholesalePrice = parseFloat(p.wholesale) || 0;
+        let rowQty = 0;
+        let whTds = '';
+
+        if (typeof warehouses !== 'undefined') {
+            warehouses.forEach(w => {
+                const st = getWarehouseStock(p.name, w.name, sDate, eDate);
+                rowQty += st;
+                const colClass = getSafeWhClass(w.name);
+                if (settings[colClass] !== false) {
+                    const wIdx = visibleWhs.indexOf(w);
+                    if (wIdx !== -1) whTotals[wIdx] += st;
+                    whTds += `<td>${st}</td>`;
+                }
+            });
+        }
+
+        const rowVal = rowQty * cost;
+        const rowProfitWH = (wholesalePrice > 0) ? rowQty * (wholesalePrice - cost) : 0;
+        const rowProfitRT = (retailPrice > 0) ? rowQty * (retailPrice - cost) : 0;
+
+        printGlobalQty += rowQty;
+        printGlobalVal += rowVal;
+        printGlobalProfitWH += rowProfitWH;
+        printGlobalProfitRT += rowProfitRT;
+
+        const varNote = (p.variants && p.variants.length > 0)
+            ? `<div style="font-size:9px; color:#64748b; font-weight:normal; margin-top:2px;">👗 (${p.variants.length} مقاس/لون)</div>`
+            : '';
+
+        rowsHtml += `<tr>
+            <td>${idx + 1}</td>
+            <td>${p.code || p.id}</td>
+            <td style="text-align:right; font-weight:bold;">
+                ${p.name}
+                ${varNote}
+            </td>
+            ${settings['col-wr-cost'] !== false ? `<td>${cost.toFixed(2)}</td>` : ''}
+            ${whTds}
+            <td style="font-weight:bold;">${rowQty}</td>
+            ${settings['col-wr-total-val'] !== false ? `<td>${rowVal.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>` : ''}
+            ${settings['col-wr-profit-wh'] !== false ? `<td>${rowProfitWH.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>` : ''}
+            ${settings['col-wr-profit-rt'] !== false ? `<td>${rowProfitRT.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>` : ''}
+        </tr>`;
+    });
+
+    let footerTds = '';
+    visibleWhs.forEach((w, wIdx) => {
+        footerTds += `<td>${whTotals[wIdx].toLocaleString()}</td>`;
+    });
+
+    const footerHtml = `
+        <tr style="background:#eee; font-weight:900;">
+            <td colspan="${settings['col-wr-cost'] !== false ? 4 : 3}">الإجمالي العام</td>
+            ${footerTds}
+            <td>${printGlobalQty.toLocaleString()}</td>
+            ${settings['col-wr-total-val'] !== false ? `<td>${printGlobalVal.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} ج.م</td>` : ''}
+            ${settings['col-wr-profit-wh'] !== false ? `<td>${printGlobalProfitWH.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} ج.م</td>` : ''}
+            ${settings['col-wr-profit-rt'] !== false ? `<td>${printGlobalProfitRT.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} ج.م</td>` : ''}
+        </tr>
+    `;
 
     const summaryCards = document.querySelectorAll('#wrSummaryCards > div');
-    let summaryHtml = '<div style="margin-bottom:15px; border:1px solid #000; padding:10px;">';
+    let summaryHtml = '<div style="margin-bottom:15px; border:1px solid #000; padding:10px; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">';
     summaryCards.forEach(card => {
-        const title = card.querySelector('div:first-child')?.innerText.replace(/📊|💵|💎|🏬|⚙️/g, '') || '';
+        const title = card.querySelector('div:first-child')?.innerText.replace(/📊|💵|💎|🏬|⚙️/g, '').trim() || '';
         const val = card.querySelector('div:nth-child(2)')?.innerText || '0';
-        summaryHtml += `<div style="display:flex; justify-content:space-between; border-bottom:1px dashed #000; padding:3px 0; font-size:13px;">
-            <span>${title}:</span>
-            <span style="font-weight:900;">${val}</span>
+        summaryHtml += `<div style="border:1px solid #ddd; padding:6px 10px; border-radius:4px; font-size:12px;">
+            <div style="font-weight:bold; color:#444;">${title}</div>
+            <div style="font-size:14px; font-weight:900; margin-top:2px;">${val}</div>
         </div>`;
     });
     summaryHtml += '</div>';
 
-    let rowsHtml = rows.map(tr => {
-        const cells = Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim());
-        return `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
-    }).join('');
+    let dateText = '';
+    if (sDate && eDate) dateText = `عن الفترة من ${sDate} إلى ${eDate}`;
+    else if (eDate) dateText = `حتى تاريخ ${eDate}`;
+    else dateText = `الرصيد الفعلي الحالي بتاريخ: ${new Date().toLocaleString('ar-EG')}`;
 
     const content = `
         <div style="direction:rtl; font-family:'Arial', sans-serif; padding:15px; color:#000; width:100%; box-sizing:border-box;">
             <div style="text-align:center; border-bottom:3px solid #000; padding-bottom:15px; margin-bottom:20px;">
                 <h1 style="margin:0; font-size:22px; font-weight:900;">${shopName}</h1>
                 <h2 style="margin:10px 0; font-size:18px; font-weight:bold; border:2px solid #000; display:inline-block; padding:5px 20px; border-radius:8px;">تقرير أرصدة المخازن التفصيلي</h2>
-                <div style="font-size:12px; margin-top:5px; font-weight:bold;">بتاريخ: ${new Date().toLocaleString('ar-EG')}</div>
+                <div style="font-size:12px; margin-top:5px; font-weight:bold;">${dateText}</div>
+                <div style="font-size:11px; color:#555; margin-top:3px;">عدد الأصناف المشمولة: ${filtered.length} صنف</div>
             </div>
 
             ${summaryHtml}
@@ -732,6 +1122,7 @@ function printWarehouseReport() {
                     </tr>
                 </thead>
                 <tbody style="text-align:center;">${rowsHtml}</tbody>
+                <tfoot>${footerHtml}</tfoot>
             </table>
 
             <div style="margin-top:30px; text-align:center; font-size:11px; border-top:1px dashed #000; padding-top:15px;">
@@ -770,51 +1161,120 @@ function printWarehouseReport() {
 function exportWarehouseReportToExcel() {
     const XLSXLib = (typeof getXLSXLibrary === 'function' ? getXLSXLibrary() : (typeof XLSX !== 'undefined' ? XLSX : null));
 
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const canViewCost = (typeof hasPermission === 'function') ? hasPermission('docs_purchase_price') : true;
+
+    const sDate = (window.wrFilterState && window.wrFilterState.startDate) ? window.wrFilterState.startDate : null;
+    const eDate = (window.wrFilterState && window.wrFilterState.endDate) ? window.wrFilterState.endDate : null;
+
     const table = [];
-    const headerRow = ["#", "كود الصنف", "اسم الصنف", "تكلفة الوحدة"];
+    const headerRow = ["#", "كود الصنف", "اسم الصنف"];
+    if (canViewCost) headerRow.push("تكلفة الوحدة");
     if (typeof warehouses !== 'undefined') {
         warehouses.forEach(w => headerRow.push("كمية " + w.name));
     }
-    headerRow.push("إجمالي الكمية", "إجمالي القيمة التقديرية", "ربح الجملة", "ربح التجزئة");
+    headerRow.push("إجمالي الكمية");
+    if (canViewCost) headerRow.push("إجمالي القيمة التقديرية");
+    if (canViewProfits) headerRow.push("ربح الجملة", "ربح التجزئة");
     table.push(headerRow);
 
-    const search = document.getElementById('wrSearchInput')?.value.toLowerCase() || '';
-    const filtered = productsDB.filter(p => 
-        p.name.toLowerCase().includes(search) || 
-        (p.barcode && String(p.barcode).toLowerCase().includes(search)) ||
-        (p.code && String(p.code).toLowerCase().includes(search))
-    );
+    const cleanAr = (text) => {
+        if (!text) return '';
+        return String(text)
+            .replace(/[أإآ]/g, 'ا')
+            .replace(/ة/g, 'ه')
+            .replace(/ى/g, 'ي')
+            .replace(/[\u064B-\u065F]/g, '')
+            .trim()
+            .toLowerCase();
+    };
+
+    const searchRaw = document.getElementById('wrSearchInput')?.value.trim() || '';
+    const searchClean = cleanAr(searchRaw);
+
+    const filtered = productsDB.filter(p => {
+        if (!p) return false;
+        if (!searchClean) return true;
+        if (cleanAr(p.name).includes(searchClean)) return true;
+        if (p.barcode && String(p.barcode).includes(searchRaw)) return true;
+        if (p.code && String(p.code).toLowerCase().includes(searchClean)) return true;
+        if (p.variants && Array.isArray(p.variants)) {
+            return p.variants.some(v => 
+                (v.barcode && String(v.barcode).includes(searchRaw)) ||
+                (v.size && cleanAr(v.size).includes(searchClean)) ||
+                (v.color && cleanAr(v.color).includes(searchClean))
+            );
+        }
+        return false;
+    });
+
+    let totalGlobalQty = 0;
+    let totalGlobalVal = 0;
+    let totalGlobalProfitWH = 0;
+    let totalGlobalProfitRT = 0;
+    const whTotals = (typeof warehouses !== 'undefined') ? warehouses.map(() => 0) : [];
 
     filtered.forEach((p, idx) => {
         const cost = parseFloat(p.cost) || 0;
-        const row = [idx + 1, p.code || p.id, p.name, cost];
+        const retailPrice = parseFloat(p.price) || 0;
+        const wholesalePrice = parseFloat(p.wholesale) || 0;
+
+        const row = [idx + 1, p.code || p.id, p.name];
+        if (canViewCost) row.push(cost);
         let rowQty = 0;
         if (typeof warehouses !== 'undefined') {
-            warehouses.forEach(w => {
-                const st = getWarehouseStock(p.name, w.name);
+            warehouses.forEach((w, wIdx) => {
+                const st = getWarehouseStock(p.name, w.name, sDate, eDate);
                 row.push(st);
                 rowQty += st;
+                whTotals[wIdx] += st;
             });
         }
-        row.push(rowQty, rowQty * cost, rowQty * ((parseFloat(p.wholesale) || 0) - cost), rowQty * ((parseFloat(p.price) || 0) - cost));
+        const rowVal = rowQty * cost;
+        const rowProfitWH = (wholesalePrice > 0) ? rowQty * (wholesalePrice - cost) : 0;
+        const rowProfitRT = (retailPrice > 0) ? rowQty * (retailPrice - cost) : 0;
+
+        totalGlobalQty += rowQty;
+        totalGlobalVal += rowVal;
+        totalGlobalProfitWH += rowProfitWH;
+        totalGlobalProfitRT += rowProfitRT;
+
+        row.push(rowQty);
+        if (canViewCost) row.push(rowVal);
+        if (canViewProfits) {
+            row.push(rowProfitWH, rowProfitRT);
+        }
         table.push(row);
     });
+
+    // سطر الإجمالي العام في ملف الإكسيل
+    const totalRow = ["الإجمالي العام", "", ""];
+    if (canViewCost) totalRow.push("");
+    whTotals.forEach(wt => totalRow.push(wt));
+    totalRow.push(totalGlobalQty);
+    if (canViewCost) totalRow.push(totalGlobalVal);
+    if (canViewProfits) {
+        totalRow.push(totalGlobalProfitWH, totalGlobalProfitRT);
+    }
+    table.push(totalRow);
+
+    const dateSuffix = eDate ? `_${eDate}` : `_${new Date().toLocaleDateString('ar-EG')}`;
 
     if (XLSXLib && XLSXLib.utils) {
         try {
             const ws = XLSXLib.utils.aoa_to_sheet(table);
             const wb = XLSXLib.utils.book_new();
             XLSXLib.utils.book_append_sheet(wb, ws, "أرصدة المخازن");
-            XLSXLib.writeFile(wb, `تقرير_أرصدة_المخازن_${new Date().toLocaleDateString('ar-EG')}.xlsx`);
+            XLSXLib.writeFile(wb, `تقرير_أرصدة_المخازن${dateSuffix}.xlsx`);
             if (typeof showToast === 'function') showToast("✅ تم تصدير التقرير بنجاح", "success");
             return;
         } catch (e) { console.warn("Excel XLSX fallback activated:", e); }
     }
 
     if (typeof downloadAOAAsExcelCSV === 'function') {
-        downloadAOAAsExcelCSV(table, `تقرير_أرصدة_المخازن_${new Date().toLocaleDateString('ar-EG')}`);
+        downloadAOAAsExcelCSV(table, `تقرير_أرصدة_المخازن${dateSuffix}`);
     } else if (typeof window.downloadAOAAsExcelCSV === 'function') {
-        window.downloadAOAAsExcelCSV(table, `تقرير_أرصدة_المخازن_${new Date().toLocaleDateString('ar-EG')}`);
+        window.downloadAOAAsExcelCSV(table, `تقرير_أرصدة_المخازن${dateSuffix}`);
     }
 }
 window.exportWarehouseReportToExcel = exportWarehouseReportToExcel;
@@ -1167,7 +1627,7 @@ function updateInventorySelectionUI() {
         }
     }
 
-    const btns = ['invEditBtn', 'invDeleteBtn', 'invPriceAdjBtn'];
+    const btns = ['invEditBtn', 'invDeleteBtn'];
     btns.forEach(id => {
         const btn = document.getElementById(id);
         if (btn) {
@@ -1239,12 +1699,38 @@ function updateSideStockCard(productId) {
 
 let _stockCache = null;
 let _stockCacheKey = null;
+let _stockHistoryCache = null;
+let _stockHistoryCacheKey = null;
 
 function invalidateStockCache() {
     _stockCache = null;
     _stockCacheKey = null;
+    _stockHistoryCache = null;
+    _stockHistoryCacheKey = null;
 }
 window.invalidateStockCache = invalidateStockCache;
+
+function getLiveProductWhStock(p, targetWH) {
+    if (!p) return 0;
+    if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+        let varSum = 0;
+        p.variants.forEach(v => {
+            if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[targetWH] !== undefined) {
+                varSum += parseFloat(v.warehouseStocks[targetWH]) || 0;
+            } else if (targetWH === 'المخزن الرئيسي') {
+                varSum += parseFloat(v.stock) || 0;
+            }
+        });
+        return varSum;
+    }
+    if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[targetWH] !== undefined) {
+        return parseFloat(p.warehouseStocks[targetWH]) || 0;
+    }
+    if (targetWH === 'المخزن الرئيسي') {
+        return parseFloat(p.stock) || 0;
+    }
+    return 0;
+}
 
 function getWarehouseStock(productName, warehouseName, startDate = null, endDate = null) {
     if (!productName) return 0;
@@ -1253,43 +1739,27 @@ function getWarehouseStock(productName, warehouseName, startDate = null, endDate
     const p = productsDB.find(prod => prod && (prod.name === productName || prod.name?.trim() === productName.trim()));
     if (!p) return 0;
 
-    // إذا لم يكن هناك فلتر تاريخ، نرجع الرصيد الفعلي المحدث والمحفوظ للصنف في هذا المخزن مباشرة
-    if (!startDate && !endDate) {
-        if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
-            let varSum = 0;
-            p.variants.forEach(v => {
-                if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[targetWH] !== undefined) {
-                    varSum += parseFloat(v.warehouseStocks[targetWH]) || 0;
-                } else if (targetWH === 'المخزن الرئيسي') {
-                    varSum += parseFloat(v.stock) || 0;
-                }
-            });
-            return varSum;
-        }
+    const today = new Date();
+    const todayISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-        if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[targetWH] !== undefined) {
-            return parseFloat(p.warehouseStocks[targetWH]) || 0;
-        }
-        if (targetWH === 'المخزن الرئيسي') {
-            return parseFloat(p.stock) || 0;
-        }
-        return 0;
+    // إذا لم يكن هناك تاريخ نهاية أو كان تاريخ النهاية هو اليوم أو في المستقبل، نرجع الرصيد الفعلي الحي
+    if (!endDate || endDate >= todayISO) {
+        return getLiveProductWhStock(p, targetWH);
     }
 
-    const cacheKey = `${startDate || ''}_${endDate || ''}_${transactions.length}_${productsDB.length}`;
-    if (!_stockCache || _stockCacheKey !== cacheKey) {
-        _stockCache = {};
-        _stockCacheKey = cacheKey;
+    // إذا كان تاريخ النهاية في الماضي، نحسب الرصيد التاريخي بأثر رجعي من الرصيد الحالي بطرح الحركات التي حدثت بعد تاريخ النهاية
+    const cacheKey = `${endDate}_${transactions.length}_${productsDB.length}`;
+    if (!_stockHistoryCache || _stockHistoryCacheKey !== cacheKey) {
+        _stockHistoryCache = {};
+        _stockHistoryCacheKey = cacheKey;
 
         const prodIndex = {};
-        const globalChangeMap = {};
         productsDB.forEach(prod => {
-            if (prod.name) {
+            if (prod && prod.name) {
                 const n = prod.name.trim();
                 prodIndex[n] = prod;
                 prodIndex[n.toLowerCase()] = prod;
-                _stockCache[n] = {};
-                globalChangeMap[n] = 0;
+                _stockHistoryCache[n] = {};
             }
         });
 
@@ -1310,8 +1780,8 @@ function getWarehouseStock(productName, warehouseName, startDate = null, endDate
                 tDateISO = tDateISO.slice(0, 10);
             }
 
-            if (startDate && tDateISO < startDate) continue;
-            if (endDate && tDateISO > endDate) continue;
+            // الحركات التي تمت بعد تاريخ النهاية فقط هي التي غيرت الرصيد من ذلك التاريخ إلى رصيد اليوم
+            if (tDateISO <= endDate) continue;
 
             let factor = 1;
             if (pRef.units && t.unit) {
@@ -1330,29 +1800,27 @@ function getWarehouseStock(productName, warehouseName, startDate = null, endDate
             else if (type.includes('مرتجع شراء')) change = -qty;
             else if (type.includes('تسوية')) change = qty;
 
-            if (!type.includes('تحويل')) {
-                globalChangeMap[pName] += change;
-            }
+            if (!_stockHistoryCache[pName]) _stockHistoryCache[pName] = {};
+            if (!_stockHistoryCache[pName][tWH]) _stockHistoryCache[pName][tWH] = 0;
+            _stockHistoryCache[pName][tWH] += change;
 
-            if (!_stockCache[pName][tWH]) _stockCache[pName][tWH] = 0;
-            _stockCache[pName][tWH] += change;
-
-            if (type.includes('تحويل')) {
+            if (type.includes('تحويل') && t.transferStatus === 'received') {
                 const parts = (t.partner || '').split(' -> ');
                 if (parts.length === 2) {
                     const wTo = parts[1].trim();
                     const wFrom = parts[0].trim();
-                    if (!_stockCache[pName][wTo]) _stockCache[pName][wTo] = 0;
-                    _stockCache[pName][wTo] += qty;
-                    if (!_stockCache[pName][wFrom]) _stockCache[pName][wFrom] = 0;
-                    _stockCache[pName][wFrom] -= qty;
+                    if (!_stockHistoryCache[pName][wTo]) _stockHistoryCache[pName][wTo] = 0;
+                    _stockHistoryCache[pName][wTo] += qty;
+                    if (!_stockHistoryCache[pName][wFrom]) _stockHistoryCache[pName][wFrom] = 0;
+                    _stockHistoryCache[pName][wFrom] -= qty;
                 }
             }
         }
     }
 
-    const pStocks = _stockCache[(productName || '').trim()];
-    return pStocks ? (pStocks[targetWH] || 0) : 0;
+    const currentLive = getLiveProductWhStock(p, targetWH);
+    const postEndDateChange = (_stockHistoryCache[(p.name || '').trim()] && _stockHistoryCache[(p.name || '').trim()][targetWH]) || 0;
+    return currentLive - postEndDateChange;
 }
 
 function showInvDetails(id) {

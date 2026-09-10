@@ -18,11 +18,13 @@
     let selectedInquiryWarehouse = 'all'; // 'all' | warehouseName (تحديد المخزن لعرض تفاصيل أرصدته بالجدول أدناه)
     let isColCustomizerOpen = false;
 
-    // الإعدادات الافتراضية لأعمدة جدول التشكيلات التفصيلي
+    let inquiryViewMode = (typeof getStore === 'function' ? getStore('pos_inquiry_view_mode') : null) || 'horizontal';
+
+    // الإعدادات الافتراضية لأعمدة جدول التشكيلات التفصيلي (اللون أولاً ثم المقاس)
     const defaultInquiryCols = {
         index: true,          // # (م)
-        size: true,           // المقاس
-        color: true,          // اللون
+        color: true,          // اللون (العمود الأول)
+        size: true,           // المقاس (العمود الثاني)
         whStock: true,        // رصيد المخزن المحدد / المخازن
         branchesTotal: true,  // إجمالي الفروع
         totalStock: true,     // الرصيد الكلي
@@ -97,6 +99,30 @@
         } catch (e) {
             return false;
         }
+    }
+
+    /**
+     * ترتيب منطقي وذكي للمقاسات (حسب الأحرف والأرقام)
+     */
+    function getInquirySizeWeight(s) {
+        if (typeof getSizeWeight === 'function') return getSizeWeight(s);
+        if (typeof window.getSizeWeight === 'function') return window.getSizeWeight(s);
+        if (!s) return 999;
+        let str = String(s).toUpperCase().trim();
+        if (str === 'XXS') return 0;
+        if (str === 'XS') return 1;
+        if (str === 'S' || str === 'SMALL') return 2;
+        if (str === 'M' || str === 'MEDIUM') return 3;
+        if (str === 'L' || str === 'LARGE') return 4;
+        if (str === 'XL') return 5;
+        if (str === 'XXL' || str === '2XL') return 6;
+        if (str === 'XXXL' || str === '3XL') return 7;
+        if (str === '4XL') return 8;
+        if (str === '5XL') return 9;
+        if (str === '6XL') return 10;
+        let num = parseFloat(str);
+        if (!isNaN(num)) return 100 + num;
+        return 900;
     }
 
     /**
@@ -181,10 +207,10 @@
             modal.className = 'confirm-modal-overlay';
             modal.style.cssText = `
                 position: fixed; inset: 0; z-index: 99999999;
-                background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(6px);
+                background: rgba(15, 23, 42, 0.8);
                 display: flex; align-items: center; justify-content: center;
                 direction: rtl; font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
-                animation: fadeIn 0.25s ease-out;
+                animation: fadeIn 0.15s ease-out;
             `;
             document.body.appendChild(modal);
         }
@@ -241,8 +267,9 @@
         const variants = (p.variants && Array.isArray(p.variants)) ? p.variants : [];
         const hasVariants = variants.length > 0;
 
-        // استخراج المقاسات والألوان المتاحة
+        // استخراج المقاسات والألوان المتاحة وترتيب المقاسات منطقياً
         const allSizes = [...new Set(variants.map(v => v.size).filter(s => s && String(s).trim() !== '' && String(s).trim() !== '-'))];
+        allSizes.sort((a, b) => getInquirySizeWeight(a) - getInquirySizeWeight(b));
         const allColors = [...new Set(variants.map(v => v.color).filter(c => c && String(c).trim() !== '' && String(c).trim() !== '-'))];
 
         modal.innerHTML = `
@@ -422,7 +449,7 @@
                     let st = 0;
                     if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[whName] !== undefined) {
                         st = parseFloat(v.warehouseStocks[whName]) || 0;
-                    } else if (whName === 'المخزن الرئيسي' || !v.warehouseStocks) {
+                    } else if (whName === 'المخزن الرئيسي') {
                         st = parseFloat(v.stock) || 0;
                     }
                     availQty += st;
@@ -432,7 +459,7 @@
                     availQty = getWarehouseStock(p.name, whName);
                 } else if (p.warehouseStocks && p.warehouseStocks[whName] !== undefined) {
                     availQty = parseFloat(p.warehouseStocks[whName]) || 0;
-                } else if (whName === 'المخزن الرئيسي' || !p.warehouseStocks) {
+                } else if (whName === 'المخزن الرئيسي') {
                     availQty = parseFloat(p.stock) || 0;
                 }
             }
@@ -508,17 +535,6 @@
                         <span>👗</span> فلترة الأرصدة:
                     </span>
                     
-                    ${allSizes.length > 0 ? `
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <label style="font-weight: 800; font-size: 0.82rem; color: #047857;">المقاس:</label>
-                        <select onchange="window.setInquiryVariantFilter('size', this.value)"
-                            style="padding: 6px 12px; border-radius: 8px; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer;">
-                            <option value="all" ${selectedInquirySize === 'all' ? 'selected' : ''}>كل المقاسات (${allSizes.length})</option>
-                            ${sizeOptions}
-                        </select>
-                    </div>
-                    ` : ''}
-
                     ${allColors.length > 0 ? `
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <label style="font-weight: 800; font-size: 0.82rem; color: #1d4ed8;">اللون:</label>
@@ -526,6 +542,17 @@
                             style="padding: 6px 12px; border-radius: 8px; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer;">
                             <option value="all" ${selectedInquiryColor === 'all' ? 'selected' : ''}>كل الألوان (${allColors.length})</option>
                             ${colorOptions}
+                        </select>
+                    </div>
+                    ` : ''}
+
+                    ${allSizes.length > 0 ? `
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <label style="font-weight: 800; font-size: 0.82rem; color: #047857;">المقاس:</label>
+                        <select onchange="window.setInquiryVariantFilter('size', this.value)"
+                            style="padding: 6px 12px; border-radius: 8px; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer;">
+                            <option value="all" ${selectedInquirySize === 'all' ? 'selected' : ''}>كل المقاسات (${allSizes.length})</option>
+                            ${sizeOptions}
                         </select>
                     </div>
                     ` : ''}
@@ -547,16 +574,22 @@
             const mainStoreName = 'المخزن الرئيسي';
             const branches = whList.filter(w => w !== mainStoreName);
             const showCost = shouldShowInquiryCostsAndWholesale();
-            
+            const targetWh = isSingleWh ? selectedInquiryWarehouse : (currentUserWh || mainStoreName);
+
+            // =========================================================
+            // 1. الوضع الرأسي (Detailed Table View): اللون أولاً ثم المقاس
+            // =========================================================
             let thHtml = '<tr>';
             if (cols.index) {
-                thHtml += `<th style="padding: 8px 6px; width: 35px; text-align: center;">#</th>`;
+                thHtml += `<th style="padding: 8px 6px; width: 40px; text-align: center;">#</th>`;
             }
-            if (cols.size && allSizes.length > 0) {
-                thHtml += `<th style="padding: 8px 6px; text-align: center;">المقاس</th>`;
-            }
+            // ✅ اللون أولاً بحجم ملموم ومضبوط
             if (cols.color && allColors.length > 0) {
-                thHtml += `<th style="padding: 8px 6px; text-align: center;">اللون</th>`;
+                thHtml += `<th style="padding: 8px 6px; text-align: center; width: 85px; max-width: 95px; color: #1d4ed8; background: #eff6ff;">اللون</th>`;
+            }
+            // ✅ المقاس ثانياً بعد اللون
+            if (cols.size && allSizes.length > 0) {
+                thHtml += `<th style="padding: 8px 6px; text-align: center; width: 85px; max-width: 95px; color: #047857; background: #ecfdf5;">المقاس</th>`;
             }
 
             if (cols.whStock) {
@@ -678,13 +711,19 @@
 
                     let rowTds = '';
                     if (cols.index) {
-                        rowTds += `<td style="padding: 6px; text-align: center; color: #64748b; font-weight: bold;">${idx + 1}</td>`;
+                        rowTds += `<td style="padding: 6px; text-align: center; color: #64748b; font-weight: bold; width: 40px;">${idx + 1}</td>`;
                     }
-                    if (cols.size && allSizes.length > 0) {
-                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: 900; color: #047857;"><span style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 1px 6px; border-radius: 6px;">${v.size || 'قياسي'}</span></td>`;
-                    }
+                    // ✅ اللون أولاً بحجم ملموم ومضبوط
                     if (cols.color && allColors.length > 0) {
-                        rowTds += `<td style="padding: 6px; text-align: center; font-weight: 900; color: #1d4ed8;"><span style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1px 6px; border-radius: 6px;">${v.color || 'موحد'}</span></td>`;
+                        rowTds += `<td style="padding: 6px; text-align: center; width: 85px; max-width: 95px;">
+                            <span style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; font-weight: 900; font-size: 0.82rem; padding: 2px 8px; border-radius: 6px; display: inline-block; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${v.color || 'موحد'}">${v.color || 'موحد'}</span>
+                        </td>`;
+                    }
+                    // ✅ المقاس ثانياً بعد اللون
+                    if (cols.size && allSizes.length > 0) {
+                        rowTds += `<td style="padding: 6px; text-align: center; width: 85px; max-width: 95px;">
+                            <span style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; font-weight: 900; font-size: 0.82rem; padding: 2px 8px; border-radius: 6px; display: inline-block; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${v.size || 'قياسي'}">${v.size || 'قياسي'}</span>
+                        </td>`;
                     }
 
                     if (cols.whStock) {
@@ -742,6 +781,98 @@
                 }).join('');
             }
 
+            // =========================================================
+            // 2. الوضع الأفقي (Horizontal Matrix View): الألوان ثم المقاسات أفقياً كما في الرسمة
+            // =========================================================
+            let matrixHtml = '';
+            if (inquiryViewMode === 'horizontal') {
+                const matrixSizes = (allSizes.length > 0) ? allSizes : ['عام'];
+                const matrixColors = (allColors.length > 0) ? allColors : ['موحد'];
+
+                let matrixTh = `
+                    <tr style="background: #f8fafc; color: #334155; font-size: 0.92rem; border-bottom: 2px solid #cbd5e1;">
+                        <th style="padding: 10px 12px; width: 105px; max-width: 115px; text-align: center; color: #1e40af; background: #eff6ff; font-weight: 900; border-left: 1.5px solid #cbd5e1;">الالوان</th>
+                        <th colspan="${matrixSizes.length}" style="padding: 10px 12px; text-align: center; color: #065f46; background: #ecfdf5; font-weight: 900; letter-spacing: 1px;">مقاس</th>
+                    </tr>
+                `;
+
+                let matrixRows = matrixColors.map(c => {
+                    let sizeCells = matrixSizes.map(s => {
+                        // البحث عن التشكيلة المطابقة للون والمقاس
+                        const vMatch = variants.find(vr => {
+                            const matchColor = (allColors.length > 0) ? (vr.color || '').trim() === c.trim() : true;
+                            const matchSize = (allSizes.length > 0) ? (vr.size || '').trim() === s.trim() : true;
+                            return matchColor && matchSize;
+                        });
+
+                        if (vMatch) {
+                            const vIdx = variants.indexOf(vMatch);
+                            let sQty = 0;
+                            if (vMatch.warehouseStocks && typeof vMatch.warehouseStocks === 'object' && vMatch.warehouseStocks[targetWh] !== undefined) {
+                                sQty = parseFloat(vMatch.warehouseStocks[targetWh]) || 0;
+                            } else if (targetWh === mainStoreName || !vMatch.warehouseStocks) {
+                                sQty = parseFloat(vMatch.stock !== undefined ? vMatch.stock : 0) || 0;
+                            }
+
+                            if (sQty > 0) {
+                                return `
+                                    <td style="padding: 8px 6px; text-align: center; border-left: 1px solid #f1f5f9; min-width: 55px;">
+                                        <button type="button" onclick="window.addInquiryVariantByIndex(${vIdx})" 
+                                            title="انقر لإضافة (${c !== 'موحد' ? c + ' - ' : ''}مقاس ${s}) للسلة [المتاح بمخزن ${targetWh}: ${sQty}]"
+                                            style="background: #ecfdf5; color: #047857; border: 1.5px solid #10b981; border-radius: 8px; padding: 6px 14px; font-weight: 900; font-size: 0.98rem; cursor: pointer; transition: all 0.15s; min-width: 48px; box-shadow: 0 2px 5px rgba(16,185,129,0.18);"
+                                            onmouseover="this.style.background='#10b981'; this.style.color='#ffffff'; this.style.transform='scale(1.05)';"
+                                            onmouseout="this.style.background='#ecfdf5'; this.style.color='#047857'; this.style.transform='scale(1)';">
+                                            ${s}
+                                        </button>
+                                    </td>
+                                `;
+                            } else {
+                                return `
+                                    <td style="padding: 8px 6px; text-align: center; border-left: 1px solid #f8fafc; min-width: 55px;"></td>
+                                `;
+                            }
+                        } else {
+                            return `<td style="padding: 8px 6px; text-align: center; border-left: 1px solid #f8fafc; min-width: 55px;"></td>`;
+                        }
+                    }).join('');
+
+                    return `
+                        <tr style="border-bottom: 1.5px solid #e2e8f0; transition: background 0.15s;" onmouseover="this.style.background='#fbfcfd';" onmouseout="this.style.background='#ffffff';">
+                            <td style="padding: 8px 10px; text-align: center; width: 105px; max-width: 115px; background: #fafafa; border-left: 1.5px solid #cbd5e1;">
+                                <span style="background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1d4ed8; font-weight: 900; font-size: 0.88rem; padding: 4px 12px; border-radius: 8px; display: inline-block; max-width: 95px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c}">${c}</span>
+                            </td>
+                            ${sizeCells}
+                        </tr>
+                    `;
+                }).join('');
+
+                matrixHtml = `
+                    <div style="max-height: 280px; overflow-y: auto; overflow-x: auto; border-radius: 0 0 14px 14px;" class="fast-scrollbar">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; white-space: nowrap;">
+                            <thead style="background: #f8fafc; color: #475569; position: sticky; top: 0; z-index: 2;">
+                                ${matrixTh}
+                            </thead>
+                            <tbody>
+                                ${matrixRows}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            let verticalTableHtml = `
+                <div style="max-height: 260px; overflow-y: auto; overflow-x: auto; border-radius: 0 0 14px 14px;" class="fast-scrollbar">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; white-space: nowrap;">
+                        <thead style="background: #f8fafc; color: #475569; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem;">
+                            ${thHtml}
+                        </thead>
+                        <tbody>
+                            ${trsHtml}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
             const renderColCheckbox = (key, label, isChecked) => `
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 800; color: #334155; cursor: pointer; padding: 4px 6px; border-radius: 6px; transition: 0.15s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
                     <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.toggleInquiryColVisibility('${key}', this.checked)" style="width: 16px; height: 16px; accent-color: #059669; cursor: pointer;">
@@ -750,13 +881,28 @@
             `;
 
             variantsTableHtml = `
-                <!-- 1.5 جدول التشكيلات التفصيلي للفاشون مع دعم تخصيص الأعمدة وتحديد المخزن -->
+                <!-- 1.5 جدول التشكيلات للفاشون مع دعم العرض الأفقي والرأسي وتخصيص الأعمدة وتحديد المخزن -->
                 <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 14px; overflow: visible; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
                     <div style="background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 10px 16px; border-bottom: 1.5px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-radius: 14px 14px 0 0; position: relative;">
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <span style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
-                                <span>👕</span> تفاصيل الأرصدة ${matchedVars.length !== variants.length ? '(المفلترة)' : ''} للمقاسات والألوان
+                                <span>👕</span> تفاصيل الأرصدة للمقاسات والألوان
                             </span>
+
+                            <!-- أزرار التبديل الذكية بين العرض الأفقي والرأسي -->
+                            <div style="display: inline-flex; align-items: center; background: #e2e8f0; padding: 2px; border-radius: 8px; border: 1px solid #cbd5e1; gap: 2px;">
+                                <button type="button" onclick="window.setInquiryViewMode('horizontal')" 
+                                    title="عرض المقاسات أفقياً بجانب كل لون"
+                                    style="background: ${inquiryViewMode === 'horizontal' ? '#059669' : 'transparent'}; color: ${inquiryViewMode === 'horizontal' ? '#ffffff' : '#334155'}; border: none; border-radius: 6px; padding: 4px 10px; font-weight: 900; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: 0.15s;">
+                                    <span>📊</span> المقاسات أفقي
+                                </button>
+                                <button type="button" onclick="window.setInquiryViewMode('vertical')" 
+                                    title="عرض تفصيلي رأسي مع خيارات تخصيص الأعمدة"
+                                    style="background: ${inquiryViewMode === 'vertical' ? '#059669' : 'transparent'}; color: ${inquiryViewMode === 'vertical' ? '#ffffff' : '#334155'}; border: none; border-radius: 6px; padding: 4px 10px; font-weight: 900; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: 0.15s;">
+                                    <span>📑</span> تفصيلي رأسي
+                                </button>
+                            </div>
+
                             ${isSingleWh ? `
                                 <span style="background: #fef08a; color: #854d0e; border: 1.5px solid #fde047; padding: 2px 10px; border-radius: 8px; font-weight: 900; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
                                     🏢 المخزن المحدد: ${selectedInquiryWarehouse}
@@ -764,54 +910,51 @@
                                 </span>
                             ` : `
                                 <span style="background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; padding: 2px 10px; border-radius: 8px; font-weight: 800; font-size: 0.78rem;">
-                                    🏢 كل المخازن والفروع (المخزن الحالي مميز بالأصفر)
+                                    🏢 المخزن المعروض: ${targetWh} (انقر أي مخزن بالأعلى للتغيير)
                                 </span>
                             `}
                         </div>
 
-                        <!-- زر وقائمة تخصيص الأعمدة -->
-                        <div style="position: relative;">
-                            <button type="button" id="inquiryColCustomizerBtn" onclick="window.toggleInquiryColCustomizer(event)" 
-                                style="background: #ffffff; color: #334155; border: 1.5px solid #cbd5e1; padding: 5px 12px; border-radius: 8px; font-weight: 800; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: 0.2s;"
-                                onmouseover="this.style.borderColor='#059669'; this.style.color='#047857';"
-                                onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#334155';">
-                                <span>⚙️</span> تخصيص الأعمدة
-                            </button>
+                        ${inquiryViewMode === 'vertical' ? `
+                            <!-- زر وقائمة تخصيص الأعمدة في الوضع الرأسي -->
+                            <div style="position: relative;">
+                                <button type="button" id="inquiryColCustomizerBtn" onclick="window.toggleInquiryColCustomizer(event)" 
+                                    style="background: #ffffff; color: #334155; border: 1.5px solid #cbd5e1; padding: 5px 12px; border-radius: 8px; font-weight: 800; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: 0.2s;"
+                                    onmouseover="this.style.borderColor='#059669'; this.style.color='#047857';"
+                                    onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#334155';">
+                                    <span>⚙️</span> تخصيص الأعمدة
+                                </button>
 
-                            <div id="inquiryColDropdown" style="display: ${isColCustomizerOpen ? 'block' : 'none'}; position: absolute; left: 0; top: 38px; background: #ffffff; border: 2px solid #cbd5e1; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); padding: 12px 14px; min-width: 230px; z-index: 1000; text-align: right;" onclick="event.stopPropagation();">
-                                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 8px;">
-                                    <span style="font-weight: 900; color: #0f172a; font-size: 0.85rem;">⚙️ تخصيص الأعمدة</span>
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <button type="button" onclick="window.resetInquiryColsToDefault()" style="background: none; border: none; color: #059669; font-size: 0.75rem; font-weight: 800; cursor: pointer; text-decoration: underline;">الافتراضي</button>
-                                        <button type="button" onclick="window.toggleInquiryColCustomizer(event)" style="background: none; border: none; color: #64748b; font-size: 0.95rem; font-weight: bold; cursor: pointer; padding: 0 4px;">✕</button>
+                                <div id="inquiryColDropdown" style="display: ${isColCustomizerOpen ? 'block' : 'none'}; position: absolute; left: 0; top: 38px; background: #ffffff; border: 2px solid #cbd5e1; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); padding: 12px 14px; min-width: 230px; z-index: 1000; text-align: right;" onclick="event.stopPropagation();">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 8px;">
+                                        <span style="font-weight: 900; color: #0f172a; font-size: 0.85rem;">⚙️ تخصيص الأعمدة</span>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <button type="button" onclick="window.resetInquiryColsToDefault()" style="background: none; border: none; color: #059669; font-size: 0.75rem; font-weight: 800; cursor: pointer; text-decoration: underline;">الافتراضي</button>
+                                            <button type="button" onclick="window.toggleInquiryColCustomizer(event)" style="background: none; border: none; color: #64748b; font-size: 0.95rem; font-weight: bold; cursor: pointer; padding: 0 4px;">✕</button>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 4px; max-height: 250px; overflow-y: auto;" class="fast-scrollbar">
+                                        ${renderColCheckbox('index', 'م (#)', cols.index)}
+                                        ${allColors.length > 0 ? renderColCheckbox('color', 'اللون (العمود الأول)', cols.color) : ''}
+                                        ${allSizes.length > 0 ? renderColCheckbox('size', 'المقاس (العمود الثاني)', cols.size) : ''}
+                                        ${renderColCheckbox('whStock', 'رصيد المخزن المحدد / المخازن', cols.whStock)}
+                                        ${!isSingleWh ? renderColCheckbox('branchesTotal', 'إجمالي الفروع', cols.branchesTotal) : ''}
+                                        ${renderColCheckbox('totalStock', 'الرصيد الكلي', cols.totalStock)}
+                                        ${renderColCheckbox('retailPrice', 'سعر القطاعي', cols.retailPrice)}
+                                        ${showCost ? renderColCheckbox('wholesalePrice', 'سعر الجملة', cols.wholesalePrice) : ''}
+                                        ${renderColCheckbox('barcode', 'الباركود الفريد', cols.barcode)}
+                                        ${renderColCheckbox('action', 'زر الإضافة (سلة)', cols.action)}
                                     </div>
                                 </div>
-                                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 250px; overflow-y: auto;" class="fast-scrollbar">
-                                    ${renderColCheckbox('index', 'م (#)', cols.index)}
-                                    ${allSizes.length > 0 ? renderColCheckbox('size', 'المقاس', cols.size) : ''}
-                                    ${allColors.length > 0 ? renderColCheckbox('color', 'اللون', cols.color) : ''}
-                                    ${renderColCheckbox('whStock', 'رصيد المخزن المحدد / المخازن', cols.whStock)}
-                                    ${!isSingleWh ? renderColCheckbox('branchesTotal', 'إجمالي الفروع', cols.branchesTotal) : ''}
-                                    ${renderColCheckbox('totalStock', 'الرصيد الكلي', cols.totalStock)}
-                                    ${renderColCheckbox('retailPrice', 'سعر القطاعي', cols.retailPrice)}
-                                    ${showCost ? renderColCheckbox('wholesalePrice', 'سعر الجملة', cols.wholesalePrice) : ''}
-                                    ${renderColCheckbox('barcode', 'الباركود الفريد', cols.barcode)}
-                                    ${renderColCheckbox('action', 'زر الإضافة (سلة)', cols.action)}
-                                </div>
                             </div>
-                        </div>
+                        ` : `
+                            <span style="font-size: 0.78rem; color: #065f46; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 8px; font-weight: 800;">
+                                💡 انقر على المقاس المتوفر لإضافته للسلة فوراً
+                            </span>
+                        `}
                     </div>
 
-                    <div style="max-height: 260px; overflow-y: auto; overflow-x: auto; border-radius: 0 0 14px 14px;" class="fast-scrollbar">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 600px; white-space: nowrap;">
-                            <thead style="background: #f8fafc; color: #475569; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem;">
-                                ${thHtml}
-                            </thead>
-                            <tbody>
-                                ${trsHtml}
-                            </tbody>
-                        </table>
-                    </div>
+                    ${inquiryViewMode === 'horizontal' ? matrixHtml : verticalTableHtml}
                 </div>
             `;
         }
@@ -983,7 +1126,7 @@
      */
     function renderHistoryTabContent(p) {
         const allTx = (typeof transactions !== 'undefined' && Array.isArray(transactions))
-            ? transactions.filter(t => t.product === p.name || t.productName === p.name || t.id == p.id || t.productId == p.id)
+            ? transactions.filter(t => (t.product === p.name || t.productName === p.name || t.id == p.id || t.productId == p.id) && !(t.type && t.type.includes('تحويل') && t.transferStatus === 'rejected'))
             : [];
 
         if (allTx.length === 0) {
@@ -1011,18 +1154,29 @@
             let typeBg = '#ecfdf5';
             let typeColor = '#047857';
 
-            if (rawType.includes('شراء') || rawType.includes('purchase')) {
+            if (rawType.includes('مرتجع') || rawType.includes('return')) {
+                const isPurRet = rawType.includes('شراء') || rawType.includes('purchase');
+                typeLabel = isPurRet ? 'مرتجع شراء' : 'مرتجع بيع';
+                typeBg = '#fff7ed';
+                typeColor = '#c2410c';
+            } else if (rawType.includes('شراء') || rawType.includes('purchase')) {
                 typeLabel = 'شراء';
                 typeBg = '#eff6ff';
                 typeColor = '#1d4ed8';
-            } else if (rawType.includes('مرتجع') || rawType.includes('return')) {
-                typeLabel = 'مرتجع';
-                typeBg = '#fff7ed';
-                typeColor = '#c2410c';
             } else if (rawType.includes('تحويل') || rawType.includes('transfer')) {
-                typeLabel = 'تحويل مخزن';
-                typeBg = '#faf5ff';
-                typeColor = '#7e22ce';
+                if (tx.transferStatus === 'pending') {
+                    typeLabel = 'تحويل مخزن (معلق ⏳)';
+                    typeBg = '#fef3c7';
+                    typeColor = '#b45309';
+                } else if (tx.transferStatus === 'rejected') {
+                    typeLabel = 'تحويل مخزن (مرفوض ❌)';
+                    typeBg = '#fee2e2';
+                    typeColor = '#b91c1c';
+                } else {
+                    typeLabel = 'تحويل مخزن (مستلم ✅)';
+                    typeBg = '#dcfce7';
+                    typeColor = '#15803d';
+                }
             } else if (rawType.includes('تسوية') || rawType.includes('adjustment')) {
                 typeLabel = 'تسوية مخزن';
                 typeBg = '#fefce8';
@@ -1036,7 +1190,7 @@
             const sSize = tx.size || tx.selectedSize || '-';
             const sColor = tx.color || tx.selectedColor || '-';
 
-            const isPurchase = rawType.includes('شراء') || rawType.includes('purchase');
+            const isPurchase = (rawType.includes('شراء') || rawType.includes('purchase')) && !rawType.includes('مرتجع بيع');
             const canViewCost = shouldShowInquiryCostsAndWholesale();
             const displayPrice = (isPurchase && !canViewCost)
                 ? `<span style="color: #94a3b8; font-size: 0.75rem; font-weight: 800;">🔒 محجوب</span>`
@@ -1045,8 +1199,11 @@
                 ? `<span style="color: #94a3b8; font-size: 0.75rem; font-weight: 800;">🔒 محجوب</span>`
                 : total.toFixed(2);
 
+            const hasInv = tx.invoiceId && String(tx.invoiceId) !== '-';
+
             return `
-                <tr style="border-bottom: 1px solid #f1f5f9; ${idx % 2 === 1 ? 'background: #fafafa;' : ''}">
+                <tr style="border-bottom: 1px solid #f1f5f9; ${idx % 2 === 1 ? 'background: #fafafa;' : ''} ${hasInv ? 'cursor: pointer;' : ''}"
+                    ${hasInv ? `title="اضغط لعرض أو طباعة الفاتورة #${tx.invoiceId}" onclick="if(typeof viewInvoiceItems==='function') viewInvoiceItems('${tx.invoiceId}', '${tx.type}')"` : ''}>
                     <td style="padding: 8px 10px; font-weight: 800; text-align: center; color: #64748b;">${idx + 1}</td>
                     <td style="padding: 8px 12px; font-weight: 800; color: #334155; font-size: 0.82rem; white-space: nowrap;">
                         ${tx.date || tx.dateISO || '-'}
@@ -1207,6 +1364,19 @@
         } else {
             selectedInquiryWarehouse = whName;
         }
+        renderInquiryModal();
+    };
+
+    /**
+     * تبديل وضع عرض المقاسات (أفقي مصفوفة أو رأسي تفصيلي) مع الحفظ التلقائي
+     */
+    window.setInquiryViewMode = function (mode) {
+        inquiryViewMode = mode;
+        try {
+            if (typeof setStore === 'function') {
+                setStore('pos_inquiry_view_mode', mode);
+            }
+        } catch (e) {}
         renderInquiryModal();
     };
 

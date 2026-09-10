@@ -19,7 +19,7 @@ async function initAppStore() {
         window.bayanDB = window.db;
     } else if (typeof Dexie !== 'undefined') {
         window.bayanDB = new Dexie("BayanDatabase");
-        window.bayanDB.version(100).stores({
+        window.bayanDB.version(101).stores({
             products: "++id, name, barcode, category",
             transactions: "++id, dateISO, type, partner, invoiceId",
             accounts: "++id, name, type, code",
@@ -29,7 +29,9 @@ async function initAppStore() {
             auditLogs: "++id, timestamp, action",
             backups: "++id, timestamp",
             wallpapers: "name",
-            treasuryAudit: "++id, date, category"
+            treasuryAudit: "++id, date, category",
+            syncQueue: "++id, timestamp, action, type, status",
+            warehouses: "++id, name"
         });
 
         try {
@@ -91,7 +93,13 @@ function setStore(key, value) {
     
     const dbInstance = window.bayanDB || window.db;
     if (dbInstance && dbInstance.settings) {
-        dbInstance.settings.put({ id: key, value: String(value) }).catch(err => {
+        const storedVal = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : String(value);
+        dbInstance.settings.put({ id: key, value: storedVal }).then(() => {
+            if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
+                // Trigger sync but without awaiting to not block UI
+                window.BayanNetworkHub.onDataSaved();
+            }
+        }).catch(err => {
             console.error(`❌ خطأ في حفظ الإعداد [${key}] داخل IndexedDB:`, err);
         });
     }

@@ -29,7 +29,155 @@
             }
         };
 
+        // 🏷️ توليد شارة ملونة ومميزة للجهاز وحرفه في جدول الفواتير
+        function getTerminalBadgeHtml(t) {
+            const rawTerminal = t.terminal || 'الجهاز الرئيسي 💻';
+            let letter = t.terminalLetter;
+            if (!letter) {
+                const match = rawTerminal.match(/\(([A-Z])\)/i);
+                if (match) letter = match[1].toUpperCase();
+                else if (rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master')) letter = 'MASTER';
+                else letter = 'A';
+            }
+
+            const isMaster = letter === 'MASTER' || rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master');
+
+            // ألوان وهوية بصرية مميزة لكل جهاز وحرف
+            const colorMap = {
+                'MASTER': { bg: '#ecfdf5', border: '#10b981', color: '#065f46', dot: '#10b981', label: '💻 الرئيسي (ماستر)' },
+                'A': { bg: '#f5f3ff', border: '#8b5cf6', color: '#5b21b6', dot: '#7c3aed', label: '📱 فرعي (A)' },
+                'B': { bg: '#fff7ed', border: '#f97316', color: '#9a3412', dot: '#ea580c', label: '📱 فرعي (B)' },
+                'C': { bg: '#ecfeff', border: '#06b6d4', color: '#155e75', dot: '#0891b2', label: '📱 فرعي (C)' },
+                'D': { bg: '#fff1f2', border: '#f43f5e', color: '#9f1239', dot: '#e11d48', label: '📱 فرعي (D)' },
+                'E': { bg: '#fefce8', border: '#eab308', color: '#854d0e', dot: '#ca8a04', label: '📱 فرعي (E)' }
+            };
+
+            const style = colorMap[letter] || { bg: '#f8fafc', border: '#94a3b8', color: '#334155', dot: '#64748b', label: rawTerminal };
+            const label = isMaster ? '💻 الرئيسي' : (t.terminal || style.label);
+            const safeInvId = String(t.invoiceId || t.id || '').replace(/'/g, "\\'");
+
+            return `
+                <div style="display:inline-flex; align-items:center; gap:4px; margin-top:2px;">
+                    <span style="font-size:0.73rem; background:${style.bg}; color:${style.color}; border:1px solid ${style.border}; padding:1px 6px; border-radius:6px; font-weight:800; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.04);" title="${rawTerminal}">
+                        <span style="width:6px; height:6px; border-radius:50%; background:${style.dot}; display:inline-block;"></span>
+                        <span>${label}</span>
+                    </span>
+                    <button type="button" onclick="event.stopPropagation(); window.showTerminalInfoModal('${safeInvId}')" 
+                        style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:50%; width:18px; height:18px; font-size:0.68rem; font-weight:900; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; padding:0; line-height:1; transition:0.2s;" 
+                        title="تفاصيل جهاز البيع والمزامنة">❓</button>
+                </div>
+            `;
+        }
+
+        // ❓ نافذة الاستعلام التوضيحية لجهاز إصدار الفاتورة
+        window.showTerminalInfoModal = function(invoiceId) {
+            if (!window.transactions) return;
+            const tx = transactions.find(t => String(t.invoiceId || t.id) === String(invoiceId) && t.isInvoiceHead)
+                || transactions.find(t => String(t.invoiceId || t.id) === String(invoiceId));
+            if (!tx) {
+                if (typeof showToast === 'function') showToast('لم يتم العثور على بيانات الفاتورة', 'warning');
+                return;
+            }
+
+            const rawTerminal = tx.terminal || 'الجهاز الرئيسي 💻';
+            let letter = tx.terminalLetter;
+            if (!letter) {
+                const match = rawTerminal.match(/\(([A-Z])\)/i);
+                if (match) letter = match[1].toUpperCase();
+                else if (rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master')) letter = 'MASTER';
+                else letter = 'A';
+            }
+
+            const isMaster = letter === 'MASTER' || rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master');
+            const order = tx.terminalOrder != null ? tx.terminalOrder : (isMaster ? 0 : (letter === 'A' ? 1 : (letter === 'B' ? 2 : (letter === 'C' ? 3 : 1))));
+
+            let syncOrderDescription = '';
+            if (isMaster) {
+                syncOrderDescription = 'الجهاز الماستر الرئيسي (سيرفر المنظومة المضيف لقاعدة البيانات المركزية)';
+            } else if (order === 1 || letter === 'A') {
+                syncOrderDescription = 'أول جهاز فرعي تم إقرانه ومزامنته مع المنظومة (كاشير فرعي 1)';
+            } else if (order === 2 || letter === 'B') {
+                syncOrderDescription = 'ثاني جهاز فرعي تم إقرانه ومزامنته مع المنظومة (كاشير فرعي 2)';
+            } else if (order === 3 || letter === 'C') {
+                syncOrderDescription = 'ثالث جهاز فرعي تم إقرانه ومزامنته مع المنظومة (كاشير فرعي 3)';
+            } else if (order === 4 || letter === 'D') {
+                syncOrderDescription = 'رابع جهاز فرعي تم إقرانه ومزامنته مع المنظومة (كاشير فرعي 4)';
+            } else {
+                syncOrderDescription = `جهاز فرعي مقترن ومزامن مع المنظومة (الترتيب: رقم ${order})`;
+            }
+
+            const modalId = 'terminalInfoDetailsModal';
+            let modal = document.getElementById(modalId);
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'confirm-modal-overlay';
+                modal.style.zIndex = '9999999999';
+                document.body.appendChild(modal);
+            }
+
+            modal.innerHTML = `
+                <div style="background:#ffffff; padding:28px 24px; border-radius:22px; width:460px; max-width:92%; text-align:center; box-shadow:0 25px 60px rgba(0,0,0,0.3); border:2px solid ${isMaster ? '#10b981' : '#7c3aed'}; direction:rtl; font-family:inherit; animation:fadeIn 0.2s ease;">
+                    <div style="font-size:2.8rem; margin-bottom:8px;">${isMaster ? '🖥️' : '📱'}</div>
+                    <h3 style="margin:0 0 6px; color:#0f172a; font-size:1.25rem; font-weight:900;">
+                        تفاصيل جهاز إصدار العملية
+                    </h3>
+                    <div style="color:#64748b; font-size:0.85rem; font-weight:700; margin-bottom:16px;">
+                        فاتورة رقم: <span style="font-family:monospace; color:#2563eb; font-weight:900;">#${tx.invoiceId || tx.id}</span>
+                    </div>
+
+                    <div style="background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:14px; padding:16px; margin-bottom:16px; text-align:right; font-size:0.88rem; line-height:1.7;">
+                        <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-weight:bold;">جهاز البيع / الإصدار:</span>
+                            <span style="font-weight:900; color:#0f172a;">${tx.terminal || (isMaster ? 'الجهاز الرئيسي 💻' : 'كاشير فرعي 📱')}</span>
+                        </div>
+
+                        <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-weight:bold;">الرمز الأبجدي للجهاز:</span>
+                            <span style="background:${isMaster ? '#10b981' : '#7c3aed'}; color:white; font-weight:900; padding:2px 10px; border-radius:6px; font-family:monospace; font-size:0.88rem;">
+                                ${letter}
+                            </span>
+                        </div>
+
+                        <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-weight:bold;">المستخدم / الكاشير:</span>
+                            <span style="font-weight:800; color:#1e293b;">👤 ${tx.user || '-'}</span>
+                        </div>
+
+                        <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-weight:bold;">المخزن / القسم:</span>
+                            <span style="font-weight:800; color:#047857;">🏢 ${tx.warehouse || 'المخزن الرئيسي'}</span>
+                        </div>
+
+                        <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-weight:bold;">تاريخ وتوقيت العملية:</span>
+                            <span style="font-weight:800; color:#475569; font-size:0.82rem;">${tx.date || ''} ${tx.timeISO || ''}</span>
+                        </div>
+
+                        ${tx.terminalId ? `
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-weight:bold;">معرّف الجهاز (Device ID):</span>
+                            <span style="font-family:monospace; color:#64748b; font-size:0.8rem;">${tx.terminalId}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <div style="background:${isMaster ? '#ecfdf5' : '#f5f3ff'}; border:1px solid ${isMaster ? '#a7f3d0' : '#ddd6fe'}; border-radius:12px; padding:12px 14px; margin-bottom:18px; text-align:right; font-size:0.84rem; color:${isMaster ? '#065f46' : '#5b21b6'}; font-weight:700; line-height:1.5;">
+                        ℹ️ <strong>حالة الجهاز في المنظومة:</strong><br>
+                        ${syncOrderDescription}
+                    </div>
+
+                    <button onclick="document.getElementById('${modalId}').remove()" style="background:#0f172a; color:#ffffff; border:none; padding:11px 30px; border-radius:12px; font-weight:bold; font-size:0.95rem; cursor:pointer; width:100%; transition:0.2s;">
+                        إغلاق النافذة
+                    </button>
+                </div>
+            `;
+        };
+
         window.accountBalancesCache = {};
+        window.invalidateAccountBalancesCache = function() {
+            window.accountBalancesCache = {};
+        };
 
         function getAccountBalance(name, excludeInvoiceId = null) {
             if (!name || (window.isGenericCashPartner && window.isGenericCashPartner(name))) return 0;
@@ -228,6 +376,9 @@
                         date: t.date,
                         dateISO: t.dateISO,
                         type: t.type,
+                        transferStatus: t.transferStatus || null,
+                        sourceWarehouse: t.sourceWarehouse || t.fromWarehouse || null,
+                        toWarehouse: t.toWarehouse || t.destWarehouse || null,
                         partner: t.partner,
                         method: t.method || t.paymentMethod,
                         user: t.user,
@@ -244,6 +395,10 @@
                         products: []
                     };
                 }
+
+                if (t.transferStatus) groups[key].transferStatus = t.transferStatus;
+                if (t.sourceWarehouse) groups[key].sourceWarehouse = t.sourceWarehouse;
+                if (t.toWarehouse) groups[key].toWarehouse = t.toWarehouse;
 
                 if (t.partner && (!groups[key].partner || groups[key].partner === 'عميل نقدي' || groups[key].partner === 'مورد نقدي')) {
                     groups[key].partner = t.partner;
@@ -391,7 +546,8 @@
             }
 
             if (searchProduct) {
-                rawData = rawData.filter(t => t.product && t.product.toLowerCase().includes(searchProduct));
+                const cleanProdQ = cleanAr(searchProduct);
+                rawData = rawData.filter(t => t.product && cleanAr(t.product).includes(cleanProdQ));
             }
 
             let finalData = [];
@@ -431,6 +587,11 @@
             let sumTotal = 0, sumPaid = 0, sumDebt = 0, sumProfit = 0;
 
             finalData.forEach(t => {
+                const isRejectedTransfer = t.type && t.type.includes('تحويل') && t.transferStatus === 'rejected';
+                if (isRejectedTransfer) {
+                    // التحويلات المرفوضة ملغاة ولا تدخل في إجماليات الفواتير المحاسبية
+                    return;
+                }
 
                 sumTotal += (parseFloat(t.total) || 0);
 
@@ -467,28 +628,19 @@
 
             if (document.getElementById('invSumProfit')) document.getElementById('invSumProfit').innerText = sumProfit.toFixed(2);
 
-            // إخفاء/إظهار كارت الأرباح بناءً على الصلاحيات
-
-            const hasProfitPerm = checkPermission('general_profits');
+            // إخفاء/إظهار كارت الأرباح وعمود الأرباح برمجياً وبهدوء تام بدون أي نوافذ تنبيه منبثقة
+            const hasProfitPerm = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
 
             const profitCard = document.getElementById('invProfitCard');
-
             if (profitCard) profitCard.style.display = hasProfitPerm ? 'flex' : 'none';
 
-            // إخفاء عمود الربح في الجدول برمجياً إذا لم يكن هناك صلاحية
-
-            invoicesColumnVisibility[5] = hasProfitPerm;
-
+            // تحديث استايلات الأعمدة (بدون المساس بمصفوفة تخصيص الأعمدة المحفوظة)
             updateInvoicesTableStyles();
 
-            // تحديث رؤوس الجدول يدوياً لضمان المطابقة الكاملة ومنع الترحيل
-
+            // تنظيف أي ستايلات display مضمنة قديمة على الرؤوس لضمان سيادة قواعد CSS العامة
             const invHeadCells = document.querySelectorAll('#invoicesMainTable thead th');
-
-            invHeadCells.forEach((th, idx) => {
-
-                if (invoicesColumnVisibility[idx] === false) th.style.display = 'none';
-                else th.style.display = '';
+            invHeadCells.forEach((th) => {
+                th.style.display = '';
             });
 
             let rowsHtml = '';
@@ -534,26 +686,40 @@
 
                 }
 
+                const isRejectedTransfer = t.type && t.type.includes('تحويل') && t.transferStatus === 'rejected';
+
                 const totalTextFinal = (t.total || t.price || 0);
 
                 let paid = (t.paid !== undefined) ? (typeof t.paid === 'number' ? t.paid.toFixed(2) : t.paid) : parseFloat(totalTextFinal || 0).toFixed(2);
 
-                const remaining = (t.remaining !== undefined) ? (typeof t.remaining === 'number' ? t.remaining.toFixed(2) : t.remaining) : 0;
+                let remaining = (t.remaining !== undefined) ? (typeof t.remaining === 'number' ? t.remaining.toFixed(2) : t.remaining) : 0;
 
                 // إذا كانت العملية تحويلاً مخزنياً، نفترض أنها مدفوعة بالكامل (عملية داخلية) حتى لا تظهر في مديونية الفواتير
-
                 if (t.type.includes('تحويل')) {
-                    paid = parseFloat(totalTextFinal || 0).toFixed(2);
+                    if (isRejectedTransfer) {
+                        paid = '-';
+                        remaining = '-';
+                    } else {
+                        paid = parseFloat(totalTextFinal || 0).toFixed(2);
+                    }
                 }
 
-                const isV = (idx) => invoicesColumnVisibility[idx] !== false;
+                const isV = (idx) => {
+                    if (idx === 5 && !hasProfitPerm) return false;
+                    return invoicesColumnVisibility[idx] !== false;
+                };
+
+                const displayTotalHtml = isRejectedTransfer
+                    ? `<span style="text-decoration:line-through; color:#94a3b8; font-weight:normal;">${parseFloat(totalTextFinal || 0).toFixed(2)}</span> <span style="color:#dc2626; font-size:0.75rem; font-weight:900;">(ملغي)</span>`
+                    : parseFloat(totalTextFinal || 0).toFixed(2);
 
                 rowsHtml += `
-                    <tr class="${isSelected ? 'selected-row' : ''}" onclick="selectInvoiceRow(${t.originalIndex})" ondblclick="if(window.viewSelectedInvoice) window.viewSelectedInvoice();">
+                    <tr class="${isSelected ? 'selected-row' : ''}" style="${isRejectedTransfer ? 'background:#fff5f5; opacity:0.85;' : ''}" data-orig-index="${t.originalIndex}" onclick="selectInvoiceRow(${t.originalIndex}, this)" ondblclick="if(window.viewSelectedInvoice) window.viewSelectedInvoice();">
                         <td class="col-inv-0" style="${isV(0) ? '' : 'display:none;'}"><input type="radio" name="invRad" ${isSelected ? 'checked' : ''}></td>
                         <td class="col-inv-1" style="${isV(1) ? '' : 'display:none;'}">
                             <div style="display:flex; flex-direction:row; gap:4px; align-items:center; justify-content:center; flex-wrap:wrap;">
                                 <span style="background:rgba(0,0,0,0.05); padding:2px 5px; border-radius:4px; font-weight:bold; font-size:0.75rem;">${t.invoiceId || '-'} ${t.is_returned ? '<span title="تم الإرجاع" style="color:#ef4444; margin-right:2px;">↩️</span>' : ''}</span>
+                                ${isRejectedTransfer ? '<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:1px 5px; font-size:0.7rem; border-radius:4px; font-weight:900;">ملغي ❌</span>' : ''}
                                 ${isSalesOrPurchase ? (() => {
                                     const m = (t.method || '').toLowerCase();
                                     const isCreditMethod = m.includes('آجل') || m.includes('اجل') || m.includes('ذمم') || m.includes('credit') || m.includes('تقسيط');
@@ -603,7 +769,12 @@
                                 } else if (type.includes('صرف')) {
                                     return `<span class="stock-badge badge-disburse" title="سند صرف نقدية">💸 سند صرف</span>`;
                                 } else if (type.includes('تحويل')) {
-                                    return `<span class="stock-badge badge-transfer" title="تحويل مخزني">🚚 تحويل مخزن</span>`;
+                                    if (t.transferStatus === 'pending') {
+                                        return `<span class="stock-badge badge-transfer" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a;" title="تحويل مخزني معلق بانتظار الاستلام">🚚 تحويل (معلق ⏳)</span>`;
+                                    } else if (t.transferStatus === 'rejected') {
+                                        return `<span class="stock-badge badge-transfer" style="background:#fee2e2; color:#991b1b; border:1.5px solid #f87171; font-weight:900;" title="تحويل مخزني مرفوض وملغي - لم تنفذ العملية">❌ تحويل (مرفوض / ملغي)</span>`;
+                                    }
+                                    return `<span class="stock-badge badge-transfer" style="background:#dcfce7; color:#15803d; border:1px solid #86efac;" title="تحويل مخزني مستلم">🚚 تحويل (مستلم ✅)</span>`;
                                 } else if (type.includes('تسوية')) {
                                     return `<span class="stock-badge badge-adj" title="تسوية مخزنية">⚖️ تسوية مخزنية</span>`;
                                 }
@@ -615,16 +786,16 @@
                         <td class="col-inv-6" style="${isV(6) ? '' : 'display:none;'}">
                             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;">
                                 <span style="font-weight:800; color:#1e293b; font-size:0.83rem;">🏢 ${warehouse}</span>
-                                <span style="font-size:0.72rem; color:#64748b; background:rgba(0,0,0,0.04); padding:1px 6px; border-radius:4px; font-weight:700;">${t.terminal || 'الجهاز الرئيسي 💻'}</span>
+                                ${getTerminalBadgeHtml(t)}
                             </div>
                         </td>
-                        <td class="col-inv-7" style="font-weight:bold; color:var(--main-blue); ${isV(7) ? '' : 'display:none;'}">${parseFloat(totalTextFinal || 0).toFixed(2)}</td>
-                        <td class="col-inv-8" style="color:blue; font-weight:bold; ${isV(8) ? '' : 'display:none;'}">${paid}</td>
-                        <td class="col-inv-9" style="color:red; font-weight:bold; ${isV(9) ? '' : 'display:none;'}">${remaining}</td>
+                        <td class="col-inv-7" style="font-weight:bold; color:${isRejectedTransfer ? '#94a3b8' : 'var(--main-blue)'}; ${isV(7) ? '' : 'display:none;'}">${displayTotalHtml}</td>
+                        <td class="col-inv-8" style="color:${isRejectedTransfer ? '#94a3b8' : 'blue'}; font-weight:bold; ${isV(8) ? '' : 'display:none;'}">${paid}</td>
+                        <td class="col-inv-9" style="color:${isRejectedTransfer ? '#94a3b8' : 'red'}; font-weight:bold; ${isV(9) ? '' : 'display:none;'}">${remaining}</td>
                         <td class="col-inv-10" style="${isV(10) ? '' : 'display:none;'}">${t.partner || '-'}</td>
-                        <td class="col-inv-13" style="${isV(13) ? '' : 'display:none;'}">${t.notes || '-'}</td>
                         <td class="col-inv-11" style="font-size:0.8rem; ${isV(11) ? '' : 'display:none;'}">${t.user || '-'}</td>
                         <td class="col-inv-12" style="font-size:0.8rem; color: #888; ${isV(12) ? '' : 'display:none;'}">${t.editDate || '-'}</td>
+                        <td class="col-inv-13" style="${isV(13) ? '' : 'display:none;'}">${t.notes || '-'}</td>
                     </tr>
                 `;
             });
@@ -707,6 +878,23 @@
             tx.partner = head.partner || head.customer || 'عميل نقدي';
             tx.method = head.method || head.paymentMethod || 'نقدي';
             tx.notes = invoiceItems.find(t => t.notes)?.notes || tx.notes || '';
+
+            // استخراج بيانات الخصم والإضافات الإجمالية للفاتورة
+            const invDisc = parseFloat(head.invoiceDiscount != null ? head.invoiceDiscount : (head.discount != null ? head.discount : (head.discountAmount || 0))) || 0;
+            const invDiscType = head.invoiceDiscountType || head.discountType || 'val';
+            const invExtra = parseFloat(head.invoiceTax != null ? head.invoiceTax : (head.invoiceExtra != null ? head.invoiceExtra : (head.tax != null ? head.tax : (head.extra || head.addition || 0)))) || 0;
+            const invExtraType = head.invoiceTaxType || head.invoiceExtraType || head.taxType || 'val';
+            const invGrandTotal = parseFloat(head.invoiceGrandTotal != null ? head.invoiceGrandTotal : (head.finalTotal != null ? head.finalTotal : (head.grandTotal || 0))) || 0;
+
+            tx.invoiceDiscount = invDisc;
+            tx.discount = invDisc;
+            tx.discountType = invDiscType;
+            tx.invoiceDiscountType = invDiscType;
+            tx.invoiceTax = invExtra;
+            tx.extra = invExtra;
+            tx.tax = invExtra;
+            tx.invoiceTaxType = invExtraType;
+            tx.invoiceGrandTotal = invGrandTotal;
             
             // أخذ كافة العناصر التي تحتوي على أصناف فعلية واستبعاد أسطر الهيدر المالي الخالية من اسم الصنف
             let rawItems = invoiceItems.filter(i => {
@@ -719,16 +907,39 @@
                 return true;
             });
 
-            // تم إلغاء دمج الأصناف المتشابهة لعرض الفاتورة بنفس عدد السطور الأصلية تماماً
-            tx.items = rawItems.map(i => ({
-                name: i.product || i.productName || i.name || 'صنف غير محدد',
-                qty: parseFloat(i.qty || 0),
-                unit: i.unit || '-',
-                size: i.size || i.selectedSize || '',
-                color: i.color || i.selectedColor || '',
-                price: parseFloat(i.price || 0),
-                total: parseFloat(i.total != null ? i.total : (parseFloat(i.qty || 0) * parseFloat(i.price || 0)))
-            }));
+            // تم إلغاء دمج الأصناف المتشابهة لعرض الفاتورة بنفس عدد السطور الأصلية تماماً مع رصد الخصم والإضافة بدقة
+            tx.items = rawItems.map(i => {
+                const qty = parseFloat(i.qty != null ? i.qty : (i.quantity || 0));
+                const price = parseFloat(i.price != null ? i.price : (i.costPrice || i.purchasePrice || 0));
+                let disc = parseFloat(i.discount != null ? i.discount : (i.itemDiscount != null ? i.itemDiscount : 0)) || 0;
+                const discType = i.discountType || i.itemDiscountType || 'val';
+                let addition = parseFloat(i.addition != null ? i.addition : (i.extra != null ? i.extra : 0)) || 0;
+                const total = parseFloat(i.total != null ? i.total : (qty * price - disc + addition));
+                
+                // في حال عدم وجود خصم أو إضافة مسجل صراحة على السطر ولكن الإجمالي الفعلي يختلف عن (الكمية × السعر)
+                if (disc === 0 && addition === 0 && qty > 0 && price > 0) {
+                    const gross = qty * price;
+                    if (gross > total + 0.01) {
+                        disc = gross - total;
+                    } else if (total > gross + 0.01) {
+                        addition = total - gross;
+                    }
+                }
+
+                return {
+                    name: i.product || i.productName || i.name || 'صنف غير محدد',
+                    qty: qty,
+                    unit: i.unit || '-',
+                    size: i.size || i.selectedSize || '',
+                    color: i.color || i.selectedColor || '',
+                    price: price,
+                    discount: disc,
+                    discountType: discType,
+                    addition: addition,
+                    extra: addition,
+                    total: total
+                };
+            });
             
             // سحب المدفوع والمتبقي من رأس الفاتورة بشكل صحيح وموثوق
             tx.paid = parseFloat(head.paidAmount != null ? head.paidAmount : (head.paid || 0));
@@ -821,11 +1032,20 @@
 
             displayItems.forEach((it, idx) => {
 
+                const itSize = it.selectedSize || it.size || '';
+                const itColor = it.selectedColor || it.color || '';
+                const variantBadge = (itSize || itColor) 
+                    ? `<div style="font-size:0.75rem; color:#4338ca; background:#e0e7ff; padding:2px 8px; border-radius:4px; margin-top:4px; display:inline-block; font-weight:700;">المقاس: ${itSize || '-'} | اللون: ${itColor || '-'}</div>` 
+                    : '';
+
                 rowsHtml += `
 
-                <tr class="edit-row" data-id="${it.invoiceId}" data-product="${it.product}">
+                <tr class="edit-row" data-id="${it.invoiceId}" data-tx-id="${it.id || ''}" data-product="${it.product}" data-size="${itSize}" data-color="${itColor}">
 
-                    <td style="padding:10px; border:1px solid #ddd; background:#f9f9f9;"><input type="text" class="edit-name-input" list="editItemsList" value="${it.product}" oninput="window.updateEditPrice(this)" style="width:100%; border:1px solid #ccc; padding:5px; border-radius:4px; font-weight:bold;"></td>
+                    <td style="padding:10px; border:1px solid #ddd; background:#f9f9f9;">
+                        <input type="text" class="edit-name-input" list="editItemsList" value="${it.product}" oninput="window.updateEditPrice(this)" style="width:100%; border:1px solid #ccc; padding:5px; border-radius:4px; font-weight:bold;">
+                        ${variantBadge}
+                    </td>
 
                     <td style="padding:10px; border:1px solid #ddd;"><input type="number" step="0.01" class="edit-q-input" value="${it.qty}" oninput="window.calcEditRow(this)" style="width:70px; border:1px solid #ccc; padding:5px; border-radius:4px;"></td>
 
@@ -1005,9 +1225,20 @@
 
                 const newTotal = newQty * newPrice;
 
-                // البحث عن السجل الأصلي لتعديله
+                // البحث عن السجل الأصلي لتعديله بدقة باستخدام معرف الحركة ID الفريد ثم التشكيلة
+                const txId = row.dataset.txId;
+                const rowSize = row.dataset.size || '';
+                const rowColor = row.dataset.color || '';
 
-                const transaction = transactions.find(t => t.invoiceId == invId && t.product === originalProductName);
+                let transaction = txId ? transactions.find(t => String(t.id) === String(txId)) : null;
+                if (!transaction) {
+                    transaction = transactions.find(t => 
+                        t.invoiceId == invId && 
+                        t.product === originalProductName &&
+                        (!rowSize || (t.size || t.selectedSize) === rowSize) &&
+                        (!rowColor || (t.color || t.selectedColor) === rowColor)
+                    ) || transactions.find(t => t.invoiceId == invId && t.product === originalProductName);
+                }
 
                 if (transaction) {
 
@@ -1037,17 +1268,29 @@
 
                     transaction.user = editorName; // تحديث المستخدم ليكون آخر من عدل الفاتورة
 
-                    // حساب الربح الجديد بناءً على التكلفة
+                    // حساب الربح الجديد بناءً على التكلفة (مع مراعاة تكلفة المقاس المخصص في الفاشون)
 
                     const p = productsDB.find(x => x.name === newProductName);
 
                     if (p) {
 
-                        const cost = parseFloat(p.cost) || 0;
+                        let effCost = parseFloat(p.cost) || 0;
+                        const sSize = String(transaction.selectedSize || transaction.size || rowSize || '').trim();
+                        const sColor = String(transaction.selectedColor || transaction.color || rowColor || '').trim();
+
+                        if (p.variants && Array.isArray(p.variants) && (sSize || sColor)) {
+                            const matchedVarForCost = p.variants.find(v => 
+                                (!sSize || String(v.size || '').trim() === sSize) && 
+                                (!sColor || String(v.color || '').trim() === sColor)
+                            );
+                            if (matchedVarForCost && matchedVarForCost.cost) {
+                                effCost = parseFloat(matchedVarForCost.cost) || effCost;
+                            }
+                        }
 
                         const factor = parseFloat(transaction.unitFactor) || 1;
 
-                        const totalCost = cost * newQty * factor;
+                        const totalCost = effCost * newQty * factor;
 
                         if (transaction.type.includes('بيع')) {
 
@@ -1507,7 +1750,7 @@
 
                         } else if (section === 'transfer') {
 
-                            transferItemsBatch = invItems.filter(x => x.product).map(it => {
+                            window.transferItemsBatch = invItems.filter(x => x.product).map(it => {
                                 const p = productsDB.find(x => x.name === it.product || x.id === it.productId);
                                 return {
                                     id: p ? p.id : (Date.now() + Math.random()),
@@ -1523,6 +1766,7 @@
                                     unitFactor: parseFloat(it.unitFactor) || 1
                                 };
                             });
+                            transferItemsBatch = window.transferItemsBatch;
 
                             const parts = (partnerName || '').split('->');
                             const wFrom = parts[0]?.trim();
@@ -1595,7 +1839,7 @@
                                 const p = productsDB.find(x => x.name === it.product || x.id === it.productId);
                                 const u = (p && p.units) ? p.units.find(un => un.unitName === it.unit) : null;
                                 const factor = parseFloat(it.unitFactor) || 1;
-                                const baseAdjQty = (parseFloat(it.qty) || 0) * factor;
+                                const baseAdjDiff = (parseFloat(it.qty) || 0) * factor;
 
                                 let liveStock = 0;
                                 if (p) {
@@ -1606,7 +1850,7 @@
                                         if (matchedVar) {
                                             liveStock = (matchedVar.warehouseStocks && matchedVar.warehouseStocks[activeWH] !== undefined)
                                                 ? (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0)
-                                                : (parseFloat(matchedVar.stock) || 0);
+                                                : (activeWH === 'المخزن الرئيسي' ? (parseFloat(matchedVar.stock) || 0) : 0);
                                         } else {
                                             liveStock = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWH) : (parseFloat(p.stock) || 0);
                                         }
@@ -1615,29 +1859,45 @@
                                     }
                                 }
 
-                                // الرصيد قبل التسوية = الرصيد الحالي ناقص كمية الفاتورة التي تم تطبيقها سابقاً
-                                const origStockBefore = (liveStock - baseAdjQty) / factor;
+                                // في التسوية: الفرق = الفعلي - الدفتري، وبالتالي: الدفتري = الحالي - الفرق، والفعلي المجرود = الدفتري + الفرق = الحالي
+                                let origStockBefore = (liveStock - baseAdjDiff) / factor;
+                                let origCountedQty = origStockBefore + (parseFloat(it.qty) || 0);
+
+                                if (it.notes && typeof it.notes === 'string') {
+                                    const actualMatch = it.notes.match(/فعلي\s+([\d.-]+)/);
+                                    const bookMatch = it.notes.match(/دفتري\s+([\d.-]+)/);
+                                    if (actualMatch && !isNaN(parseFloat(actualMatch[1]))) {
+                                        origCountedQty = parseFloat(actualMatch[1]) / factor;
+                                    }
+                                    if (bookMatch && !isNaN(parseFloat(bookMatch[1]))) {
+                                        origStockBefore = parseFloat(bookMatch[1]) / factor;
+                                    }
+                                }
 
                                 return {
                                     id: p ? p.id : (Date.now() + Math.random()),
                                     name: it.product,
+                                    code: (p && p.variants && (it.selectedSize || it.size)) ? (p.variants.find(v => (v.size === (it.selectedSize || it.size) && (!it.color || v.color === (it.selectedColor || it.color))))?.barcode || p.code) : (p ? p.code : ''),
                                     selectedSize: it.selectedSize || it.size || '',
                                     selectedColor: it.selectedColor || it.color || '',
                                     size: it.selectedSize || it.size || '',
                                     color: it.selectedColor || it.color || '',
-                                    qty: parseFloat(it.qty),
-                                    price: parseFloat(it.price),
-                                    unit: it.unit,
+                                    qty: Math.max(0, origCountedQty),
+                                    price: parseFloat(it.price) || 0,
+                                    unit: it.unit || 'قطعة',
                                     unitFactor: factor,
                                     selectedUnit: u,
                                     units: p ? (p.units || []) : [],
-                                    stock: origStockBefore
+                                    stock: origStockBefore,
+                                    notes: it.notes || ''
                                 };
                             });
 
-                               if (document.getElementById('adjBadgeID')) document.getElementById('adjBadgeID').innerText = invId;
-                            document.getElementById('adjDate').value = t.dateISO || '';
-                            document.getElementById('adjTime').value = t.timeISO || '';
+                            window.adjCart = adjCart;
+
+                            if (document.getElementById('adjBadgeID')) document.getElementById('adjBadgeID').innerText = invId;
+                            if (document.getElementById('adjDate')) document.getElementById('adjDate').value = t.dateISO || '';
+                            if (document.getElementById('adjTime')) document.getElementById('adjTime').value = t.timeISO || '';
 
                             if (typeof renderAdjTable === 'function') renderAdjTable();
 
@@ -1673,19 +1933,37 @@
             });
         };
 
+        // دالة موحدة لمطابقة نوع الفاتورة والحركة بدقة لمنع تداخل البيع مع المرتجع
+        window.isMatchingInvoiceType = function(txType, targetType) {
+            if (!targetType) return true;
+            if (!txType) return false;
+            const sTx = String(txType).trim();
+            const sTarget = String(targetType).trim();
+            const isTargetReturn = sTarget.includes('مرتجع');
+            const isTxReturn = sTx.includes('مرتجع');
+            if (isTargetReturn !== isTxReturn) return false;
+            if (sTarget.includes('بيع') && sTx.includes('بيع')) return true;
+            if (sTarget.includes('شراء') && sTx.includes('شراء')) return true;
+            if (sTarget.includes('تسوية') && sTx.includes('تسوية')) return true;
+            if (sTarget.includes('تحويل') && sTx.includes('تحويل')) return true;
+            if (sTarget.includes('قبض') && sTx.includes('قبض')) return true;
+            if (sTarget.includes('صرف') && sTx.includes('صرف')) return true;
+            return sTx.includes(sTarget) || sTarget.includes(sTx);
+        };
+
         // دالة مساعدة لتنفيذ منطق الحذف في التعديل (تحتاج لاستدعاء من الحفظ)
         window.revertAndClearOldInvoice = async function(invId, type) {
             if (!invId) return;
 
             const cleanType = type ? String(type).replace(/📤|📥|↩️|⚖️/g, '').trim() : '';
 
-            // إذا لم تكن editingOriginalItems محملة، نحاول جلب السجلات القديمة من transactions
+            // إذا لم تكن editingOriginalItems محملة، نحاول جلب السجلات القديمة من transactions مع مطابقة دقيقة للنوع
             const oldItems = (typeof editingOriginalItems !== 'undefined' && editingOriginalItems && editingOriginalItems.length > 0) ? 
                 editingOriginalItems : 
                 (typeof transactions !== 'undefined' && Array.isArray(transactions) ? transactions.filter(t => {
                     const hasInvId = t.invoiceId != null && t.invoiceId !== '';
-                    if (hasInvId) return String(t.invoiceId) === String(invId);
-                    return String(t.id) === String(invId);
+                    const isMatch = hasInvId ? (String(t.invoiceId) === String(invId)) : (String(t.id) === String(invId));
+                    return isMatch && (!cleanType || window.isMatchingInvoiceType(t.type, cleanType));
                 }) : []);
 
             const defaultWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
@@ -1726,11 +2004,18 @@
                         p.stock = (parseFloat(p.stock) || 0) - baseQty;
                         p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) - baseQty;
                     } else if (itType.includes('تحويل')) {
-                        const srcWH = (item.sourceWarehouse || defaultWH || 'المخزن الرئيسي').trim();
-                        const dstWH = (item.warehouse || '').trim();
-                        p.warehouseStocks[srcWH] = (parseFloat(p.warehouseStocks[srcWH]) || 0) + baseQty;
-                        if (dstWH) {
-                            p.warehouseStocks[dstWH] = Math.max(0, (parseFloat(p.warehouseStocks[dstWH]) || 0) - baseQty);
+                        // لا يتم تعديل أو عكس الأرصدة إلا إذا كان التحويل قد تم استلامه بالفعل (received)
+                        // أما إذا كان معلقاً (pending) فلم يخصم أصلاً من المخزن المصدر
+                        if (item.transferStatus === 'received') {
+                            const srcWH = (item.sourceWarehouse || defaultWH || 'المخزن الرئيسي').trim();
+                            const dstWH = (item.warehouse || '').trim();
+                            if (!p.warehouseStocks) p.warehouseStocks = {};
+                            p.warehouseStocks[srcWH] = (parseFloat(p.warehouseStocks[srcWH]) || 0) + baseQty;
+                            if (dstWH) {
+                                p.warehouseStocks[dstWH] = Math.max(0, (parseFloat(p.warehouseStocks[dstWH]) || 0) - baseQty);
+                            }
+                            if (srcWH === 'المخزن الرئيسي') p.stock = p.warehouseStocks[srcWH];
+                            if (dstWH === 'المخزن الرئيسي') p.stock = p.warehouseStocks[dstWH];
                         }
                     }
 
@@ -1758,15 +2043,29 @@
                                     matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                     matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
                                 } else if (item.type && item.type.includes('تسوية')) {
-                                    matchedVar.stock = (parseFloat(matchedVar.stock) || 0) - baseQty;
-                                    matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty;
+                                    matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
+                                    matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
                                 } else if (item.type && item.type.includes('تحويل')) {
-                                    const srcWH = (item.sourceWarehouse || defaultWH || 'المخزن الرئيسي').trim();
-                                    const dstWH = (item.warehouse || '').trim();
-                                    matchedVar.warehouseStocks[srcWH] = (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) + baseQty;
-                                    if (dstWH) matchedVar.warehouseStocks[dstWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) - baseQty);
+                                    if (item.transferStatus === 'received') {
+                                        const srcWH = (item.sourceWarehouse || defaultWH || 'المخزن الرئيسي').trim();
+                                        const dstWH = (item.warehouse || '').trim();
+                                        if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
+                                        matchedVar.warehouseStocks[srcWH] = (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) + baseQty;
+                                        if (dstWH) matchedVar.warehouseStocks[dstWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) - baseQty);
+                                        if (srcWH === 'المخزن الرئيسي') matchedVar.stock = matchedVar.warehouseStocks[srcWH];
+                                        if (dstWH === 'المخزن الرئيسي') matchedVar.stock = matchedVar.warehouseStocks[dstWH];
+                                    }
                                 }
                             }
+                        }
+                        if (p.variants.length > 0) {
+                            p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                            p.warehouseStocks[activeWH] = p.variants.reduce((sum, v) => {
+                                const vWh = (v.warehouseStocks && v.warehouseStocks[activeWH] !== undefined)
+                                    ? parseFloat(v.warehouseStocks[activeWH])
+                                    : (activeWH === 'المخزن الرئيسي' ? (parseFloat(v.stock) || 0) : 0);
+                                return sum + (isNaN(vWh) ? 0 : vWh);
+                            }, 0);
                         }
                     }
 
@@ -1779,23 +2078,23 @@
                 transactions = transactions.filter(t => {
                     const hasInvId = t.invoiceId != null && t.invoiceId !== '';
                     const isMatch = hasInvId ? (String(t.invoiceId) === String(invId)) : (String(t.id) === String(invId));
-                    return !(isMatch && (!cleanType || (t.type && t.type.includes(cleanType))));
+                    return !(isMatch && (!cleanType || window.isMatchingInvoiceType(t.type, cleanType)));
                 });
             }
 
-            // 3. مسح كاش أرصدة المخازن فوراً
-            if (typeof invalidateStockCache === 'function') {
-                invalidateStockCache();
-            }
+            // 3. مسح كاش أرصدة المخازن والحسابات فوراً
+            if (typeof invalidateStockCache === 'function') invalidateStockCache();
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+            window.accountBalancesCache = {};
 
             // 4. الحذف الفعلي والنهائي من قاعدة البيانات لمنع التكرار (الدبلرة) عند التعديل
             try {
 
                 if (typeof db !== 'undefined' && db.transactions) {
-                    await db.transactions.where('invoiceId').equals(invId.toString()).filter(t => !cleanType || t.type.includes(cleanType)).delete();
+                    await db.transactions.where('invoiceId').equals(invId.toString()).filter(t => !cleanType || window.isMatchingInvoiceType(t.type, cleanType)).delete();
 
                     if (!isNaN(Number(invId))) {
-                        await db.transactions.where('invoiceId').equals(Number(invId)).filter(t => !cleanType || t.type.includes(cleanType)).delete();
+                        await db.transactions.where('invoiceId').equals(Number(invId)).filter(t => !cleanType || window.isMatchingInvoiceType(t.type, cleanType)).delete();
                     }
                 }
 
@@ -1840,9 +2139,8 @@
 
                         const invId = t.invoiceId;
 
-                        const cleanType = t.type.split(' ')[0]; // استخراج الكلمة الأولى من النوع (بيع، شراء، تسوية، إلخ) لضمان المطابقة
-
-                        const itemsToRemove = invId ? transactions.filter(x => x.invoiceId == invId && x.type.includes(cleanType)) : [t];
+                        // تصفية السجلات المراد حذفها باستخدام مطابقة دقيقة للنوع لمنع حذف المرتجعات عند حذف المبيعات
+                        const itemsToRemove = invId ? transactions.filter(x => x.invoiceId == invId && window.isMatchingInvoiceType(x.type, t.type)) : [t];
 
                         // 🗑️ نقل للقمامة قبل الحذف
 
@@ -1891,11 +2189,16 @@
                                     p.stock = (parseFloat(p.stock) || 0) - baseQty;
                                     p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) - baseQty;
                                 } else if (item.type.includes('تحويل')) {
-                                    const srcWH = item.sourceWarehouse || 'المخزن الرئيسي';
-                                    const dstWH = item.warehouse || '';
-                                    p.warehouseStocks[srcWH] = (parseFloat(p.warehouseStocks[srcWH]) || 0) + baseQty;
-                                    if (dstWH) {
-                                        p.warehouseStocks[dstWH] = Math.max(0, (parseFloat(p.warehouseStocks[dstWH]) || 0) - baseQty);
+                                    if (item.transferStatus === 'received') {
+                                        const srcWH = item.sourceWarehouse || 'المخزن الرئيسي';
+                                        const dstWH = item.warehouse || '';
+                                        if (!p.warehouseStocks) p.warehouseStocks = {};
+                                        p.warehouseStocks[srcWH] = (parseFloat(p.warehouseStocks[srcWH]) || 0) + baseQty;
+                                        if (dstWH) {
+                                            p.warehouseStocks[dstWH] = Math.max(0, (parseFloat(p.warehouseStocks[dstWH]) || 0) - baseQty);
+                                        }
+                                        if (srcWH === 'المخزن الرئيسي') p.stock = p.warehouseStocks[srcWH];
+                                        if (dstWH === 'المخزن الرئيسي') p.stock = p.warehouseStocks[dstWH];
                                     }
                                 }
 
@@ -1911,7 +2214,7 @@
                                         if (matchedVar) {
                                             if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                                             if (item.type && item.type.includes('مرتجع بيع')) {
-                                                matchedVar.stock = (parseFloat(matchedVar.stock) || 0) - baseQty;
+                                                matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                                 matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
                                             } else if (item.type && item.type.includes('مرتجع شراء')) {
                                                 matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
@@ -1920,18 +2223,32 @@
                                                 matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
                                                 matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
                                             } else if (item.type && item.type.includes('شراء')) {
-                                                matchedVar.stock = (parseFloat(matchedVar.stock) || 0) - baseQty;
+                                                matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                                 matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
                                             } else if (item.type && item.type.includes('تسوية')) {
-                                                matchedVar.stock = (parseFloat(matchedVar.stock) || 0) - baseQty;
-                                                matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty;
+                                                matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
+                                                matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
                                             } else if (item.type && item.type.includes('تحويل')) {
-                                                const srcWH = item.sourceWarehouse || 'المخزن الرئيسي';
-                                                const dstWH = item.warehouse || '';
-                                                matchedVar.warehouseStocks[srcWH] = (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) + baseQty;
-                                                if (dstWH) matchedVar.warehouseStocks[dstWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) - baseQty);
+                                                if (item.transferStatus === 'received') {
+                                                    const srcWH = item.sourceWarehouse || 'المخزن الرئيسي';
+                                                    const dstWH = item.warehouse || '';
+                                                    if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
+                                                    matchedVar.warehouseStocks[srcWH] = (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) + baseQty;
+                                                    if (dstWH) matchedVar.warehouseStocks[dstWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) - baseQty);
+                                                    if (srcWH === 'المخزن الرئيسي') matchedVar.stock = matchedVar.warehouseStocks[srcWH];
+                                                    if (dstWH === 'المخزن الرئيسي') matchedVar.stock = matchedVar.warehouseStocks[dstWH];
+                                                }
                                             }
                                         }
+                                    }
+                                    if (p.variants.length > 0) {
+                                        p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                                        p.warehouseStocks[activeWH] = p.variants.reduce((sum, v) => {
+                                            const vWh = (v.warehouseStocks && v.warehouseStocks[activeWH] !== undefined)
+                                                ? parseFloat(v.warehouseStocks[activeWH])
+                                                : (activeWH === 'المخزن الرئيسي' ? (parseFloat(v.stock) || 0) : 0);
+                                            return sum + (isNaN(vWh) ? 0 : vWh);
+                                        }, 0);
                                     }
                                 }
 
@@ -1947,7 +2264,7 @@
 
                         if (invId) {
 
-                            transactions = transactions.filter(x => !(x.invoiceId == invId && x.type.includes(cleanType)));
+                            transactions = transactions.filter(x => !(x.invoiceId == invId && window.isMatchingInvoiceType(x.type, t.type)));
 
                             // 🛑 الحذف النهائي من قاعدة البيانات
 
@@ -1963,11 +2280,11 @@
 
                                 .toArray();
 
-                            // فلترة السجلات التي تطابق النوع أيضاً لضمان الدقة
+                            // فلترة السجلات التي تطابق النوع بدقة لضمان عدم حذف المرتجعات عند حذف المبيعات
 
                             const idsToDelete = dbItems
 
-                                .filter(x => x.type.includes(cleanType))
+                                .filter(x => window.isMatchingInvoiceType(x.type, t.type))
 
                                 .map(x => x.id);
 
@@ -2012,6 +2329,11 @@
                         }
 
                         await saveData();
+
+                        if (typeof invalidateStockCache === 'function') invalidateStockCache();
+                        if (typeof window.invalidateStockCache === 'function') window.invalidateStockCache();
+                        if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+                        window.accountBalancesCache = {};
 
                         renderInvoicesTable();
 
@@ -2062,17 +2384,20 @@
             if (filterEl) {
 
                 let cleanType = 'all';
-                if (type.includes('مرتجع بيع')) cleanType = 'sales-return';
-                else if (type.includes('مرتجع شراء')) cleanType = 'purchase-return';
-                else if (type.includes('بيع')) cleanType = 'sales';
-                else if (type.includes('شراء')) cleanType = 'purchase';
+                if (type.includes('مرتجع بيع')) cleanType = 'مرتجع بيع';
+                else if (type.includes('مرتجع شراء')) cleanType = 'مرتجع شراء';
+                else if (type.includes('بيع')) cleanType = 'بيع';
+                else if (type.includes('شراء')) cleanType = 'شراء';
+                else if (type.includes('قبض')) cleanType = 'قبض';
+                else if (type.includes('صرف')) cleanType = 'صرف';
+                else if (type.includes('تحويل')) cleanType = 'تحويل';
+                else if (type.includes('تسوية')) cleanType = 'تسوية';
 
                 filterEl.value = cleanType;
 
                 document.querySelectorAll('.invoice-tab').forEach(btn => {
-
-                    btn.classList.toggle('active', btn.innerText.includes(type) || btn.innerText.includes(cleanType));
-
+                    const bTxt = btn.innerText.trim();
+                    btn.classList.toggle('active', cleanType === 'all' ? bTxt.includes('الكل') : bTxt.includes(cleanType));
                 });
 
             }

@@ -2,262 +2,188 @@
 //  النوافذ المنبثقة، الإشعارات، ومعاينة الفواتير (Modals & Notifications)
 // ============================================================
         window.showNotificationsModal = function(activeTab = null) {
-            const today = new Date();
-            const allLowStock = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => (parseFloat(p.stock) || 0) <= (parseFloat(p.minStock) || 5));
-            
-            // فحص تواريخ الصلاحية
-            const allExpiring = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => {
-                if (!p.expiry) return false;
-                const exp = new Date(p.expiry);
-                if (isNaN(exp.getTime())) return false;
-                exp.setHours(0, 0, 0, 0);
-                const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
-                return diffDays <= 30;
-            });
+            // 1. استدعاء الإحصائيات الشاملة من المصدر الموحد للحقيقة (Single Source of Truth)
+            const stats = (typeof window.getSystemNotificationsStats === 'function') 
+                ? window.getSystemNotificationsStats() 
+                : {
+                    allLowStock: [], activeLowStock: [], archivedLowStock: [],
+                    allExpiring: [], activeExpiring: [], archivedExpiring: [],
+                    allDebtAccounts: [], activeDebt: [], archivedDebt: [],
+                    allDelayed: [], activeDelayed: [], archivedDelayed: [],
+                    pendingTransfersList: [], activeTransfers: [], activeTransfersCount: 0,
+                    cloudHistory: [], activeCloud: [], activeCloudCount: 0,
+                    activeProductsTotal: 0, activeAccountsTotal: 0,
+                    totalActiveCount: 0, totalReceiptCount: 0,
+                    activeWH: 'المخزن الرئيسي'
+                };
 
-            const allDebtAccounts = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
-                const debit = parseFloat(a.debit) || 0;
-                const credit = parseFloat(a.credit) || 0;
-                const balance = debit - credit;
-                const isRemindActive = (a.remind === true || a.remind === 'true');
-                return (a.type === 'client' || a.type === 'mixed') && balance > 0 && isRemindActive;
-            });
+            const {
+                activeLowStock, archivedLowStock,
+                activeExpiring, archivedExpiring,
+                activeDebt, archivedDebt,
+                activeDelayed, archivedDelayed,
+                pendingTransfersList, activeTransfers, activeTransfersCount,
+                cloudHistory, activeCloud, activeCloudCount,
+                activeProductsTotal, activeAccountsTotal,
+                totalActiveCount, activeWH, canViewAccounts
+            } = stats;
 
-            // العملاء المتأخرين (رصيد > 0 وآخر عملية من أكثر من 30 يوم)
-            const allDelayed = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
-                const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
-                if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
-                const isRemindActive = (a.remind === true || a.remind === 'true');
-                if (!isRemindActive) return false;
-                const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
-                if (!lastTrans) return true;
-                const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
-                const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
-                return diffDays > 30;
-            });
+            const receiptLog = (window.bayanReceiptLog && Array.isArray(window.bayanReceiptLog)) ? window.bayanReceiptLog : [];
+            const totalReceiptCount = receiptLog.length;
 
-            // تقسيم البضاعة والصلاحية والحسابات إلى نشط ومستلم
-            const activeLowStock = allLowStock.filter(p => !window.acknowledgedLowStock.includes(p.id));
-            const archivedLowStock = allLowStock.filter(p => window.acknowledgedLowStock.includes(p.id));
-
-            const activeExpiring = allExpiring.filter(p => !window.acknowledgedExpiry.includes(p.id));
-            const archivedExpiring = allExpiring.filter(p => window.acknowledgedExpiry.includes(p.id));
-
-            const activeDebt = allDebtAccounts.filter(a => !window.acknowledgedDebt.includes(a.id));
-            const archivedDebt = allDebtAccounts.filter(a => window.acknowledgedDebt.includes(a.id));
-
-            const activeDelayed = allDelayed.filter(a => !window.acknowledgedDelayed.includes(a.id));
-            const archivedDelayed = allDelayed.filter(a => window.acknowledgedDelayed.includes(a.id));
-
-            // أذونات التحويل المخزني المعلقة الواردة لهذا المخزن
-            const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
-            const allPendingTransfers = (typeof transactions !== 'undefined' && Array.isArray(transactions))
-                ? transactions.filter(t => t.type && t.type.includes('تحويل') && t.transferStatus === 'pending' && (t.warehouse === activeWH || t.toWarehouse === activeWH))
-                : [];
-
-            // تجميع التحويلات حسب رقم الإذن invoiceId
-            const pendingTransferInvoices = {};
-            allPendingTransfers.forEach(t => {
-                const invId = t.invoiceId || 'TR-UNKNOWN';
-                if (!pendingTransferInvoices[invId]) {
-                    pendingTransferInvoices[invId] = {
-                        id: invId,
-                        date: t.date,
-                        sourceWarehouse: t.sourceWarehouse,
-                        warehouse: t.warehouse,
-                        user: t.user || '-',
-                        notes: t.notes || '',
-                        items: []
-                    };
-                }
-                pendingTransferInvoices[invId].items.push(t);
-            });
-
-            const pendingTransfersList = Object.values(pendingTransferInvoices);
-            const activeTransfersCount = pendingTransfersList.length;
-
-            const activeProductsTotal = activeLowStock.length + activeExpiring.length;
-            const activeAccountsTotal = activeDebt.length + activeDelayed.length;
-            const totalActiveCount = activeProductsTotal + activeAccountsTotal + activeTransfersCount;
-            const totalArchivedCount = archivedLowStock.length + archivedExpiring.length + archivedDebt.length + archivedDelayed.length;
-
-            // تحديد التبويب النشط ذكياً إذا لم يحدد
+            // 2. التحديد الذكي للتبويب الافتراضي مع احترام الصلاحيات
             if (!activeTab) {
                 if (activeTransfersCount > 0) activeTab = 'transfers';
                 else if (activeProductsTotal > 0) activeTab = 'products';
-                else if (activeAccountsTotal > 0) activeTab = 'accounts';
+                else if (canViewAccounts && activeAccountsTotal > 0) activeTab = 'accounts';
+                else if (activeCloudCount > 0) activeTab = 'cloud';
                 else activeTab = 'products';
             }
+            if (activeTab === 'accounts' && !canViewAccounts) {
+                activeTab = 'products';
+            }
 
-            // تحديث شارة جرس الإشعارات في الهيدر فوراً
+            // 3. تحديث شارة الجرس في الهيدر فوراً وبدقة تامة لمنع أي التباس في الأرقام
             const topBell = document.getElementById('bellBadge') || document.getElementById('notificationsBadge');
             if (topBell) {
                 topBell.innerText = totalActiveCount > 99 ? '99+' : totalActiveCount;
                 topBell.style.display = totalActiveCount > 0 ? 'flex' : 'none';
             }
 
-            const createRows = (items, type, isArchived) => items.map(item => {
-                const isProd = type === 'low-stock';
-                const isExpiry = type === 'expiry';
-                const isDelayed = type === 'delayed';
-                const name = item.name;
-                let value = "";
-                let extra = "";
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
 
-                if (isProd) {
-                    value = `<span style="font-size:1.1rem; font-weight:900; color:#ef4444; direction:ltr; display:inline-block;">${item.stock}</span> <span style="font-size:0.75rem; color:#64748b;">(الحد: ${item.minStock || 5})</span>`;
-                } else if (isExpiry) {
-                    const exp = new Date(item.expiry);
-                    exp.setHours(0, 0, 0, 0);
-                    const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
-                    if (diffDays <= 0) {
-                        value = `<span style="font-size:0.82rem; font-weight:900; color:#dc2626; background:#fee2e2; padding:3px 8px; border-radius:6px; display:inline-block;">❌ منتهي الصلاحية</span>`;
-                        extra = `<br><span style="font-size:0.75rem; color:#dc2626; font-weight:bold;">انتهى بتاريخ ${item.expiry} (منذ ${Math.abs(diffDays)} يوم)</span>`;
-                    } else {
-                        value = `<span style="font-size:0.82rem; font-weight:900; color:#d97706; background:#fef3c7; padding:3px 8px; border-radius:6px; display:inline-block;">⏳ قارب على الانتهاء</span>`;
-                        extra = `<br><span style="font-size:0.75rem; color:#d97706; font-weight:bold;">ينتهي خلال ${diffDays} يوم (بتاريخ ${item.expiry})</span>`;
-                    }
-                } else {
-                    const balance = (parseFloat(item.debit) || 0) - (parseFloat(item.credit) || 0);
-                    value = `<span style="font-size:1.05rem; font-weight:900; color:#e11d48; direction:ltr; display:inline-block;">${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>`;
-                    if (isDelayed) {
-                        const lastTrans = transactions.filter(t => t.partnerId === item.id || t.account === item.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
-                        if (lastTrans) {
-                            const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
-                            const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
-                            extra = `<br><span style="font-size:0.75rem; color:#b45309; font-weight:bold;">⏳ متأخر منذ ${diffDays} يوم</span>`;
-                        } else {
-                            extra = `<br><span style="font-size:0.75rem; color:#dc2626; font-weight:bold;">⏳ متأخر عن السداد (لا توجد دفعات)</span>`;
-                        }
-                    }
-                }
+            // دوال مساعدة لإنشاء صفوف الجداول بتصميم حديث وفخم
+            const escapeStr = (str) => String(str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-                return `
-                <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
-                    <td style="padding: 12px 14px; font-weight: bold; color: #1e293b; text-align: right;">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <span style="font-size:1.2rem;">${isProd ? '📦' : (isExpiry ? '📅' : (isDelayed ? '⚠️' : '💳'))}</span>
+            const modalContent = `
+                <div class="glass-card-premium" style="background: #ffffff; border: 1px solid rgba(226, 232, 240, 0.95); padding: 0; border-radius: 24px; width: 960px; max-width: 96vw; max-height: 90vh; overflow: hidden; box-shadow: 0 35px 80px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(255,255,255,0.2); display: flex; flex-direction: column; direction: rtl; font-family: inherit;">
+
+                    <!-- Header بتدرج داكن وعصري مع ملخص ذكي -->
+                    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%); padding: 18px 26px; display: flex; justify-content: space-between; align-items: center; color: white; border-bottom: 1px solid rgba(255,255,255,0.1); position: relative;">
+                        <div style="display:flex; align-items:center; gap:14px;">
+                            <div style="width: 44px; height: 44px; border-radius: 14px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); display: flex; align-items: center; justify-content: center; font-size: 1.35rem; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);">
+                                🔔
+                            </div>
                             <div>
-                                <div style="font-weight:900; font-size:0.95rem; color:#0f172a;">${name}</div>
-                                ${extra}
+                                <h3 style="margin: 0; font-size: 1.28rem; font-weight: 900; color: #f8fafc; letter-spacing: -0.3px; display:flex; align-items:center; gap:8px;">
+                                    مركز إدارة التنبيهات وسجل الاستلام
+                                    ${totalActiveCount > 0 ? `<span style="background: #ef4444; color: #fff; font-size: 0.72rem; font-weight: 900; padding: 2px 8px; border-radius: 12px; box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);">${totalActiveCount} تنبيه نشط</span>` : '<span style="background: #10b981; color: #fff; font-size: 0.72rem; font-weight: 900; padding: 2px 8px; border-radius: 12px;">مستقر ومكتمل ✔️</span>'}
+                                </h3>
+                                <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 700; margin-top: 3px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+                                    <span>🏬 المخزن الحالي: <b style="color: #60a5fa;">${escapeStr(activeWH)}</b></span>
+                                    <span>•</span>
+                                    <span>📋 التنبيهات الموثقة بالسجل: <b style="color: #fbbf24;">${totalReceiptCount}</b></span>
+                                </div>
                             </div>
                         </div>
-                    </td>
-                    <td style="padding: 12px 14px; font-weight: 900; text-align: center;">${value}</td>
-                    <td style="padding: 12px 14px; text-align: center;">
-                        ${!isArchived ? `
-                            <div style="display:flex; gap:6px; justify-content:center; align-items:center;">
-                                ${(!isProd && !isExpiry) ? `<button class="tool-btn" style="background:#3b82f6; color:white; border-radius:8px; border:none; padding: 6px 12px; font-weight:800; font-size:0.8rem; cursor:pointer;" onclick="openStatementFromNotify('${item.id}')" title="عرض كشف حساب العميل">📄 كشف</button>` : ''}
-                                <button class="tool-btn" style="background:linear-gradient(135deg, #10b981, #059669); color:white; border-radius:8px; padding: 6px 14px; font-size: 0.8rem; font-weight: 900; border: none; cursor: pointer; display:flex; align-items:center; gap:4px; box-shadow:0 2px 6px rgba(16,185,129,0.3);" 
-                                        onclick="acknowledgeNotification('${type}', ${(isProd || isExpiry) ? item.id : `'${item.id}'` }, '${activeTab}')" title="تأكيد الاستلام ونقله لسجل الاستلام">
-                                    <span style="font-size:0.9rem;">✔️</span> استلام
-                                </button>
-                            </div>
-                        ` : `
-                            <div style="display:flex; gap:8px; justify-content:center; align-items:center;">
-                                <span style="color: #10b981; font-weight: 900; font-size: 0.85rem;">✔️ مستلم</span>
-                                <button class="tool-btn" style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; border-radius:8px; padding:4px 10px; font-size:0.75rem; font-weight:bold; cursor:pointer;" onclick="unacknowledgeNotification('${type}', ${(isProd || isExpiry) ? item.id : `'${item.id}'` })" title="إعادة التنبيه إلى القائمة النشطة">إعادة 🔄</button>
-                            </div>
-                        `}
-                    </td>
-                </tr>`;
-            }).join('');
 
-            const existingModal = document.getElementById('notifyModal');
-            const modalContent = `
-                <div class="glass-card-premium" style="background: #ffffff; border: 1px solid #e2e8f0; padding: 0; border-radius: 22px; width: 820px; max-width: 95%; max-height: 88vh; overflow: hidden; box-shadow: 0 30px 70px rgba(15, 23, 42, 0.2); display: flex; flex-direction: column; direction: rtl; font-family: inherit;">
-
-                    <!-- Header -->
-                    <div style="background: linear-gradient(135deg, #0f172a, #1e293b); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; color: white;">
-                        <h3 style="margin:0; font-size: 1.25rem; font-weight: 900; display: flex; align-items: center; gap: 10px; color: #f8fafc;">
-                            <span style="font-size: 1.4rem;">🔔</span> مركز إدارة التنبيهات والتحويلات الواردة
-                        </h3>
-                        <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             ${(totalActiveCount > 0 && activeTab !== 'transfers') ? `
-                                <button onclick="acknowledgeAllNotifications('${activeTab}')" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #6ee7b7; padding: 6px 14px; border-radius: 10px; cursor: pointer; font-size: 0.85rem; font-weight: bold; display: flex; align-items: center; gap: 6px; transition: 0.2s;" onmouseover="this.style.background='rgba(16, 185, 129, 0.35)'" onmouseout="this.style.background='rgba(16, 185, 129, 0.2)'">
-                                    <span>✔️</span> استلام وقراءة الكل
+                                <button onclick="acknowledgeAllNotifications('${activeTab}')" style="background: rgba(16, 185, 129, 0.18); border: 1.5px solid #10b981; color: #a7f3d0; padding: 7px 16px; border-radius: 11px; cursor: pointer; font-size: 0.84rem; font-weight: 900; display: flex; align-items: center; gap: 6px; transition: 0.2s;" onmouseover="this.style.background='rgba(16, 185, 129, 0.35)'" onmouseout="this.style.background='rgba(16, 185, 129, 0.18)'">
+                                    <span>✔️</span> استلام وتوثيق الكل
                                 </button>
                             ` : ''}
-                            <button onclick="document.getElementById('notifyModal').remove()" style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">&times;</button>
+                            <button onclick="document.getElementById('notifyModal').remove()" style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); color: #fff; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 1.25rem; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">&times;</button>
                         </div>
                     </div>
 
-                    <!-- Custom Tabs (5 تبويبات مخصصة وشاملة) -->
-                    <div style="display: flex; background: #f8fafc; border-bottom: 1.5px solid #e2e8f0; overflow-x: auto;">
-                        <div onclick="showNotificationsModal('products')" style="flex: 1; min-width: 125px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'products' ? '#10b981' : 'transparent'}; color: ${activeTab === 'products' ? '#047857' : '#64748b'}; background: ${activeTab === 'products' ? 'rgba(16, 185, 129, 0.08)' : 'transparent'};">
-                            📦 البضاعة والصلاحية <span style="background:${activeProductsTotal > 0 ? '#ef4444' : '#e2e8f0'}; color:${activeProductsTotal > 0 ? '#fff' : '#64748b'}; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${activeProductsTotal}</span>
+                    <!-- Custom Tabs Bar (5 تبويبات أنيقة وواسعة) -->
+                    <div style="display: flex; background: #f8fafc; border-bottom: 2px solid #e2e8f0; overflow-x: auto; gap: 4px; padding: 6px 12px 0 12px;">
+                        <!-- تبويب البضاعة والصلاحية -->
+                        <div onclick="showNotificationsModal('products')" style="flex: 1; min-width: 155px; padding: 12px 10px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.9rem; transition: 0.2s; border-radius: 12px 12px 0 0; border-bottom: 3.5px solid ${activeTab === 'products' ? '#10b981' : 'transparent'}; color: ${activeTab === 'products' ? '#047857' : '#64748b'}; background: ${activeTab === 'products' ? '#ffffff' : 'transparent'}; box-shadow: ${activeTab === 'products' ? '0 -2px 10px rgba(0,0,0,0.04)' : 'none'}; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                            <span>📦 البضاعة والصلاحية</span>
+                            <span style="background: ${activeProductsTotal > 0 ? '#ef4444' : '#e2e8f0'}; color: ${activeProductsTotal > 0 ? '#ffffff' : '#64748b'}; font-size: 0.72rem; font-weight: 900; padding: 2px 7px; border-radius: 12px;">${activeProductsTotal}</span>
                         </div>
-                        <div onclick="showNotificationsModal('transfers')" style="flex: 1; min-width: 135px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'transfers' ? '#059669' : 'transparent'}; color: ${activeTab === 'transfers' ? '#047857' : '#64748b'}; background: ${activeTab === 'transfers' ? 'rgba(5, 150, 105, 0.08)' : 'transparent'};">
-                            🚚 تحويلات واردة <span style="background:${activeTransfersCount > 0 ? '#059669' : '#e2e8f0'}; color:${activeTransfersCount > 0 ? '#fff' : '#64748b'}; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${activeTransfersCount}</span>
+
+                        <!-- تبويب التحويلات الواردة -->
+                        <div onclick="showNotificationsModal('transfers')" style="flex: 1; min-width: 155px; padding: 12px 10px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.9rem; transition: 0.2s; border-radius: 12px 12px 0 0; border-bottom: 3.5px solid ${activeTab === 'transfers' ? '#059669' : 'transparent'}; color: ${activeTab === 'transfers' ? '#047857' : '#64748b'}; background: ${activeTab === 'transfers' ? '#ffffff' : 'transparent'}; box-shadow: ${activeTab === 'transfers' ? '0 -2px 10px rgba(0,0,0,0.04)' : 'none'}; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                            <span>🚚 تحويلات واردة</span>
+                            <span style="background: ${activeTransfersCount > 0 ? '#059669' : '#e2e8f0'}; color: ${activeTransfersCount > 0 ? '#ffffff' : '#64748b'}; font-size: 0.72rem; font-weight: 900; padding: 2px 7px; border-radius: 12px;">${activeTransfersCount}</span>
                         </div>
-                        <div onclick="showNotificationsModal('accounts')" style="flex: 1; min-width: 125px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'accounts' ? '#3b82f6' : 'transparent'}; color: ${activeTab === 'accounts' ? '#1d4ed8' : '#64748b'}; background: ${activeTab === 'accounts' ? 'rgba(59, 130, 246, 0.08)' : 'transparent'};">
-                            💳 تنبيهات الحسابات <span style="background:${activeAccountsTotal > 0 ? '#ef4444' : '#e2e8f0'}; color:${activeAccountsTotal > 0 ? '#fff' : '#64748b'}; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${activeAccountsTotal}</span>
+
+                        <!-- تبويب الحسابات والديون (محمي بصلاحيات الحسابات) -->
+                        ${canViewAccounts ? `
+                        <div onclick="showNotificationsModal('accounts')" style="flex: 1; min-width: 155px; padding: 12px 10px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.9rem; transition: 0.2s; border-radius: 12px 12px 0 0; border-bottom: 3.5px solid ${activeTab === 'accounts' ? '#3b82f6' : 'transparent'}; color: ${activeTab === 'accounts' ? '#1d4ed8' : '#64748b'}; background: ${activeTab === 'accounts' ? '#ffffff' : 'transparent'}; box-shadow: ${activeTab === 'accounts' ? '0 -2px 10px rgba(0,0,0,0.04)' : 'none'}; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                            <span>💳 تنبيهات الحسابات</span>
+                            <span style="background: ${activeAccountsTotal > 0 ? '#ef4444' : '#e2e8f0'}; color: ${activeAccountsTotal > 0 ? '#ffffff' : '#64748b'}; font-size: 0.72rem; font-weight: 900; padding: 2px 7px; border-radius: 12px;">${activeAccountsTotal}</span>
                         </div>
-                        <div onclick="showNotificationsModal('archived')" style="flex: 1; min-width: 120px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'archived' ? '#f59e0b' : 'transparent'}; color: ${activeTab === 'archived' ? '#b45309' : '#64748b'}; background: ${activeTab === 'archived' ? 'rgba(245, 158, 11, 0.08)' : 'transparent'};">
-                            📁 سجل الاستلام <span style="background:#e2e8f0; color:#475569; font-size:0.75rem; padding:2px 7px; border-radius:12px; margin-right:4px;">${totalArchivedCount}</span>
+                        ` : ''}
+
+                        <!-- تبويب سجل الاستلام الموثق -->
+                        <div onclick="showNotificationsModal('archived')" style="flex: 1; min-width: 165px; padding: 12px 10px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.9rem; transition: 0.2s; border-radius: 12px 12px 0 0; border-bottom: 3.5px solid ${activeTab === 'archived' ? '#d97706' : 'transparent'}; color: ${activeTab === 'archived' ? '#b45309' : '#64748b'}; background: ${activeTab === 'archived' ? '#ffffff' : 'transparent'}; box-shadow: ${activeTab === 'archived' ? '0 -2px 10px rgba(0,0,0,0.04)' : 'none'}; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                            <span>📋 سجل الاستلام والتدقيق</span>
+                            <span style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; font-size: 0.72rem; font-weight: 900; padding: 2px 7px; border-radius: 12px;">${totalReceiptCount}</span>
                         </div>
-                        <div onclick="showNotificationsModal('cloud')" style="flex: 1; min-width: 130px; padding: 14px 8px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.92rem; transition: 0.25s; border-bottom: 3px solid ${activeTab === 'cloud' ? '#8b5cf6' : 'transparent'}; color: ${activeTab === 'cloud' ? '#6d28d9' : '#64748b'}; background: ${activeTab === 'cloud' ? 'rgba(139, 92, 246, 0.08)' : 'transparent'};">
-                            ☁️ الإشعارات السحابية ${window.latestCloudAnnouncement && window.latestCloudAnnouncement.active ? '<span style="background:#ef4444; width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:3px;"></span>' : ''}
+
+                        <!-- تبويب الإشعارات السحابية -->
+                        <div onclick="showNotificationsModal('cloud')" style="flex: 1; min-width: 155px; padding: 12px 10px; text-align: center; cursor: pointer; font-weight: 900; font-size: 0.9rem; transition: 0.2s; border-radius: 12px 12px 0 0; border-bottom: 3.5px solid ${activeTab === 'cloud' ? '#8b5cf6' : 'transparent'}; color: ${activeTab === 'cloud' ? '#6d28d9' : '#64748b'}; background: ${activeTab === 'cloud' ? '#ffffff' : 'transparent'}; box-shadow: ${activeTab === 'cloud' ? '0 -2px 10px rgba(0,0,0,0.04)' : 'none'}; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                            <span>☁️ الإشعارات السحابية</span>
+                            ${activeCloudCount > 0 ? `<span style="background: #8b5cf6; color: #fff; font-size: 0.72rem; font-weight: 900; padding: 2px 7px; border-radius: 12px;">${activeCloudCount}</span>` : ''}
                         </div>
                     </div>
 
                     <!-- Content Area -->
-                    <div style="padding: 20px 24px; flex: 1; overflow-y: auto; background: #fff; min-height: 280px;">
+                    <div style="padding: 22px 26px; flex: 1; overflow-y: auto; background: #ffffff; min-height: 320px;" class="fast-scrollbar">
+
+                        <!-- 1. تبويب التحويلات الواردة -->
                         ${activeTab === 'transfers' ? `
                             ${(activeTransfersCount === 0) ? `
-                                <div style="text-align: center; padding: 45px 20px; color: #64748b;">
-                                    <div style="font-size: 3.2rem; margin-bottom: 12px;">🚚✨</div>
-                                    <div style="font-weight: 900; font-size: 1.15rem; color: #0f172a;">لا توجد تحويلات واردة بانتظار الاستلام!</div>
-                                    <div style="font-size: 0.88rem; margin-top: 5px; color: #64748b;">جميع الشحنات المحولة إلى (${activeWH}) تم فحصها واستلامها واعتمادها بنجاح.</div>
+                                <div style="text-align: center; padding: 50px 20px; color: #64748b;">
+                                    <div style="font-size: 3.5rem; margin-bottom: 12px;">🚚✨</div>
+                                    <div style="font-weight: 900; font-size: 1.2rem; color: #0f172a;">لا توجد أذونات تحويل واردة بانتظار الاستلام!</div>
+                                    <div style="font-size: 0.9rem; margin-top: 6px; color: #64748b;">جميع الشحنات المحولة إلى (<b style="color:#059669;">${escapeStr(activeWH)}</b>) تم فحصها واستلامها واعتمادها بنجاح.</div>
                                 </div>
                             ` : `
-                                <div style="margin-bottom: 15px; display:flex; justify-content:space-between; align-items:center;">
-                                    <span style="font-size:0.88rem; font-weight:800; color:#1e293b;">أذونات التحويل الواردة بانتظار المراجعة والاستلام (${activeTransfersCount}):</span>
+                                <div style="margin-bottom: 16px; display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:0.92rem; font-weight:900; color:#1e293b;">
+                                        📦 أذونات التحويل الواردة بانتظار المراجعة والاستلام المخزني (<b style="color:#059669;">${activeTransfersCount}</b>):
+                                    </span>
                                 </div>
                                 <div style="display:flex; flex-direction:column; gap:16px;">
                                     ${pendingTransfersList.map(tr => `
-                                        <div style="background:#f8fafc; border:2px solid #a7f3d0; border-radius:16px; padding:18px 20px; box-shadow:0 4px 15px rgba(0,0,0,0.04);">
-                                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px dashed #cbd5e1; padding-bottom:12px; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                                        <div style="background:#f8fafc; border:2px solid #a7f3d0; border-radius:18px; padding:18px 22px; box-shadow:0 4px 18px rgba(0,0,0,0.04);">
+                                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px dashed #cbd5e1; padding-bottom:12px; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
                                                 <div>
-                                                    <span style="background:#047857; color:#fff; font-weight:900; font-size:0.82rem; padding:4px 12px; border-radius:20px;">إذن تحويل #${tr.id}</span>
-                                                    <span style="color:#0f172a; font-weight:bold; font-size:0.9rem; margin-right:8px;">من: <b style="color:#2563eb;">${tr.sourceWarehouse}</b> ⬅️ إلى: <b style="color:#059669;">${tr.warehouse}</b></span>
+                                                    <span style="background:#047857; color:#fff; font-weight:900; font-size:0.85rem; padding:4px 14px; border-radius:20px;">إذن تحويل #${escapeStr(tr.id)}</span>
+                                                    <span style="color:#0f172a; font-weight:900; font-size:0.95rem; margin-right:10px;">من: <b style="color:#2563eb;">${escapeStr(tr.sourceWarehouse)}</b> ⬅️ إلى مخزنك: <b style="color:#059669;">${escapeStr(tr.warehouse)}</b></span>
                                                 </div>
-                                                <div style="font-size:0.8rem; color:#64748b; font-weight:bold;">
-                                                    🕒 ${tr.date || ''} | 👤 المرسل: ${tr.user}
+                                                <div style="font-size:0.82rem; color:#64748b; font-weight:bold;">
+                                                    🕒 ${escapeStr(tr.date || '')} | 👤 المرسل: <b style="color:#334155;">${escapeStr(tr.user)}</b>
                                                 </div>
                                             </div>
 
-                                            <div style="background:#fff; border-radius:10px; border:1px solid #e2e8f0; overflow:hidden; margin-bottom:12px;">
-                                                <table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:center;">
-                                                    <thead style="background:#f1f5f9; color:#475569; font-weight:bold;">
+                                            <div style="background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; margin-bottom:14px;">
+                                                <table style="width:100%; border-collapse:collapse; font-size:0.88rem; text-align:center;">
+                                                    <thead style="background:#f1f5f9; color:#475569; font-weight:900;">
                                                         <tr>
-                                                            <th style="padding:6px 10px; text-align:right;">الصنف</th>
-                                                            <th style="padding:6px 10px;">المقاس</th>
-                                                            <th style="padding:6px 10px;">اللون</th>
-                                                            <th style="padding:6px 10px;">الكمية المحولة</th>
+                                                            <th style="padding:8px 14px; text-align:right;">الصنف المحول</th>
+                                                            <th style="padding:8px 10px;">المقاس</th>
+                                                            <th style="padding:8px 10px;">اللون</th>
+                                                            <th style="padding:8px 14px;">الكمية</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
                                                         ${tr.items.map(it => `
                                                             <tr style="border-top:1px solid #f1f5f9;">
-                                                                <td style="padding:8px 10px; font-weight:bold; color:#0f172a; text-align:right;">${it.product}</td>
-                                                                <td style="padding:8px 10px; color:#64748b;">${it.selectedSize || it.size || '-'}</td>
-                                                                <td style="padding:8px 10px; color:#64748b;">${it.selectedColor || it.color || '-'}</td>
-                                                                <td style="padding:8px 10px; font-weight:900; color:#047857; font-size:0.95rem;">${it.qty} ${it.unit || ''}</td>
+                                                                <td style="padding:10px 14px; font-weight:900; color:#0f172a; text-align:right;">${escapeStr(it.product)}</td>
+                                                                <td style="padding:10px 10px; color:#475569; font-weight:bold;">${escapeStr(it.selectedSize || it.size || '-')}</td>
+                                                                <td style="padding:10px 10px; color:#475569; font-weight:bold;">${escapeStr(it.selectedColor || it.color || '-')}</td>
+                                                                <td style="padding:10px 14px; font-weight:900; color:#047857; font-size:1.02rem;">${it.qty} ${escapeStr(it.unit || 'قطعة')}</td>
                                                             </tr>
                                                         `).join('')}
                                                     </tbody>
                                                 </table>
                                             </div>
 
-                                            ${tr.notes ? `<div style="font-size:0.82rem; color:#64748b; margin-bottom:12px; background:#fff; padding:6px 12px; border-radius:8px; border:1px solid #e2e8f0;">📝 ملاحظات المرسل: ${tr.notes}</div>` : ''}
+                                            ${tr.notes ? `<div style="font-size:0.85rem; color:#475569; margin-bottom:14px; background:#ffffff; padding:8px 14px; border-radius:10px; border:1px solid #e2e8f0; font-weight:bold;">📝 ملاحظات المرسل: ${escapeStr(tr.notes)}</div>` : ''}
 
-                                            <div style="display:flex; justify-content:flex-end; gap:10px;">
-                                                <button onclick="if(confirm('هل أنت متأكد من رفض إذن التحويل #${tr.id} وإرجاع البضاعة للمخزن المصدر؟')) window.rejectTransferFromNotify('${tr.id}')" style="background:#fee2e2; color:#dc2626; border:1.5px solid #fca5a5; border-radius:9px; padding:8px 16px; font-weight:bold; font-size:0.85rem; cursor:pointer;">
-                                                    ❌ رفض الإذن
+                                            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                                                <button onclick="if(confirm('هل أنت متأكد من رفض إذن التحويل #${escapeStr(tr.id)}؟ تظل البضاعة مسجلة بالكامل برصيد المخزن المصدر.')) window.rejectTransferFromNotify('${escapeStr(tr.id)}')" style="background:#fee2e2; color:#dc2626; border:1.5px solid #fca5a5; border-radius:10px; padding:9px 18px; font-weight:900; font-size:0.86rem; cursor:pointer; transition:0.2s;">
+                                                    ❌ رفض التحويل
                                                 </button>
-                                                <button onclick="window.acceptTransferFromNotify('${tr.id}')" style="background:linear-gradient(135deg, #10b981, #047857); color:#fff; border:none; border-radius:9px; padding:8px 24px; font-weight:900; font-size:0.9rem; cursor:pointer; box-shadow:0 3px 8px rgba(16,185,129,0.35);">
-                                                    ✅ موافقة واستلام الشحنة
+                                                <button onclick="window.acceptTransferFromNotify('${escapeStr(tr.id)}')" style="background:linear-gradient(135deg, #10b981, #047857); color:#fff; border:none; border-radius:10px; padding:9px 24px; font-weight:900; font-size:0.92rem; cursor:pointer; box-shadow:0 3px 10px rgba(16,185,129,0.35); transition:0.2s;">
+                                                    ✅ موافقة واستلام البضاعة بالمخزن
                                                 </button>
                                             </div>
                                         </div>
@@ -265,88 +191,344 @@
                                 </div>
                             `}
                         ` : activeTab === 'products' ? `
+                            <!-- 2. تبويب البضاعة والصلاحية -->
                             ${(activeProductsTotal === 0) ? `
-                                <div style="text-align: center; padding: 45px 20px; color: #64748b;">
-                                    <div style="font-size: 3.2rem; margin-bottom: 12px;">🎉</div>
-                                    <div style="font-weight: 900; font-size: 1.15rem; color: #0f172a;">مخزون البضاعة والصلاحيات مكتمل ومستقر!</div>
-                                    <div style="font-size: 0.88rem; margin-top: 5px; color: #64748b;">لا توجد أصناف وصلت للحد الأدنى للنواقص أو أوشكت صلاحيتها على الانتهاء.</div>
+                                <div style="text-align: center; padding: 50px 20px; color: #64748b;">
+                                    <div style="font-size: 3.5rem; margin-bottom: 12px;">🎉📦</div>
+                                    <div style="font-weight: 900; font-size: 1.25rem; color: #0f172a;">مخزون البضاعة والصلاحيات مستقر ومكتمل!</div>
+                                    <div style="font-size: 0.9rem; margin-top: 6px; color: #64748b;">لا توجد أصناف وصلت لحد النواقص الأدنى أو اقتربت تواريخ صلاحيتها.</div>
                                 </div>
                             ` : `
-                                <div style="margin-bottom: 12px; display:flex; justify-content:space-between; align-items:center;">
-                                    <span style="font-size:0.85rem; font-weight:800; color:#475569;">الأصناف التي قاربت على النفاد أو قريبة الانتهاء:</span>
-                                    <button onclick="acknowledgeAllProductsNotifications()" style="padding: 6px 14px; background: #10b981; color: white; border: none; border-radius: 8px; font-weight: 900; font-size: 0.8rem; cursor: pointer;">✔️ استلام جميع تنبيهات البضاعة</button>
+                                <div style="margin-bottom: 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                                    <span style="font-size:0.9rem; font-weight:900; color:#334155;">
+                                        الأصناف المطلوب متابعتها (${activeProductsTotal}): <span style="color:#ef4444; font-weight:900;">(${activeLowStock.length} نواقص)</span> • <span style="color:#d97706; font-weight:900;">(${activeExpiring.length} صلاحيات)</span>
+                                    </span>
+                                    <button onclick="acknowledgeAllProductsNotifications()" style="padding: 7px 16px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 9px; font-weight: 900; font-size: 0.84rem; cursor: pointer; box-shadow:0 2px 8px rgba(16,185,129,0.3);">
+                                        ✔️ استلام وتوثيق كل تنبيهات البضاعة
+                                    </button>
                                 </div>
-                                <table class="report-table" style="width:100%; border-collapse:collapse; color: #1e293b;">
-                                    <thead>
-                                        <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
-                                            <th style="text-align:right; padding:10px 12px; color: #475569; font-weight: 900;">اسم الصنف</th>
-                                            <th style="padding:10px 12px; color: #475569; font-weight: 900; text-align:center;">الحالة / الرصيد</th>
-                                            <th style="padding:10px 12px; color: #475569; font-weight: 900; text-align:center;">تأكيد الاستلام</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${createRows(activeLowStock, 'low-stock', false)}
-                                        ${createRows(activeExpiring, 'expiry', false)}
-                                    </tbody>
-                                </table>
+
+                                <div style="border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.02);">
+                                    <table style="width:100%; border-collapse:collapse; font-size:0.88rem; text-align:right;">
+                                        <thead>
+                                            <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-weight: 900;">
+                                                <th style="padding:12px 16px;">الصنف والبيان</th>
+                                                <th style="padding:12px 16px; text-align:center;">المخزون / تاريخ الصلاحية</th>
+                                                <th style="padding:12px 16px; text-align:center;">مستوى التنبيه</th>
+                                                <th style="padding:12px 16px; text-align:center; width:140px;">الإجراء</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- أصناف النواقص -->
+                                            ${activeLowStock.map(p => {
+                                                const curStock = parseFloat(p.stock) || 0;
+                                                const minStock = parseFloat(p.minStock) || 5;
+                                                const isZero = curStock <= 0;
+                                                const pDetails = `الرصيد: ${curStock} (حد الأمان: ${minStock})`;
+                                                return `
+                                                <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                                    <td style="padding: 12px 16px;">
+                                                        <div style="display:flex; align-items:center; gap:10px;">
+                                                            <div style="width:34px; height:34px; border-radius:10px; background:#fee2e2; color:#dc2626; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;">
+                                                                📦
+                                                            </div>
+                                                            <div>
+                                                                <div style="font-weight:900; color:#0f172a; font-size:0.92rem;">${escapeStr(p.name)}</div>
+                                                                ${p.barcode ? `<div style="font-size:0.75rem; color:#64748b; font-family:monospace;">كود: ${escapeStr(p.barcode)}</div>` : ''}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <span style="font-size:1.1rem; font-weight:900; color:#ef4444; direction:ltr; display:inline-block;">${curStock}</span>
+                                                        <span style="font-size:0.78rem; color:#64748b; margin-right:4px;">(حد الأمان: ${minStock})</span>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        ${isZero ? `
+                                                            <span style="background:#fee2e2; color:#b91c1c; font-size:0.75rem; font-weight:900; padding:4px 10px; border-radius:20px; border:1px solid #fca5a5;">❌ نفد تماماً (0)</span>
+                                                        ` : `
+                                                            <span style="background:#fef3c7; color:#b45309; font-size:0.75rem; font-weight:900; padding:4px 10px; border-radius:20px; border:1px solid #fde68a;">⚠️ قارب على النفاد</span>
+                                                        `}
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <button onclick="window.acknowledgeNotification('low-stock', '${escapeStr(p.id)}', { name: '${escapeStr(p.name)}', details: '${escapeStr(pDetails)}', typeLabel: 'نواقص بضاعة' }, 'products')" 
+                                                            style="background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; border-radius:9px; padding:7px 14px; font-size:0.82rem; font-weight:900; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(16,185,129,0.3); transition:0.2s;"
+                                                            title="تأكيد الاستلام ونقله لسجل الاستلام الموثق">
+                                                            <span>✔️</span> استلام
+                                                        </button>
+                                                    </td>
+                                                </tr>`;
+                                            }).join('')}
+
+                                            <!-- أصناف الصلاحية -->
+                                            ${activeExpiring.map(p => {
+                                                const exp = new Date(p.expiry);
+                                                exp.setHours(0, 0, 0, 0);
+                                                const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
+                                                const isExpired = diffDays <= 0;
+                                                const pDetails = isExpired ? `منتهي بتاريخ ${p.expiry} (منذ ${Math.abs(diffDays)} يوم)` : `ينتهي في ${diffDays} يوم (${p.expiry})`;
+                                                return `
+                                                <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                                    <td style="padding: 12px 16px;">
+                                                        <div style="display:flex; align-items:center; gap:10px;">
+                                                            <div style="width:34px; height:34px; border-radius:10px; background:#fef3c7; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;">
+                                                                📅
+                                                            </div>
+                                                            <div>
+                                                                <div style="font-weight:900; color:#0f172a; font-size:0.92rem;">${escapeStr(p.name)}</div>
+                                                                <div style="font-size:0.75rem; color:#64748b;">تاريخ الصلاحية: <b style="color:#0f172a;">${escapeStr(p.expiry)}</b></div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        ${isExpired ? `
+                                                            <span style="font-size:0.85rem; font-weight:900; color:#dc2626; background:#fee2e2; padding:3px 10px; border-radius:8px; border:1px solid #fca5a5;">❌ منتهي منذ ${Math.abs(diffDays)} يوم</span>
+                                                        ` : `
+                                                            <span style="font-size:0.85rem; font-weight:900; color:#d97706; background:#fef3c7; padding:3px 10px; border-radius:8px; border:1px solid #fde68a;">⏳ ينتهي خلال ${diffDays} يوم</span>
+                                                        `}
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <span style="background:${isExpired ? '#fee2e2' : '#fef3c7'}; color:${isExpired ? '#dc2626' : '#d97706'}; font-size:0.75rem; font-weight:900; padding:4px 10px; border-radius:20px;">
+                                                            ${isExpired ? 'صلاحية منتهية ❌' : 'صلاحية وشيكة ⚠️'}
+                                                        </span>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <button onclick="window.acknowledgeNotification('expiry', '${escapeStr(p.id)}', { name: '${escapeStr(p.name)}', details: '${escapeStr(pDetails)}', typeLabel: 'صلاحية قريبة/منتهية' }, 'products')" 
+                                                            style="background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; border-radius:9px; padding:7px 14px; font-size:0.82rem; font-weight:900; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(16,185,129,0.3); transition:0.2s;"
+                                                            title="تأكيد الاستلام ونقله لسجل الاستلام الموثق">
+                                                            <span>✔️</span> استلام
+                                                        </button>
+                                                    </td>
+                                                </tr>`;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
                             `}
                         ` : activeTab === 'accounts' ? `
+                            <!-- 3. تبويب الحسابات والديون -->
                             ${(activeAccountsTotal === 0) ? `
-                                <div style="text-align: center; padding: 45px 20px; color: #64748b;">
-                                    <div style="font-size: 3.2rem; margin-bottom: 12px;">✅</div>
-                                    <div style="font-weight: 900; font-size: 1.15rem; color: #0f172a;">حسابات العملاء منتظمة!</div>
-                                    <div style="font-size: 0.88rem; margin-top: 5px; color: #64748b;">لا توجد تنبيهات ديون نشطة أو حسابات متأخرة مسجلة للتذكير.</div>
+                                <div style="text-align: center; padding: 50px 20px; color: #64748b;">
+                                    <div style="font-size: 3.5rem; margin-bottom: 12px;">✅💳</div>
+                                    <div style="font-weight: 900; font-size: 1.25rem; color: #0f172a;">حسابات العملاء منتظمة بالكامل!</div>
+                                    <div style="font-size: 0.9rem; margin-top: 6px; color: #64748b;">لا توجد مديونيات نشطة أو حسابات متأخرة عن السداد بانتظار التذكير.</div>
                                 </div>
                             ` : `
-                                <div style="margin-bottom: 12px; display:flex; justify-content:space-between; align-items:center;">
-                                    <span style="font-size:0.85rem; font-weight:800; color:#475569;">العملاء الذين عليهم مديونيات أو متأخرين عن السداد:</span>
-                                    <button onclick="acknowledgeAllAccountsNotifications()" style="padding: 6px 14px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: 900; font-size: 0.8rem; cursor: pointer;">✔️ استلام جميع تنبيهات الحسابات</button>
+                                <div style="margin-bottom: 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                                    <span style="font-size:0.9rem; font-weight:900; color:#334155;">
+                                        تنبيهات الحسابات النشطة (${activeAccountsTotal}): <span style="color:#ef4444; font-weight:900;">(${activeDebt.length} مديونية)</span> • <span style="color:#b45309; font-weight:900;">(${activeDelayed.length} متأخر سداد)</span>
+                                    </span>
+                                    <button onclick="acknowledgeAllAccountsNotifications()" style="padding: 7px 16px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border: none; border-radius: 9px; font-weight: 900; font-size: 0.84rem; cursor: pointer; box-shadow:0 2px 8px rgba(59,130,246,0.3);">
+                                        ✔️ استلام وتوثيق كل تنبيهات الحسابات
+                                    </button>
                                 </div>
-                                <table class="report-table" style="width:100%; border-collapse:collapse; color: #1e293b;">
-                                    <thead>
-                                        <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
-                                            <th style="text-align:right; padding:10px 12px; color: #475569; font-weight: 900;">اسم الحساب / العميل</th>
-                                            <th style="padding:10px 12px; color: #475569; font-weight: 900; text-align:center;">المبلغ المستحق</th>
-                                            <th style="padding:10px 12px; color: #475569; font-weight: 900; text-align:center;">الإجراء</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${createRows(activeDebt, 'debt', false)}
-                                        ${createRows(activeDelayed, 'delayed', false)}
-                                    </tbody>
-                                </table>
+
+                                <div style="border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.02);">
+                                    <table style="width:100%; border-collapse:collapse; font-size:0.88rem; text-align:right;">
+                                        <thead>
+                                            <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-weight: 900;">
+                                                <th style="padding:12px 16px;">اسم العميل / الحساب</th>
+                                                <th style="padding:12px 16px; text-align:center;">المبلغ المستحق</th>
+                                                <th style="padding:12px 16px; text-align:center;">حالة السداد والتأخير</th>
+                                                <th style="padding:12px 16px; text-align:center; width:190px;">الإجراءات</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- ديون العملاء -->
+                                            ${activeDebt.map(a => {
+                                                const debit = parseFloat(a.debit) || 0;
+                                                const credit = parseFloat(a.credit) || 0;
+                                                const balance = debit - credit;
+                                                const detailsText = `المبلغ المستحق: ${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} ج.م`;
+                                                return `
+                                                <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                                    <td style="padding: 12px 16px;">
+                                                        <div style="display:flex; align-items:center; gap:10px;">
+                                                            <div style="width:34px; height:34px; border-radius:10px; background:#eff6ff; color:#2563eb; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;">
+                                                                💳
+                                                            </div>
+                                                            <div>
+                                                                <div style="font-weight:900; color:#0f172a; font-size:0.92rem;">${escapeStr(a.name)}</div>
+                                                                ${a.phone ? `<div style="font-size:0.75rem; color:#64748b;">📞 ${escapeStr(a.phone)}</div>` : ''}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <span style="font-size:1.08rem; font-weight:900; color:#e11d48; direction:ltr; display:inline-block;">${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                                        <span style="font-size:0.78rem; color:#64748b; margin-right:4px;">ج.م</span>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <span style="background:#fee2e2; color:#be123c; font-size:0.75rem; font-weight:900; padding:4px 10px; border-radius:20px; border:1px solid #fecdd3;">مديونية مستحقة للتذكير</span>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <div style="display:flex; gap:6px; justify-content:center; align-items:center;">
+                                                            <button class="tool-btn" style="background:#3b82f6; color:white; border-radius:8px; border:none; padding: 6px 12px; font-weight:800; font-size:0.8rem; cursor:pointer;" onclick="openStatementFromNotify('${escapeStr(a.id)}')" title="عرض كشف حساب العميل">📄 كشف</button>
+                                                            <button class="tool-btn" style="background:linear-gradient(135deg, #10b981, #059669); color:white; border-radius:8px; padding: 6px 14px; font-size: 0.8rem; font-weight: 900; border: none; cursor: pointer; display:flex; align-items:center; gap:4px; box-shadow:0 2px 6px rgba(16,185,129,0.3);" 
+                                                                onclick="window.acknowledgeNotification('debt', '${escapeStr(a.id)}', { name: '${escapeStr(a.name)}', details: '${escapeStr(detailsText)}', typeLabel: 'مديونية عميل' }, 'accounts')" title="تأكيد الاستلام ونقله لسجل الاستلام">
+                                                                <span style="font-size:0.85rem;">✔️</span> استلام
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>`;
+                                            }).join('')}
+
+                                            <!-- العملاء المتأخرين عن السداد -->
+                                            ${activeDelayed.map(a => {
+                                                const debit = parseFloat(a.debit) || 0;
+                                                const credit = parseFloat(a.credit) || 0;
+                                                const balance = debit - credit;
+                                                const lastTrans = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+                                                    ? transactions.filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0]
+                                                    : null;
+                                                let delayNote = "متأخر عن السداد (لا توجد دفعات مسجلة)";
+                                                if (lastTrans) {
+                                                    const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
+                                                    const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
+                                                    delayNote = `متأخر منذ ${diffDays} يوم (آخر حركة: ${lastTrans.date || ''})`;
+                                                }
+                                                const detailsText = `المبلغ: ${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} ج.م (${delayNote})`;
+                                                return `
+                                                <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                                    <td style="padding: 12px 16px;">
+                                                        <div style="display:flex; align-items:center; gap:10px;">
+                                                            <div style="width:34px; height:34px; border-radius:10px; background:#fef3c7; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;">
+                                                                ⏳
+                                                            </div>
+                                                            <div>
+                                                                <div style="font-weight:900; color:#0f172a; font-size:0.92rem;">${escapeStr(a.name)}</div>
+                                                                ${a.phone ? `<div style="font-size:0.75rem; color:#64748b;">📞 ${escapeStr(a.phone)}</div>` : ''}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <span style="font-size:1.08rem; font-weight:900; color:#b45309; direction:ltr; display:inline-block;">${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                                        <span style="font-size:0.78rem; color:#64748b; margin-right:4px;">ج.م</span>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <span style="background:#fffbeb; color:#b45309; font-size:0.75rem; font-weight:900; padding:4px 10px; border-radius:20px; border:1px solid #fde68a;">⏳ ${escapeStr(delayNote)}</span>
+                                                    </td>
+                                                    <td style="padding: 12px 16px; text-align:center;">
+                                                        <div style="display:flex; gap:6px; justify-content:center; align-items:center;">
+                                                            <button class="tool-btn" style="background:#3b82f6; color:white; border-radius:8px; border:none; padding: 6px 12px; font-weight:800; font-size:0.8rem; cursor:pointer;" onclick="openStatementFromNotify('${escapeStr(a.id)}')" title="عرض كشف حساب العميل">📄 كشف</button>
+                                                            <button class="tool-btn" style="background:linear-gradient(135deg, #10b981, #059669); color:white; border-radius:8px; padding: 6px 14px; font-size: 0.8rem; font-weight: 900; border: none; cursor: pointer; display:flex; align-items:center; gap:4px; box-shadow:0 2px 6px rgba(16,185,129,0.3);" 
+                                                                onclick="window.acknowledgeNotification('delayed', '${escapeStr(a.id)}', { name: '${escapeStr(a.name)}', details: '${escapeStr(detailsText)}', typeLabel: 'متأخر عن السداد' }, 'accounts')" title="تأكيد الاستلام ونقله لسجل الاستلام">
+                                                                <span style="font-size:0.85rem;">✔️</span> استلام
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>`;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
                             `}
                         ` : activeTab === 'archived' ? `
-                            ${(totalArchivedCount === 0) ? `
-                                <div style="text-align: center; padding: 45px 20px; color: #64748b;">
-                                    <div style="font-size: 3.2rem; margin-bottom: 12px;">📁</div>
-                                    <div style="font-weight: 900; font-size: 1.1rem; color: #0f172a;">سجل الاستلام فارغ</div>
-                                    <div style="font-size: 0.85rem; margin-top: 5px; color: #64748b;">لم يتم وضع علامة استلام على أي تنبيه حتى الآن.</div>
+                            <!-- 4. تبويب سجل الاستلام والتدقيق الموثق (Audit & Receipt Log) -->
+                            <div style="display:flex; flex-direction:column; gap:16px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:#f8fafc; padding:12px 16px; border-radius:14px; border:1px solid #e2e8f0;">
+                                    <div>
+                                        <span style="font-weight:900; color:#0f172a; font-size:0.95rem;">📋 سجل الاستلام والتدقيق الموثق:</span>
+                                        <span style="font-size:0.82rem; color:#64748b; margin-right:8px;">توثيق رسمي لجميع التنبيهات المستلمة بالوقت واسم المستلم والمخزن.</span>
+                                    </div>
+                                    <div style="display:flex; gap:8px;">
+                                        ${totalReceiptCount > 0 ? `
+                                            <button onclick="window.resetAcknowledgedNotifications()" style="padding:6px 14px; background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; border-radius:8px; font-weight:900; font-size:0.8rem; cursor:pointer; transition:0.2s;" title="إعادة كافة التنبيهات للقوائم النشطة">
+                                                🔄 استعادة الكل للنشط
+                                            </button>
+                                            <button onclick="window.clearReceiptLog()" style="padding:6px 14px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; border-radius:8px; font-weight:900; font-size:0.8rem; cursor:pointer; transition:0.2s;" title="مسح بيانات السجل نهائياً">
+                                                🗑️ مسح السجل
+                                            </button>
+                                        ` : ''}
+                                    </div>
                                 </div>
-                            ` : `
-                                <table class="report-table" style="width:100%; border-collapse:collapse; color: #334155;">
-                                    <thead>
-                                        <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
-                                            <th style="text-align:right; padding:10px 12px; color: #475569; font-weight: 900;">البيان المستلم</th>
-                                            <th style="padding:10px 12px; color: #475569; font-weight: 900; text-align:center;">القيمة</th>
-                                            <th style="padding:10px 12px; color: #475569; font-weight: 900; text-align:center;">الحالة</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${createRows(archivedLowStock, 'low-stock', true)}
-                                        ${createRows(archivedExpiring, 'expiry', true)}
-                                        ${createRows(archivedDebt, 'debt', true)}
-                                        ${createRows(archivedDelayed, 'delayed', true)}
-                                    </tbody>
-                                </table>
-                            `}
+
+                                ${(totalReceiptCount === 0) ? `
+                                    <div style="text-align: center; padding: 50px 20px; color: #64748b;">
+                                        <div style="font-size: 3.5rem; margin-bottom: 12px;">📁📋</div>
+                                        <div style="font-weight: 900; font-size: 1.25rem; color: #0f172a;">سجل الاستلام فارغ حالياً</div>
+                                        <div style="font-size: 0.9rem; margin-top: 6px; color: #64748b;">عند النقر على زر <b>(✔️ استلام)</b> في أي تنبيه، سيتم توثيق اسم المستلم والمخزن وتوقيت الاستلام هنا فوراً.</div>
+                                    </div>
+                                ` : `
+                                    <div style="border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.02);">
+                                        <table style="width:100%; border-collapse:collapse; font-size:0.86rem; text-align:right;">
+                                            <thead>
+                                                <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-weight: 900;">
+                                                    <th style="padding:12px 14px; width:130px; text-align:center;">نوع التنبيه</th>
+                                                    <th style="padding:12px 14px;">البيان المستلم</th>
+                                                    <th style="padding:12px 14px;">التفاصيل والرصيد</th>
+                                                    <th style="padding:12px 14px; text-align:center; width:110px;">👤 المستلم</th>
+                                                    <th style="padding:12px 14px; text-align:center; width:110px;">🏬 المخزن</th>
+                                                    <th style="padding:12px 14px; text-align:center; width:130px;">🕒 التوقيت</th>
+                                                    <th style="padding:12px 14px; text-align:center; width:95px;">إجراء</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${receiptLog.map((log) => {
+                                                    const badgeColor = (log.type === 'low-stock') ? '#ef4444' 
+                                                        : (log.type === 'expiry' ? '#d97706' 
+                                                        : (log.type === 'debt' ? '#2563eb' 
+                                                        : (log.type === 'delayed' ? '#b45309' 
+                                                        : (log.type === 'transfer' ? '#059669' : '#8b5cf6'))));
+                                                    
+                                                    const badgeBg = (log.type === 'low-stock') ? '#fee2e2' 
+                                                        : (log.type === 'expiry' ? '#fef3c7' 
+                                                        : (log.type === 'debt' ? '#eff6ff' 
+                                                        : (log.type === 'delayed' ? '#fffbeb' 
+                                                        : (log.type === 'transfer' ? '#ecfdf5' : '#f5f3ff'))));
+
+                                                    const icon = (log.type === 'low-stock') ? '📦' 
+                                                        : (log.type === 'expiry' ? '📅' 
+                                                        : (log.type === 'debt' ? '💳' 
+                                                        : (log.type === 'delayed' ? '⚠️' 
+                                                        : (log.type === 'transfer' ? '🚚' : '☁️'))));
+
+                                                    return `
+                                                    <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                                        <td style="padding: 10px 12px; text-align:center;">
+                                                            <span style="background:${badgeBg}; color:${badgeColor}; font-weight:900; font-size:0.75rem; padding:4px 9px; border-radius:14px; display:inline-flex; align-items:center; gap:4px; border:1px solid ${badgeColor}33;">
+                                                                <span>${icon}</span> ${escapeStr(log.typeLabel || log.type)}
+                                                            </span>
+                                                        </td>
+                                                        <td style="padding: 10px 12px; font-weight:900; color:#0f172a;">
+                                                            ${escapeStr(log.name)}
+                                                        </td>
+                                                        <td style="padding: 10px 12px; color:#475569; font-weight:bold; font-size:0.82rem;">
+                                                            ${escapeStr(log.details || '-')}
+                                                        </td>
+                                                        <td style="padding: 10px 12px; text-align:center; font-weight:900; color:#1e293b; font-size:0.82rem;">
+                                                            <span style="background:#f1f5f9; padding:3px 8px; border-radius:6px;">👤 ${escapeStr(log.user || 'المدير')}</span>
+                                                        </td>
+                                                        <td style="padding: 10px 12px; text-align:center; color:#047857; font-weight:bold; font-size:0.8rem;">
+                                                            ${escapeStr(log.warehouse || 'الرئيسي')}
+                                                        </td>
+                                                        <td style="padding: 10px 12px; text-align:center; color:#64748b; font-size:0.78rem; font-weight:bold;">
+                                                            <div>${escapeStr(log.date || '')}</div>
+                                                            <div style="color:#0f172a;">${escapeStr(log.time || '')}</div>
+                                                        </td>
+                                                        <td style="padding: 10px 12px; text-align:center;">
+                                                            <button onclick="window.unacknowledgeNotification('${escapeStr(log.type)}', '${escapeStr(log.targetId)}', '${escapeStr(log.logId)}')" 
+                                                                style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:8px; padding:4px 10px; font-size:0.75rem; font-weight:900; cursor:pointer; display:inline-flex; align-items:center; gap:4px; transition:0.2s;"
+                                                                onmouseover="this.style.background='#fee2e2'; this.style.color='#dc2626'; this.style.borderColor='#fca5a5';"
+                                                                onmouseout="this.style.background='#f1f5f9'; this.style.color='#475569'; this.style.borderColor='#cbd5e1';"
+                                                                title="استعادة هذا التنبيه وإلغاء استلامه وإرجاعه للقائمة النشطة">
+                                                                <span>🔄</span> استعادة
+                                                            </button>
+                                                        </td>
+                                                    </tr>`;
+                                                }).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                `}
+                            </div>
                         ` : `
-                            <!-- محتوى تبويب الإشعارات السحابية (عرض كافة الإشعارات والرسائل السحابية التاريخية) -->
-                            <div style="padding: 10px 0; display:flex; flex-direction:column; gap:16px;">
+                            <!-- 5. تبويب الإشعارات والرسائل السحابية -->
+                            <div style="display:flex; flex-direction:column; gap:16px;">
                                 ${(window.cloudAnnouncementsHistory && window.cloudAnnouncementsHistory.length > 0) ? `
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
-                                        <span style="font-size:0.85rem; font-weight:800; color:#475569;">سجل الرسائل والتحديثات السحابية الواردة (${window.cloudAnnouncementsHistory.length}):</span>
-                                        <button onclick="if (typeof window.checkCloudAnnouncements === 'function') { window.checkCloudAnnouncements(); setTimeout(() => showNotificationsModal('cloud'), 800); }" style="padding: 6px 14px; background: #8b5cf6; color: white; border: none; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; box-shadow: 0 2px 6px rgba(139, 92, 246, 0.3);">🔄 تحديث وفحص الرسائل الآن</button>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:8px;">
+                                        <span style="font-size:0.88rem; font-weight:900; color:#334155;">سجل الرسائل والتحديثات السحابية الواردة (${window.cloudAnnouncementsHistory.length}):</span>
+                                        <button onclick="if (typeof window.checkCloudAnnouncements === 'function') { window.checkCloudAnnouncements(); setTimeout(() => showNotificationsModal('cloud'), 800); }" style="padding: 6px 14px; background: #8b5cf6; color: white; border: none; border-radius: 9px; font-weight: 900; font-size: 0.8rem; cursor: pointer; box-shadow: 0 2px 6px rgba(139, 92, 246, 0.3);">
+                                            🔄 فحص الرسائل السحابية الآن
+                                        </button>
                                     </div>
                                     ${window.cloudAnnouncementsHistory.map((item, idx) => {
                                         const annNumber = item.id ? item.id : (idx + 1);
@@ -365,7 +547,7 @@
                                                     ${item.icon || '📢'}
                                                 </div>
                                                 <div>
-                                                    <h4 style="margin: 0; font-size: 1.18rem; font-weight: 900; color: #fde047;">${item.title || 'إشعار سحابي'}</h4>
+                                                    <h4 style="margin: 0; font-size: 1.18rem; font-weight: 900; color: #fde047;">${escapeStr(item.title || 'إشعار سحابي')}</h4>
                                                     <p style="margin: 3px 0 0; font-size: 0.78rem; color: #94a3b8; font-weight: bold;">
                                                         رسالة مباشرة من فريق التطوير ${dateFormatted ? `• 📅 ${dateFormatted}` : ''}
                                                     </p>
@@ -373,61 +555,70 @@
                                             </div>
 
                                             <div style="background: rgba(255,255,255,0.06); border-radius: 14px; padding: 16px 18px; font-size: 0.95rem; line-height: 1.8; font-weight: 700; color: #f8fafc; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.08); white-space: pre-line;">
-                                                ${item.message || 'لا توجد تفاصيل.'}
+                                                ${escapeStr(item.message || 'لا توجد تفاصيل.')}
                                             </div>
 
                                             ${item.link ? `
                                                 <div style="text-align:left;">
-                                                    <button onclick="window.open('${item.link}', '_blank')" style="padding: 8px 18px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 10px; font-weight: 900; font-size:0.85rem; cursor: pointer; box-shadow: 0 3px 8px rgba(16,185,129,0.3);">
-                                                        ${item.linkText || 'معرفة التفاصيل 🔗'}
+                                                    <button onclick="window.open('${escapeStr(item.link)}', '_blank')" style="padding: 8px 18px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 10px; font-weight: 900; font-size:0.85rem; cursor: pointer; box-shadow: 0 3px 8px rgba(16,185,129,0.3);">
+                                                        ${escapeStr(item.linkText || 'معرفة التفاصيل 🔗')}
                                                     </button>
                                                 </div>
                                             ` : ''}
                                         </div>`;
                                     }).join('')}
                                 ` : `
-                                    <div style="text-align: center; padding: 45px 20px; color: #64748b;">
-                                        <div style="font-size: 3.2rem; margin-bottom: 12px;">☁️</div>
-                                        <div style="font-weight: 900; font-size: 1.15rem; color: #0f172a;">لا توجد رسائل سحابية حالياً</div>
-                                        <div style="font-size: 0.88rem; margin-top: 6px; color: #64748b;">جميع التحديثات والتهاني المباشرة من فريق التطوير ستظهر لك وتتراكم هنا فور نشرها.</div>
-                                        <button onclick="if (typeof window.checkCloudAnnouncements === 'function') { window.checkCloudAnnouncements(); setTimeout(() => showNotificationsModal('cloud'), 1000); }" style="margin-top: 15px; padding: 8px 18px; background: #8b5cf6; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">🔄 فحص الرسائل السحابية الآن</button>
+                                    <div style="text-align: center; padding: 50px 20px; color: #64748b;">
+                                        <div style="font-size: 3.5rem; margin-bottom: 12px;">☁️</div>
+                                        <div style="font-weight: 900; font-size: 1.2rem; color: #0f172a;">لا توجد رسائل سحابية حالياً</div>
+                                        <div style="font-size: 0.9rem; margin-top: 6px; color: #64748b;">جميع التحديثات والتهاني المباشرة من فريق التطوير ستظهر لك وتتراكم هنا فور نشرها.</div>
+                                        <button onclick="if (typeof window.checkCloudAnnouncements === 'function') { window.checkCloudAnnouncements(); setTimeout(() => showNotificationsModal('cloud'), 1000); }" style="margin-top: 15px; padding: 9px 20px; background: #8b5cf6; color: white; border: none; border-radius: 10px; font-weight: 900; cursor: pointer; box-shadow:0 3px 10px rgba(139,92,246,0.3);">
+                                            🔄 فحص وتحديث الرسائل السحابية الآن
+                                        </button>
                                     </div>
                                 `}
                             </div>
                         `}
                     </div>
 
-                    <!-- Footer -->
-                    <div style="padding: 14px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                    <!-- Footer مع أزرار سريعة وإغلاق -->
+                    <div style="padding: 14px 26px; background: #f8fafc; border-top: 1.5px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <div>
                             ${(activeTab === 'products' && activeProductsTotal > 0) ? `
-                                <button onclick="acknowledgeAllProductsNotifications()" style="padding: 9px 18px; background: #10b981; color: white; border: none; border-radius: 9px; font-weight: 900; cursor: pointer; font-size:0.85rem;">
-                                    <span>✔️</span> استلام جميع تنبيهات البضاعة والصلاحيات
+                                <button onclick="acknowledgeAllProductsNotifications()" style="padding: 9px 20px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 10px; font-weight: 900; cursor: pointer; font-size:0.86rem; box-shadow:0 2px 8px rgba(16,185,129,0.3);">
+                                    <span>✔️</span> استلام وتوثيق كل تنبيهات البضاعة والصلاحية
                                 </button>
                             ` : (activeTab === 'accounts' && activeAccountsTotal > 0) ? `
-                                <button onclick="acknowledgeAllAccountsNotifications()" style="padding: 9px 18px; background: #3b82f6; color: white; border: none; border-radius: 9px; font-weight: 900; cursor: pointer; font-size:0.85rem;">
-                                    <span>✔️</span> استلام جميع تنبيهات الحسابات
+                                <button onclick="acknowledgeAllAccountsNotifications()" style="padding: 9px 20px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border: none; border-radius: 10px; font-weight: 900; cursor: pointer; font-size:0.86rem; box-shadow:0 2px 8px rgba(59,130,246,0.3);">
+                                    <span>✔️</span> استلام وتوثيق كل تنبيهات الحسابات
                                 </button>
-                            ` : (activeTab === 'archived' && totalArchivedCount > 0) ? `
-                                <button onclick="resetAcknowledgedNotifications()" style="padding: 9px 18px; background: #ef4444; color: white; border: none; border-radius: 9px; font-weight: 900; cursor: pointer; font-size:0.85rem;">
-                                    <span>🔄</span> استعادة جميع التنبيهات للنشط
+                            ` : (activeTab === 'archived' && totalReceiptCount > 0) ? `
+                                <button onclick="window.resetAcknowledgedNotifications()" style="padding: 9px 20px; background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; border-radius: 10px; font-weight: 900; cursor: pointer; font-size:0.86rem;">
+                                    <span>🔄</span> استعادة جميع التنبيهات المستلمة للقوائم النشطة
                                 </button>
                             ` : ''}
                         </div>
-                        <button onclick="document.getElementById('notifyModal').remove()" style="padding: 9px 28px; background: #0f172a; color: white; border: none; border-radius: 9px; font-weight: 900; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#0f172a'">إغلاق</button>
+                        <button onclick="document.getElementById('notifyModal').remove()" style="padding: 10px 32px; background: #0f172a; color: white; border: none; border-radius: 10px; font-weight: 900; font-size:0.9rem; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#0f172a'">إغلاق</button>
                     </div>
                 </div>
             `;
 
-             if (existingModal) {
+            const existingModal = document.getElementById('notifyModal');
+            if (existingModal) {
                 existingModal.innerHTML = modalContent;
             } else {
-                const fullModal = `<div id="notifyModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);  display:flex; align-items:center; justify-content:center; z-index:99999; animation: fadeIn 0.2s ease;">${modalContent}</div>`;
+                const fullModal = `<div id="notifyModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.75); display:flex; align-items:center; justify-content:center; z-index:99999; animation: fadeIn 0.2s ease;">${modalContent}</div>`;
                 document.body.insertAdjacentHTML('beforeend', fullModal);
             }
         };
 
         window.openStatementFromNotify = function(accountId) {
+            const canView = (typeof currentUser !== 'undefined' && currentUser && (currentUser.role === 'admin' || (typeof hasPermission === 'function' && (hasPermission('accounts_statement') || hasPermission('accounts_view')))));
+            if (!canView) {
+                if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لعرض كشف حساب العملاء', 'error');
+                return;
+            }
+
             const notifyModal = document.getElementById('notifyModal');
             if (notifyModal) notifyModal.remove();
 
@@ -656,9 +847,19 @@
                 const totalAmt = parseFloat(head.total || 0);
                 const paidAmt = parseFloat(head.paidAmount || head.paid || 0);
                 const deferredAmt = parseFloat(head.deferred !== undefined ? head.deferred : (totalAmt - paidAmt));
+                const hType = String(head.type || '');
+                const isRet = hType.includes('مرتجع') || hType.includes('return');
+                const isPur = hType.includes('شراء') || hType.includes('مشتريات') || hType.includes('purchase');
+                const pDocType = isRet ? (isPur ? 'return_purchase' : 'return_sales') : (isPur ? 'purchase' : 'sales');
+                const pDocTitle = isRet ? (isPur ? 'مرتجع مشتريات' : 'مرتجع مبيعات') : (isPur ? 'فاتورة شراء' : 'فاتورة مبيعات');
+
                 printInvoice({
                     invoiceNumber: head.invoiceId || head.id,
-                    invoiceType: head.type || 'بيع',
+                    invoiceType: isRet ? (isPur ? 'مرتجع مشتريات' : 'مرتجع مبيعات') : (head.type || 'بيع'),
+                    paymentMethod: head.method || head.paymentMethod || 'نقدي',
+                    isReturn: isRet,
+                    isPurchase: isPur,
+                    docTitle: pDocTitle,
                     date: head.dateISO || head.date || '',
                     time: head.timeISO || '',
                     cashier: head.user || head.cashier || '',
@@ -667,14 +868,16 @@
                         name: it.product || it.name,
                         qty: parseFloat(it.qty || 1),
                         price: parseFloat(it.price || 0),
-                        unit: it.unit || 'قطعة'
+                        unit: it.unit || 'قطعة',
+                        size: it.size || it.selectedSize || '',
+                        color: it.color || it.selectedColor || ''
                     })),
                     totalAmount: totalAmt,
                     paid: paidAmt,
                     deferred: deferredAmt,
                     prevBalance: prevBal,
                     currentBalance: prevBal + deferredAmt,
-                    docType: (head.type && head.type.includes('شراء')) ? 'purchase' : 'sales'
+                    docType: pDocType
                 });
             }
             if (typeof closeCustomModal === 'function') closeCustomModal();
@@ -772,7 +975,17 @@
             } else if (tType === 'purchase' || tType === 'شراء' || (tType.includes('شراء') && !tType.includes('مرتجع')) || (tType.includes('مشتريات') && !tType.includes('مرتجع'))) {
                 typeName = 'فاتورة مشتريات'; typeColor = '#2980b9'; isPurchase = true;
             } else if (tType.includes('transfer') || tType.includes('تحويل') || tType === 'stock') {
-                typeName = 'إذن تحويل مخزني'; typeColor = '#16a085'; isTransfer = true;
+                if (tx.transferStatus === 'rejected') {
+                    typeName = 'إذن تحويل مخزني (❌ ملغي ومرفوض)';
+                    typeColor = '#dc2626';
+                } else if (tx.transferStatus === 'pending') {
+                    typeName = 'إذن تحويل مخزني (⏳ معلق بانتظار الاستلام)';
+                    typeColor = '#d97706';
+                } else {
+                    typeName = 'إذن تحويل مخزني';
+                    typeColor = '#16a085';
+                }
+                isTransfer = true;
             } else if (tType.includes('adjustment') || tType.includes('تسوية') || tType.includes('جرد')) {
                 typeName = 'محضر تسوية مخزنية'; typeColor = '#d97706'; isAdjustment = true;
             } else if (tType === 'receipt' || tType.includes('قبض')) {
@@ -800,39 +1013,71 @@
             );
 
             let itemsHtml = '';
+            let rawSubTotal = 0;
             let grandTotal = 0;
+            let totalItemsDiscount = 0;
+            let totalItemsAddition = 0;
             
             items.forEach(item => {
-                let name = item.name || '';
-                let qty = parseFloat(item.qty || item.quantity || 0);
+                let name = item.name || item.product || item.productName || 'صنف غير محدد';
+                let qty = parseFloat(item.qty != null ? item.qty : (item.quantity || 0));
                 let unit = item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (item.unit || '');
-                let price = parseFloat(item.price || item.costPrice || item.purchasePrice || 0);
-                let total = parseFloat(item.total != null ? item.total : (price * qty));
+                let price = parseFloat(item.price != null ? item.price : (item.costPrice || item.purchasePrice || 0));
+                let lineGross = qty * price;
+                rawSubTotal += lineGross;
+
+                let itemDisc = parseFloat(item.discount != null ? item.discount : (item.itemDiscount != null ? item.itemDiscount : 0)) || 0;
+                let itemDiscType = item.discountType || item.itemDiscountType || 'val';
+                let discAmount = (itemDiscType === 'perc' && itemDisc > 0) ? (lineGross * itemDisc / 100) : itemDisc;
+                
+                let itemAdd = parseFloat(item.addition != null ? item.addition : (item.extra != null ? item.extra : 0)) || 0;
+                
+                let total = parseFloat(item.total != null ? item.total : (lineGross - discAmount + itemAdd));
                 grandTotal += total;
+                totalItemsDiscount += discAmount;
+                totalItemsAddition += itemAdd;
                 
                 let itemSize = item.size || item.selectedSize || '';
                 let itemColor = item.color || item.selectedColor || '';
                 let sizeBadge = itemSize ? `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${itemSize}</span>` : `<span style="color:#cbd5e1;">-</span>`;
                 let colorBadge = itemColor ? `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${itemColor}</span>` : `<span style="color:#cbd5e1;">-</span>`;
 
+                let discAddBadge = '';
+                if (discAmount > 0.001 && itemAdd > 0.001) {
+                    discAddBadge = `
+                        <div style="display:flex; flex-direction:column; gap:2px; align-items:center;">
+                            <span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:1px 6px; border-radius:5px; font-weight:900; font-size:0.75rem;">خصم -${discAmount.toFixed(2)}</span>
+                            <span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:1px 6px; border-radius:5px; font-weight:900; font-size:0.75rem;">إضافة +${itemAdd.toFixed(2)}</span>
+                        </div>
+                    `;
+                } else if (discAmount > 0.001) {
+                    const percLabel = (itemDiscType === 'perc' && itemDisc > 0) ? ` (${itemDisc}%)` : '';
+                    discAddBadge = `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.8rem; display:inline-block;" title="خصم على الصنف">-${discAmount.toFixed(2)}${percLabel}</span>`;
+                } else if (itemAdd > 0.001) {
+                    discAddBadge = `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.8rem; display:inline-block;" title="إضافة على الصنف">+${itemAdd.toFixed(2)} ج.م</span>`;
+                } else {
+                    discAddBadge = `<span style="color:#cbd5e1; font-weight:700;">-</span>`;
+                }
+
                 let method = tx.method || tx.paymentMethod || 'نقدي';
                 let cashier = tx.user || tx.cashier || '-';
                 
                 itemsHtml += `
-                    <tr style="border-bottom:1px solid #f1f5f9;">
-                        <td style="padding:12px; text-align:right; font-weight:bold; color:#334155;">${name}</td>
+                    <tr style="border-bottom:1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc';" onmouseout="this.style.background='#ffffff';">
+                        <td style="padding:10px 12px; text-align:right; font-weight:bold; color:#334155;">${name}</td>
                         ${!isFinancial ? `
                             ${hasVariants ? `
-                                <td style="padding:12px; text-align:center;">${sizeBadge}</td>
-                                <td style="padding:12px; text-align:center;">${colorBadge}</td>
+                                <td style="padding:10px; text-align:center;">${sizeBadge}</td>
+                                <td style="padding:10px; text-align:center;">${colorBadge}</td>
                             ` : ''}
-                            <td style="padding:12px; text-align:center; color:#475569; font-weight:bold;">${qty} ${unit}</td>
-                            <td style="padding:12px; text-align:center; color:#475569;">${price.toFixed(2)} ج.م</td>
+                            <td style="padding:10px; text-align:center; color:#475569; font-weight:bold;">${qty} ${unit}</td>
+                            <td style="padding:10px; text-align:center; color:#475569; font-weight:700;">${price.toFixed(2)} ج.م</td>
+                            <td style="padding:10px; text-align:center;">${discAddBadge}</td>
                         ` : `
-                            <td style="padding:12px; text-align:center; color:#475569;">${method}</td>
-                            <td style="padding:12px; text-align:center; color:#475569;">${cashier}</td>
+                            <td style="padding:10px; text-align:center; color:#475569;">${method}</td>
+                            <td style="padding:10px; text-align:center; color:#475569;">${cashier}</td>
                         `}
-                        <td style="padding:12px; text-align:center; font-weight:bold; color:#1e293b;">${total.toFixed(2)} ج.م</td>
+                        <td style="padding:10px; text-align:center; font-weight:900; color:#1e293b;">${total.toFixed(2)} ج.م</td>
                     </tr>
                 `;
             });
@@ -848,6 +1093,56 @@
                 z-index: 11000; display: flex; align-items: center; justify-content: center;
                 direction: rtl; font-family: 'Cairo', sans-serif;
             `;
+
+            // خصم وإضافة الفاتورة العامة
+            let invDiscountVal = parseFloat(tx.invoiceDiscount != null ? tx.invoiceDiscount : (tx.discount != null ? tx.discount : (tx.discountAmount || 0))) || 0;
+            let invDiscountType = tx.invoiceDiscountType || tx.discountType || 'val';
+            let invDiscountAmount = (invDiscountType === 'perc' && invDiscountVal > 0) ? (rawSubTotal * invDiscountVal / 100) : invDiscountVal;
+
+            let invTaxVal = parseFloat(tx.invoiceTax != null ? tx.invoiceTax : (tx.tax != null ? tx.tax : (tx.extra || tx.addition || 0))) || 0;
+            let invTaxType = tx.invoiceTaxType || tx.taxType || 'val';
+            let invTaxAmount = (invTaxType === 'perc' && invTaxVal > 0) ? (rawSubTotal * invTaxVal / 100) : invTaxVal;
+
+            // حساب الخصم والإضافة الإجمالية بدقة لمنع التكرار (Double Counting) في حال كان الخصم موزعاً سلفاً على أسطر الأصناف
+            let totalDiscountDisplay = 0;
+            if (invDiscountAmount > 0.001 && Math.abs(totalItemsDiscount - invDiscountAmount) < 0.15) {
+                totalDiscountDisplay = invDiscountAmount;
+            } else if (invDiscountAmount > 0.001 && totalItemsDiscount > 0.001) {
+                if (Math.abs(grandTotal - (rawSubTotal - totalItemsDiscount)) < 0.15) {
+                    totalDiscountDisplay = totalItemsDiscount + invDiscountAmount;
+                } else {
+                    totalDiscountDisplay = Math.max(totalItemsDiscount, invDiscountAmount);
+                }
+            } else {
+                totalDiscountDisplay = totalItemsDiscount > 0 ? totalItemsDiscount : invDiscountAmount;
+            }
+
+            let totalAdditionDisplay = 0;
+            if (invTaxAmount > 0.001 && Math.abs(totalItemsAddition - invTaxAmount) < 0.15) {
+                totalAdditionDisplay = invTaxAmount;
+            } else if (invTaxAmount > 0.001 && totalItemsAddition > 0.001) {
+                if (Math.abs(grandTotal - (rawSubTotal + totalItemsAddition)) < 0.15) {
+                    totalAdditionDisplay = totalItemsAddition + invTaxAmount;
+                } else {
+                    totalAdditionDisplay = Math.max(totalItemsAddition, invTaxAmount);
+                }
+            } else {
+                totalAdditionDisplay = totalItemsAddition > 0 ? totalItemsAddition : invTaxAmount;
+            }
+
+            let invoiceFinalTotal = 0;
+            if (tx.invoiceGrandTotal && parseFloat(tx.invoiceGrandTotal) > 0) {
+                invoiceFinalTotal = parseFloat(tx.invoiceGrandTotal);
+            } else if (tx.finalTotal && parseFloat(tx.finalTotal) > 0) {
+                invoiceFinalTotal = parseFloat(tx.finalTotal);
+            } else if (tx.grandTotal && parseFloat(tx.grandTotal) > 0) {
+                invoiceFinalTotal = parseFloat(tx.grandTotal);
+            } else {
+                invoiceFinalTotal = Math.max(0, rawSubTotal - totalDiscountDisplay + totalAdditionDisplay);
+            }
+            if (invoiceFinalTotal <= 0 && grandTotal > 0) {
+                invoiceFinalTotal = grandTotal;
+            }
             
             let methodVal = String(tx.method || tx.paymentMethod || '').trim();
             let paidVal = parseFloat(tx.paidAmount != null ? tx.paidAmount : (tx.paid != null ? tx.paid : 0));
@@ -858,19 +1153,19 @@
             let remainingVal = 0;
 
             if (isDeferred) {
-                remainingVal = parseFloat(tx.deferred != null ? tx.deferred : (tx.remaining != null ? tx.remaining : (grandTotal - paidVal)));
-                if (isNaN(remainingVal) || remainingVal < 0) remainingVal = Math.max(0, grandTotal - paidVal);
+                remainingVal = parseFloat(tx.deferred != null ? tx.deferred : (tx.remaining != null ? tx.remaining : (invoiceFinalTotal - paidVal)));
+                if (isNaN(remainingVal) || remainingVal < 0) remainingVal = Math.max(0, invoiceFinalTotal - paidVal);
             } else {
                 let recordedRemaining = parseFloat(tx.deferred != null ? tx.deferred : (tx.remaining != null ? tx.remaining : 0));
                 if (recordedRemaining > 0.001) {
                     isDeferred = true;
                     remainingVal = recordedRemaining;
-                } else if (paidVal > 0 && grandTotal > paidVal && (grandTotal - paidVal) > 0.001) {
+                } else if (paidVal > 0 && invoiceFinalTotal > paidVal && (invoiceFinalTotal - paidVal) > 0.001) {
                     isDeferred = true;
-                    remainingVal = grandTotal - paidVal;
+                    remainingVal = invoiceFinalTotal - paidVal;
                 } else {
                     remainingVal = 0;
-                    paidVal = grandTotal; // نقدي خالص
+                    paidVal = invoiceFinalTotal; // نقدي خالص
                 }
             }
 
@@ -881,14 +1176,17 @@
                 } else {
                     displayMethod = '⏳ آجل (ذمم)';
                 }
+            } else if (methodVal.includes('حساب') || methodVal.includes('خصم من حساب') || methodVal.includes('رصيد')) {
+                displayMethod = '👤 خصم من الحساب';
             } else if (methodVal.includes('تحويل') || methodVal.includes('بنك') || methodVal.includes('شبكة') || methodVal.includes('فيزا') || methodVal.includes('شيك')) {
                 displayMethod = methodVal.includes('شيك') ? '🏦 شيك بنكي' : '🏦 بنك / تحويل';
             } else {
                 displayMethod = '💵 نقدي (كاش)';
             }
             
+            let modalWidth = hasVariants ? '880px' : '780px';
             let modalContent = `
-                <div style="background: white; width: ${hasVariants ? '760px' : '680px'}; max-width: 95%; max-height: 90vh; border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,0.4);">
+                <div style="background: white; width: ${modalWidth}; max-width: 96vw; max-height: 90vh; border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,0.4);">
                     <div style="background: linear-gradient(135deg, ${typeColor}, #2c3e50); padding: 20px 25px; color: white; display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <h3 style="margin: 0; font-size: 1.3rem; font-weight: 900;">${typeName} #${tx.invoiceId || tx.invoiceNumber || tx.id}</h3>
@@ -897,50 +1195,60 @@
                         <button onclick="document.getElementById('customViewModalOverlay').remove()" style="background: rgba(0,0,0,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight:bold;">&times;</button>
                     </div>
                     
-                    <div style="padding: 25px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: #f8fafc; padding: 15px; border-radius: 16px; border: 1px solid #e2e8f0; font-size:0.9rem;">
+                    <div style="padding: 22px 25px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 18px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #f8fafc; padding: 14px 18px; border-radius: 16px; border: 1px solid #e2e8f0; font-size:0.88rem;">
                             ${isTransfer ? `
-                                <div><b style="color: #64748b; font-size: 0.85rem;">📦 مخزن المصدر:</b> <span style="font-weight: 800; color: #1e293b;">${tx.sourceWarehouse || tx.fromWarehouse || tx.from || '-'}</span></div>
-                                <div><b style="color: #64748b; font-size: 0.85rem;">🏁 مخزن الوجهة:</b> <span style="font-weight: 800; color: #1e293b;">${tx.warehouse || tx.toWarehouse || tx.to || '-'}</span></div>
+                                <div><b style="color: #64748b; font-size: 0.82rem;">📦 مخزن المصدر:</b> <span style="font-weight: 800; color: #1e293b;">${tx.sourceWarehouse || tx.fromWarehouse || tx.from || '-'}</span></div>
+                                <div><b style="color: #64748b; font-size: 0.82rem;">🏁 مخزن الوجهة:</b> <span style="font-weight: 800; color: #1e293b;">${tx.warehouse || tx.toWarehouse || tx.to || '-'}</span></div>
                             ` : isAdjustment ? `
-                                <div><b style="color: #64748b; font-size: 0.85rem;">⚖️ نوع العملية:</b> <span style="font-weight: 800; color: #1e293b;">تسوية مخزن</span></div>
-                                <div><b style="color: #64748b; font-size: 0.85rem;">👤 الطرف/الجهة:</b> <span style="font-weight: 800; color: #1e293b;">${tx.customer || tx.partner || tx.account || 'جرد مخزني'}</span></div>
+                                <div><b style="color: #64748b; font-size: 0.82rem;">⚖️ نوع العملية:</b> <span style="font-weight: 800; color: #1e293b;">تسوية مخزن</span></div>
+                                <div><b style="color: #64748b; font-size: 0.82rem;">👤 الطرف/الجهة:</b> <span style="font-weight: 800; color: #1e293b;">${tx.customer || tx.partner || tx.account || 'جرد مخزني'}</span></div>
                             ` : `
-                                <div><b style="color: #64748b; font-size: 0.85rem;">👤 ${isPurchase ? 'المورد/الحساب' : 'العميل/الحساب'}:</b> <span style="font-weight: 800; color: #1e293b;">${tx.customer || tx.partner || tx.account || tx.supplier || (isPurchase ? 'مورد نقدي' : 'عميل نقدي')}</span></div>
-                                <div><b style="color: #64748b; font-size: 0.85rem;">💳 طريقة الدفع:</b> <span style="font-weight: 800; color: #1e293b;">${displayMethod}</span></div>
+                                <div><b style="color: #64748b; font-size: 0.82rem;">👤 ${isPurchase ? 'المورد/الحساب' : 'العميل/الحساب'}:</b> <span style="font-weight: 800; color: #1e293b;">${tx.customer || tx.partner || tx.account || tx.supplier || (isPurchase ? 'مورد نقدي' : 'عميل نقدي')}</span></div>
+                                <div><b style="color: #64748b; font-size: 0.82rem;">💳 طريقة الدفع:</b> <span style="font-weight: 800; color: #1e293b;">${displayMethod}</span></div>
                             `}
-                            <div><b style="color: #64748b; font-size: 0.85rem;">👤 المستخدم المسؤول:</b> <span style="font-weight: 800; color: #1e293b;">${tx.cashier || tx.user || '-'}</span></div>
-                            <div><b style="color: #64748b; font-size: 0.85rem;">🏢 المخزن / الفرع:</b> <span style="font-weight: 800; color: #1e293b;">${tx.warehouse || 'المخزن الرئيسي'}</span></div>
-                            <div><b style="color: #64748b; font-size: 0.85rem;">💻 جهاز الإصدار:</b> <span style="font-weight: 800; color: #1e293b;">${tx.terminal || 'الجهاز الرئيسي 💻'}</span></div>
-                            ${tx.notes ? `<div style="grid-column: span 2;"><b style="color: #64748b; font-size: 0.85rem;">📝 ملاحظات:</b> <span style="font-weight: 800; color: #1e293b;">${tx.notes}</span></div>` : ''}
+                            <div><b style="color: #64748b; font-size: 0.82rem;">👤 المستخدم المسؤول:</b> <span style="font-weight: 800; color: #1e293b;">${tx.cashier || tx.user || '-'}</span></div>
+                            <div><b style="color: #64748b; font-size: 0.82rem;">🏢 المخزن / الفرع:</b> <span style="font-weight: 800; color: #1e293b;">${tx.warehouse || 'المخزن الرئيسي'}</span></div>
+                            <div>
+                                <b style="color: #64748b; font-size: 0.82rem;">💻 جهاز الإصدار:</b> 
+                                <span style="font-weight: 800; color: #1e293b; display: inline-flex; align-items: center; gap: 5px;">
+                                    <span>${tx.terminal || 'الجهاز الرئيسي 💻'}</span>
+                                    <button type="button" onclick="if(window.showTerminalInfoModal) window.showTerminalInfoModal('${tx.invoiceId || tx.id}')" 
+                                        style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:50%; width:18px; height:18px; font-size:0.68rem; font-weight:900; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; padding:0; line-height:1;" 
+                                        title="تفاصيل جهاز البيع والمزامنة">❓</button>
+                                </span>
+                            </div>
+                            ${tx.notes ? `<div style="grid-column: span 2;"><b style="color: #64748b; font-size: 0.82rem;">📝 ملاحظات:</b> <span style="font-weight: 800; color: #1e293b;">${tx.notes}</span></div>` : ''}
                         </div>
                         
-                        <div style="border: 1px solid #e2e8f0; border-radius: 16px; overflow-y: auto; max-height: 260px; background: white;">
-                            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-                                <thead style="background: #f1f5f9;">
+                        <div style="border: 1px solid #e2e8f0; border-radius: 16px; overflow-y: auto; max-height: 270px; background: white;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+                                <thead style="background: #f1f5f9; position: sticky; top: 0; z-index: 5;">
                                     <tr>
-                                        <th style="padding:12px; text-align:right; font-size:0.8rem; color:#475569; font-weight:900;">${isFinancial ? 'البيان' : 'الصنف'}</th>
+                                        <th style="padding:12px; text-align:right; font-size:0.82rem; color:#475569; font-weight:900;">${isFinancial ? 'البيان' : 'الصنف'}</th>
                                         ${!isFinancial ? `
                                             ${hasVariants ? `
-                                                <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:80px; font-weight:900;">المقاس</th>
-                                                <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:80px; font-weight:900;">اللون</th>
+                                                <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:80px; font-weight:900;">المقاس</th>
+                                                <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:80px; font-weight:900;">اللون</th>
                                             ` : ''}
-                                            <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:100px; font-weight:900;">الكمية</th>
-                                            <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:110px; font-weight:900;">السعر</th>
+                                            <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:95px; font-weight:900;">الكمية</th>
+                                            <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:110px; font-weight:900;">السعر</th>
+                                            <th style="padding:12px; text-align:center; font-size:0.82rem; color:#b91c1c; width:120px; font-weight:900; background:#fef2f2;">الخصم / الإضافة</th>
                                         ` : `
-                                            <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:150px; font-weight:900;">طريقة الدفع</th>
-                                            <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:150px; font-weight:900;">بواسطة</th>
+                                            <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:150px; font-weight:900;">طريقة الدفع</th>
+                                            <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:150px; font-weight:900;">بواسطة</th>
                                         `}
-                                        <th style="padding:12px; text-align:center; font-size:0.8rem; color:#475569; width:130px; font-weight:900;">${isFinancial ? 'المبلغ' : 'الإجمالي'}</th>
+                                        <th style="padding:12px; text-align:center; font-size:0.82rem; color:#475569; width:130px; font-weight:900;">${isFinancial ? 'المبلغ' : 'الإجمالي'}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${itemsHtml || '<tr><td colspan="' + (hasVariants ? '6' : '4') + '" style="text-align:center; padding:20px; color:#94a3b8;">لا توجد أصناف</td></tr>'}
+                                    ${itemsHtml || '<tr><td colspan="' + (!isFinancial ? (hasVariants ? '7' : '5') : '4') + '" style="text-align:center; padding:20px; color:#94a3b8;">لا توجد أصناف</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
                         
-                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; padding: 12px 10px; border-top: 1px solid #f1f5f9; background: #fafafa; border-radius: 12px;">
+                        <!-- شريط الملخص المالي المحاسبي الشامل للخصومات والإجماليات -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; padding: 14px 18px; border-top: 1.5px solid #e2e8f0; background: #f8fafc; border-radius: 14px;">
                             ${(() => {
                                 let pName = tx.customer || tx.partner || tx.account || tx.supplier || '';
                                 if (pName && !window.isGenericCashPartner(pName) && typeof getAccountBalance === 'function') {
@@ -948,28 +1256,48 @@
                                     const balColor = curBal > 0.01 ? '#e74c3c' : (curBal < -0.01 ? '#27ae60' : '#475569');
                                     const balLabel = curBal > 0.01 ? `مديونية عليه (${curBal.toFixed(2)} ج.م)` : (curBal < -0.01 ? `رصيد له (${Math.abs(curBal).toFixed(2)} ج.م)` : 'خالص (0.00 ج.م)');
                                     return `
-                                        <div style="background: #ffffff; border: 1.5px dashed ${balColor}; padding: 6px 14px; border-radius: 12px; display: flex; flex-direction: column; justify-content: center;">
-                                            <span style="font-size:0.78rem; color:#64748b; font-weight:bold;">👤 رصيد الحساب الإجمالي المتبقي:</span>
-                                            <div style="font-size:1.1rem; font-weight:900; color:${balColor};">${balLabel}</div>
+                                        <div style="background: #ffffff; border: 1.5px dashed ${balColor}; padding: 8px 16px; border-radius: 12px; display: flex; flex-direction: column; justify-content: center;">
+                                            <span style="font-size:0.76rem; color:#64748b; font-weight:bold;">👤 رصيد الحساب الإجمالي المتبقي:</span>
+                                            <div style="font-size:1.05rem; font-weight:900; color:${balColor};">${balLabel}</div>
                                         </div>
                                     `;
                                 }
                                 return '<div></div>';
                             })()}
-                            <div style="display: flex; justify-content: flex-end; gap: 20px; align-items: center;">
-                                <div>
-                                    <span style="font-size:0.8rem; color:#64748b; font-weight:bold;">${isFinancial ? 'إجمالي المبلغ:' : 'إجمالي الفاتورة:'}</span>
-                                    <div style="font-size:1.3rem; font-weight:900; color:#1e293b;">${grandTotal.toFixed(2)} ج.م</div>
+                            <div style="display: flex; justify-content: flex-end; gap: 16px; align-items: center; flex-wrap: wrap;">
+                                ${(totalDiscountDisplay > 0.001 || totalAdditionDisplay > 0.001) ? `
+                                    <div style="text-align:center;">
+                                        <span style="font-size:0.75rem; color:#64748b; font-weight:bold;">المجموع قبل الخصم:</span>
+                                        <div style="font-size:1.05rem; font-weight:800; color:#475569;">${rawSubTotal.toFixed(2)} ج.م</div>
+                                    </div>
+                                ` : ''}
+                                ${totalDiscountDisplay > 0.001 ? `
+                                    <div style="text-align:center;">
+                                        <span style="font-size:0.75rem; color:#dc2626; font-weight:bold;">إجمالي الخصم:</span>
+                                        <div style="font-size:1.15rem; font-weight:900; color:#dc2626;">-${totalDiscountDisplay.toFixed(2)} ج.م</div>
+                                    </div>
+                                ` : ''}
+                                ${totalAdditionDisplay > 0.001 ? `
+                                    <div style="text-align:center;">
+                                        <span style="font-size:0.75rem; color:#0284c7; font-weight:bold;">إضافات / ضريبة:</span>
+                                        <div style="font-size:1.15rem; font-weight:900; color:#0284c7;">+${totalAdditionDisplay.toFixed(2)} ج.م</div>
+                                    </div>
+                                ` : ''}
+                                <div style="text-align:center; background: #ffffff; padding: 6px 14px; border-radius: 10px; border: 1.5px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                                    <span style="font-size:0.75rem; color:#475569; font-weight:900;">${isFinancial ? 'إجمالي المبلغ:' : 'صافي الفاتورة:'}</span>
+                                    <div style="font-size:1.28rem; font-weight:900; color:#0f172a;">${invoiceFinalTotal.toFixed(2)} ج.م</div>
                                 </div>
                                 ${!isTransfer && !isAdjustment && !isFinancial ? `
-                                    <div>
-                                        <span style="font-size:0.8rem; color:#64748b; font-weight:bold;">المدفوع:</span>
-                                        <div style="font-size:1.3rem; font-weight:900; color:#27ae60;">${paidVal.toFixed(2)} ج.م</div>
+                                    <div style="text-align:center;">
+                                        <span style="font-size:0.75rem; color:#059669; font-weight:bold;">${isReturn ? 'المبلغ المرتجع:' : 'المدفوع:'}</span>
+                                        <div style="font-size:1.25rem; font-weight:900; color:#059669;">${paidVal.toFixed(2)} ج.م</div>
                                     </div>
-                                    <div>
-                                        <span style="font-size:0.8rem; color:#64748b; font-weight:bold;">المتبقي من الفاتورة:</span>
-                                        <div style="font-size:1.3rem; font-weight:900; color:#e74c3c;">${remainingVal.toFixed(2)} ج.م</div>
-                                    </div>
+                                    ${!isReturn && isDeferred ? `
+                                        <div style="text-align:center;">
+                                            <span style="font-size:0.75rem; color:#dc2626; font-weight:bold;">المتبقي:</span>
+                                            <div style="font-size:1.25rem; font-weight:900; color:#dc2626;">${remainingVal.toFixed(2)} ج.م</div>
+                                        </div>
+                                    ` : ''}
                                 ` : ''}
                             </div>
                         </div>
@@ -1411,11 +1739,12 @@
                         if (printType === 'sale') printType = 'بيع';
                         if (printType === 'purchase') printType = 'شراء';
                         
-                        let printDocType = 'sales';
-                        if (isPurchase) printDocType = 'purchase';
+                        let printDocType = isPurchase ? 'purchase' : 'sales';
                         if (isReturn) {
-                            printDocType = 'sales'; // توحيد المرتجعات تحت طابع المبيعات الرسمي
+                            printDocType = isPurchase ? 'return_purchase' : 'return_sales';
+                            printType = isPurchase ? 'مرتجع مشتريات' : 'مرتجع مبيعات';
                         }
+                        const printDocTitle = isReturn ? (isPurchase ? 'مرتجع مشتريات' : 'مرتجع مبيعات') : (isPurchase ? 'فاتورة مشتريات' : 'فاتورة مبيعات');
 
                         // فصل التاريخ والوقت بدقة وبصيغة سليمة
                         let printDate = '';
@@ -1445,17 +1774,21 @@
 
                         printInvoice({
                             invoiceNumber: tx.invoiceId || tx.invoiceNumber || tx.id,
-                            invoiceType: tx.method || printType,
+                            invoiceType: isReturn ? (isPurchase ? 'مرتجع مشتريات' : 'مرتجع مبيعات') : printType,
+                            paymentMethod: tx.method || tx.paymentMethod || 'نقدي',
+                            isReturn: isReturn,
+                            isPurchase: isPurchase,
+                            docTitle: printDocTitle,
                             date: printDate,
                             time: printTime,
                             cashier: tx.cashier || tx.user || '',
                             customer: tx.customer || tx.partner || 'عميل نقدي',
                             items: items,
-                            totalAmount: grandTotal,
+                            totalAmount: invoiceFinalTotal,
                             paid: paidVal,
-                            deferred: grandTotal - paidVal,
+                            deferred: isDeferred ? remainingVal : 0,
                             prevBalance: prevBal,
-                            currentBalance: prevBal + (grandTotal - paidVal),
+                            currentBalance: prevBal + (invoiceFinalTotal - paidVal),
                             docType: printDocType
                         });
                     } else {
@@ -1503,10 +1836,21 @@
             }
         }
 
-        function selectInvoiceRow(idx) {
+        function selectInvoiceRow(idx, rowEl) {
             selectedInvoiceIndex = idx;
-            renderInvoicesTable();
+            const tbody = document.getElementById('invoicesTableBody');
+            if (tbody) {
+                tbody.querySelectorAll('tr.selected-row').forEach(r => r.classList.remove('selected-row'));
+                tbody.querySelectorAll('input[name="invRad"]').forEach(rad => rad.checked = false);
+                const tr = rowEl || tbody.querySelector(`tr[data-orig-index="${idx}"]`);
+                if (tr) {
+                    tr.classList.add('selected-row');
+                    const rad = tr.querySelector('input[name="invRad"]');
+                    if (rad) rad.checked = true;
+                }
+            }
         }
+        window.selectInvoiceRow = selectInvoiceRow;
 
         function shareSelectedInvoice(platform) {
             const activeIdx = (activeTabId && activeTabId.startsWith('invoices') ? selectedInvoiceIndex : selectedHistoryIndex);
@@ -1652,7 +1996,8 @@
         };
 
         function editSelectedInvoice() {
-            const activeIdx = (activeTabId.startsWith('invoices') ? selectedInvoiceIndex : selectedHistoryIndex);
+            const isInv = (typeof activeTabId === 'string' && activeTabId.startsWith('invoices'));
+            const activeIdx = isInv ? selectedInvoiceIndex : selectedHistoryIndex;
 
             if (activeIdx === null || activeIdx === undefined || activeIdx === -1) {
                 return showCustomAlert({
@@ -1663,13 +2008,13 @@
             }
 
             const t = transactions[activeIdx];
-            if (!t || !t.invoiceId) {
+            if (!t || (!t.invoiceId && !t.id)) {
                 showToast("⚠️ لا يمكن تعديل هذه الحركة مباشرة", "error");
                 return;
             }
 
             let cleanType = '';
-            const typeStr = t.type;
+            const typeStr = t.type || '';
             if (typeStr.includes('بيع') && !typeStr.includes('مرتجع')) cleanType = 'بيع';
             else if (typeStr.includes('شراء') && !typeStr.includes('مرتجع')) cleanType = 'شراء';
             else if (typeStr.includes('مرتجع بيع')) cleanType = 'مرتجع بيع';
@@ -1680,14 +2025,15 @@
             else if (typeStr.includes('تحويل')) cleanType = 'تحويل';
 
             if (window.editTransaction) {
-                window.editTransaction(t.invoiceId, cleanType);
+                window.editTransaction(t.invoiceId || t.id, cleanType);
             }
         }
 
         function deleteSelectedInvoice() {
-            const activeIdx = (activeTabId.startsWith('invoices') ? selectedInvoiceIndex : selectedHistoryIndex);
+            const isInv = (typeof activeTabId === 'string' && activeTabId.startsWith('invoices'));
+            const activeIdx = isInv ? selectedInvoiceIndex : selectedHistoryIndex;
 
-            if (activeIdx === null || activeIdx === undefined) {
+            if (activeIdx === null || activeIdx === undefined || activeIdx === -1) {
                 return showCustomAlert({
                     type: 'warning',
                     titleText: '⚠️ تنبيه',

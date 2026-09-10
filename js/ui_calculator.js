@@ -184,6 +184,10 @@
             current.innerText = result;
             calcExpression = result.toString();
             renderCalcHistory();
+
+            if (window.BayanNetworkHub && typeof window.BayanNetworkHub.pushLocalDbToServer === 'function') {
+                window.BayanNetworkHub.pushLocalDbToServer();
+            }
         } catch (e) {
             current.innerText = "Error";
             setTimeout(calcClear, 1000);
@@ -198,6 +202,8 @@
             calcHistory = [];
         }
     }
+    window.loadCalcHistory = loadCalcHistory;
+    window.renderCalcHistory = renderCalcHistory;
 
     function toggleCalcHistory() {
         const area = document.getElementById('calcHistoryArea');
@@ -214,6 +220,9 @@
             setStore('bayan_calc_history', JSON.stringify(calcHistory));
             renderCalcHistory();
             if (typeof showToast === 'function') showToast("🗑️ تم تصفير السجل بنجاح", "info");
+            if (window.BayanNetworkHub && typeof window.BayanNetworkHub.pushLocalDbToServer === 'function') {
+                window.BayanNetworkHub.pushLocalDbToServer();
+            }
         }
     }
 

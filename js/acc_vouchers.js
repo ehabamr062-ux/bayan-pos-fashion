@@ -46,7 +46,7 @@
             saveBtns.forEach(b => { b.disabled = true; b.style.pointerEvents = 'none'; b.style.opacity = '0.6'; });
 
             try {
-                if (!checkPermission('docs_add')) return false;
+                if (!checkPermission('sec_receipt')) return false;
 
                 const amount = parseFloat(document.getElementById('receiptAmount').value);
 
@@ -96,7 +96,7 @@
 
                 const receiptID = isEditMode ? editingInvoiceId : (document.getElementById('receiptID') ? document.getElementById('receiptID').value : getNextSequence('قبض'));
 
-                if (!isEditMode && transactions.some(t => t.invoiceId === receiptID && t.type === 'قبض 📥')) {
+                if (!isEditMode && transactions.some(t => String(t.invoiceId) === String(receiptID) && t.type && t.type.includes('قبض'))) {
                     console.warn("Duplicate Receipt Blocked");
                     return false;
                 }
@@ -118,6 +118,14 @@
                     return false;
                 }
 
+                const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+                const tInfo = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalInfo === 'function')
+                    ? window.BayanNetworkHub.getTerminalInfo()
+                    : { terminal: 'الجهاز الرئيسي 💻', terminalLetter: 'MASTER', terminalOrder: 0, terminalId: '' };
+                const terminalName = tInfo.terminal;
+                const receiptTreasury = document.getElementById('receiptTreasurySelect')?.value || 'نقدية';
+                const receiptMethod = (receiptTreasury.includes('بنك') || receiptTreasury.includes('فيزا') || receiptTreasury.includes('تحويل')) ? receiptTreasury : 'نقدية';
+
                 // تسجيل الحركة في السجل العام
 
                 transactions.push({
@@ -130,7 +138,7 @@
 
                     type: 'قبض 📥',
 
-                    method: 'نقدية',
+                    method: receiptMethod,
 
                     invoiceId: receiptID,
 
@@ -147,6 +155,12 @@
                     paidAmount: Number((Number(amount) || 0).toFixed(2)),
 
                     partner: payer,
+
+                    warehouse: activeWH,
+                    terminal: terminalName,
+                    terminalLetter: tInfo.terminalLetter,
+                    terminalOrder: tInfo.terminalOrder,
+                    terminalId: tInfo.terminalId,
 
                     user: currentUser ? currentUser.name : '-',
 
@@ -242,7 +256,7 @@
 
         let isDisburseSaving = false;
 
-        async function saveDisbursement(closeAfterExplicit = false, accountChecked = false) {
+        async function saveDisbursement(closeAfterExplicit = false, accountChecked = false, force = false) {
 
             if (isDisburseSaving) return false;
             isDisburseSaving = true;
@@ -251,7 +265,7 @@
             saveBtns.forEach(b => { b.disabled = true; b.style.pointerEvents = 'none'; b.style.opacity = '0.6'; });
 
             try {
-                if (!checkPermission('docs_add')) return false;
+                if (!checkPermission('sec_disburse')) return false;
 
                 const amount = parseFloat(document.getElementById('disburseAmount').value);
 
@@ -288,9 +302,54 @@
                 if (!accountChecked) {
                     const ok = await window.ensurePartnerAccountExists(payee, 'مورد', true, () => {
                         isDisburseSaving = false;
-                        saveDisbursement(closeAfterExplicit, true);
+                        saveDisbursement(closeAfterExplicit, true, force);
                     });
                     if (!ok) return false;
+                }
+
+                const disburseTreasury = document.getElementById('disburseTreasurySelect')?.value || 'نقدية';
+                const disburseMethod = (disburseTreasury.includes('بنك') || disburseTreasury.includes('فيزا') || disburseTreasury.includes('تحويل')) ? disburseTreasury : 'نقدية';
+                const isCash = !disburseMethod.includes('بنك') && !disburseMethod.includes('فيزا') && !disburseMethod.includes('تحويل');
+
+                // 🛑 فحص رصيد الدرج / الخزينة قبل صرف النقدية لمنع العجز غير المراقب
+                if (isCash && !force) {
+                    const currentCash = (function() {
+                        let c = 0;
+                        const isNonCash = (m) => {
+                            if (!m) return false;
+                            const s = String(m).toLowerCase();
+                            return s.includes('فيزا') || s.includes('بنك') || s.includes('شيك') || s.includes('تحويل') || s.includes('آجل') || s.includes('حساب');
+                        };
+                        (window.transactions || []).forEach(t => {
+                            if (isNonCash(t.method)) return;
+                            const type = t.type || '';
+                            const amt = (t.isInvoiceHead || t.isInvoiceHead === undefined) ? (parseFloat(t.paidAmount !== undefined ? t.paidAmount : (t.paid !== undefined ? t.paid : t.total)) || 0) : 0;
+                            if (type.includes('بيع') && !type.includes('مرتجع')) c += amt;
+                            else if (type.includes('قبض')) c += (parseFloat(t.total) || 0);
+                            else if (type.includes('مرتجع شراء')) c += amt;
+                            else if (type.includes('شراء') && !type.includes('مرتجع')) c -= amt;
+                            else if (type.includes('صرف')) c -= (parseFloat(t.total) || 0);
+                            else if (type.includes('مرتجع بيع')) c -= amt;
+                        });
+                        return c;
+                    })();
+
+                    if (currentCash < amount) {
+                        saveBtns.forEach(b => { b.disabled = false; b.style.pointerEvents = 'auto'; b.style.opacity = '1'; });
+                        isDisburseSaving = false;
+                        showCustomAlert({
+                            type: 'warning',
+                            titleText: '⚠️ رصيد الخزينة غير كافٍ',
+                            msg: `مبلغ الصرف المطلوب نقداً هو (<b>${amount.toFixed(2)} ج.م</b>) بينما النقدية المتوفرة بالدرج حالياً هي (<b>${currentCash.toFixed(2)} ج.م</b>).<br><br>هل تريد المتابعة والسماح برصيد سالب بالدرج؟`,
+                            showCancel: true,
+                            confirmText: 'نعم، تابع واصرف',
+                            cancelText: 'إلغاء الصرف',
+                            onConfirm: () => {
+                                saveDisbursement(closeAfterExplicit, accountChecked, true);
+                            }
+                        });
+                        return false;
+                    }
                 }
 
                 const dt = getTransactionDateTime('disburseDate', 'disburseTime');
@@ -316,9 +375,20 @@
                     return false;
                 }
 
-                // تسجيل الحركة في السجل العام
+                const disburseID = isEditMode ? editingInvoiceId : (document.getElementById('disburseID')?.value || (typeof getNextSequence === 'function' ? getNextSequence('صرف') : 1));
 
-                const disburseID = isEditMode ? editingInvoiceId : document.getElementById('disburseID').value;
+                if (!isEditMode && transactions.some(t => String(t.invoiceId) === String(disburseID) && t.type && t.type.includes('صرف'))) {
+                    console.warn("Duplicate Disbursement Blocked");
+                    return false;
+                }
+
+                const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+                const tInfo = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalInfo === 'function')
+                    ? window.BayanNetworkHub.getTerminalInfo()
+                    : { terminal: 'الجهاز الرئيسي 💻', terminalLetter: 'MASTER', terminalOrder: 0, terminalId: '' };
+                const terminalName = tInfo.terminal;
+
+                // تسجيل الحركة في السجل العام
 
                 transactions.push({
 
@@ -330,7 +400,7 @@
 
                     type: 'صرف 📤',
 
-                    method: 'نقدية',
+                    method: disburseMethod,
 
                     invoiceId: disburseID,
 
@@ -347,6 +417,12 @@
                     paidAmount: Number((Number(amount) || 0).toFixed(2)),
 
                     partner: payee,
+
+                    warehouse: activeWH,
+                    terminal: terminalName,
+                    terminalLetter: tInfo.terminalLetter,
+                    terminalOrder: tInfo.terminalOrder,
+                    terminalId: tInfo.terminalId,
 
                     user: currentUser ? currentUser.name : '-',
 
@@ -407,11 +483,21 @@
         // ================= منطق تقرير الحركة اليومية (Daily Report Logic) =================
 
         function printReceiptData() {
-            const payer = (document.getElementById('receiptCustomer')?.value || 'غير محدد').trim();
+            const payer = (document.getElementById('receiptCustomer')?.value || '').trim();
             const amount = parseFloat(document.getElementById('receiptAmount')?.value) || 0;
-            if (amount <= 0) {
-                if (typeof showToast === 'function') showToast("⚠️ يرجى إدخال مبلغ صحيح للطباعة!", "warning");
-                else alert("⚠️ يرجى إدخال مبلغ صحيح للطباعة!");
+            const isPayerEmpty = (!payer || payer === 'غير محدد' || payer === 'عميل نقدي' || payer === 'عميل');
+
+            if (amount <= 0 && isPayerEmpty) {
+                if (typeof showToast === 'function') showToast("⚠️ لا يمكن الطباعة: يرجى كتابة اسم العميل وإدخال مبلغ سند القبض أولاً!", "warning");
+                else alert("⚠️ لا يمكن الطباعة: يرجى كتابة اسم العميل وإدخال مبلغ سند القبض أولاً!");
+                return;
+            } else if (amount <= 0) {
+                if (typeof showToast === 'function') showToast("⚠️ لا يمكن الطباعة: يرجى إدخال مبلغ صحيح لسند القبض أولاً!", "warning");
+                else alert("⚠️ لا يمكن الطباعة: يرجى إدخال مبلغ صحيح لسند القبض أولاً!");
+                return;
+            } else if (isPayerEmpty) {
+                if (typeof showToast === 'function') showToast("⚠️ لا يمكن الطباعة: يرجى كتابة وتحديد اسم العميل أولاً للسند!", "warning");
+                else alert("⚠️ لا يمكن الطباعة: يرجى كتابة وتحديد اسم العميل أولاً للسند!");
                 return;
             }
 
@@ -631,11 +717,21 @@
         }
 
         function printDisbursementData() {
-            const payee = (document.getElementById('disbursePayee')?.value || 'غير محدد').trim();
+            const payee = (document.getElementById('disbursePayee')?.value || '').trim();
             const amount = parseFloat(document.getElementById('disburseAmount')?.value) || 0;
-            if (amount <= 0) {
-                if (typeof showToast === 'function') showToast("⚠️ يرجى إدخال مبلغ صحيح للطباعة!", "warning");
-                else alert("⚠️ يرجى إدخال مبلغ صحيح للطباعة!");
+            const isPayeeEmpty = (!payee || payee === 'غير محدد' || payee === 'مورد نقدي' || payee === 'جهة');
+
+            if (amount <= 0 && isPayeeEmpty) {
+                if (typeof showToast === 'function') showToast("⚠️ لا يمكن الطباعة: يرجى كتابة اسم المستلم/المورد وإدخال مبلغ سند الصرف أولاً!", "warning");
+                else alert("⚠️ لا يمكن الطباعة: يرجى كتابة اسم المستلم/المورد وإدخال مبلغ سند الصرف أولاً!");
+                return;
+            } else if (amount <= 0) {
+                if (typeof showToast === 'function') showToast("⚠️ لا يمكن الطباعة: يرجى إدخال مبلغ صحيح لسند الصرف أولاً!", "warning");
+                else alert("⚠️ لا يمكن الطباعة: يرجى إدخال مبلغ صحيح لسند الصرف أولاً!");
+                return;
+            } else if (isPayeeEmpty) {
+                if (typeof showToast === 'function') showToast("⚠️ لا يمكن الطباعة: يرجى كتابة اسم المستلم / المورد أولاً للسند!", "warning");
+                else alert("⚠️ لا يمكن الطباعة: يرجى كتابة اسم المستلم / المورد أولاً للسند!");
                 return;
             }
 
@@ -855,6 +951,9 @@
         }
 
         function quickTransaction(type) {
+            if (type === 'receipt' && typeof checkPermission === 'function' && !checkPermission('sec_receipt')) return;
+            if (type === 'disbursement' && typeof checkPermission === 'function' && !checkPermission('sec_disburse')) return;
+
             const accId = window.selectedAccountID || (typeof selectedAccountID !== 'undefined' ? selectedAccountID : null);
             if (!accId) return alert("⚠️ يرجى تحديد حساب أولاً (بالضغط عليه في الجدول) قبل الضغط على قبض أو صرف!");
 
@@ -862,9 +961,28 @@
             const acc = allAccs.find(a => a.id == accId || a.id === accId);
             if (!acc) return alert("⚠️ لم يتم العثور على بيانات الحساب المحدد!");
 
+            // فحص التجميد مباشرة
+            const isFrozen = (acc.inactive === true || acc.inactive === 'true' || acc.isFrozen === true);
+            if (isFrozen) {
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'error',
+                        titleText: '❄️ الحساب مجمّد',
+                        msg: `عذراً، الحساب "<b>${acc.name}</b>" مجمّد حالياً من قبل الإدارة.<br>لا يمكن إنشاء سندات قبض أو صرف له حتى يتم إلغاء التجميد.`
+                    });
+                } else {
+                    alert(`❄️ عذراً، الحساب "${acc.name}" مجمّد حالياً ولا يمكن إجراء حركات مالية عليه.`);
+                }
+                return;
+            }
+
             const balance = typeof getAccountBalance === 'function' ? getAccountBalance(acc.name) : (acc.balance || 0);
-            // إذا كان الرصيد أقل من 0 يكون "ليه فلوس" وتظهر بسالب (-500.00)، وإذا كان أكبر من 0 يكون "عليه فلوس" وتظهر بموجب (500.00)
-            const formattedBal = (balance < 0 ? '-' : '') + Math.abs(balance).toLocaleString('en-US', { minimumFractionDigits: 2 });
+            let formattedBal = '0.00 ج.م (خالص)';
+            if (balance > 0.005) {
+                formattedBal = `${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} ج.م (عليه)`;
+            } else if (balance < -0.005) {
+                formattedBal = `${Math.abs(balance).toLocaleString('en-US', { minimumFractionDigits: 2 })} ج.م (له)`;
+            }
 
             if (type === 'receipt') {
                 switchSection('receipt');

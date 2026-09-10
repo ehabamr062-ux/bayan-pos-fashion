@@ -56,7 +56,7 @@ async function saveSettings() {
         name: document.getElementById('shopName').value,
         phones: [p1, p2, p3, p4],
         address: document.getElementById('shopAddress').value,
-        autoBackup: document.getElementById('autoBackupSetting').checked,
+        autoBackup: document.getElementById('autoBackupSetting').checked || (document.getElementById('autoBackupInterval').value !== 'close'),
         autoBackupInterval: document.getElementById('autoBackupInterval').value,
         printFooterMsg: document.getElementById('printFooterMsg').value,
         printSocialQrLink: document.getElementById('printSocialQrLink') ? document.getElementById('printSocialQrLink').value.trim() : '',
@@ -68,6 +68,7 @@ async function saveSettings() {
         allowBackdating: document.getElementById('allowBackdating').checked,
         allowHistoryEdit: document.getElementById('allowHistoryEdit').checked,
         showInquiryCostPrice: document.getElementById('showInquiryCostPrice') ? document.getElementById('showInquiryCostPrice').checked : false,
+        requireOriginalInvoiceForReturn: document.getElementById('requireOriginalInvoiceForReturn') ? document.getElementById('requireOriginalInvoiceForReturn').checked : true,
         // Business Profile & UI Customization Settings
         businessType: document.getElementById('appBusinessType') ? document.getElementById('appBusinessType').value : "clothing",
         directToSalesOnLogin: document.getElementById('directToSalesOnLogin') ? document.getElementById('directToSalesOnLogin').checked : true,
@@ -93,6 +94,9 @@ async function saveSettings() {
     if (typeof applyBusinessTypeUI === 'function') applyBusinessTypeUI();
 
     await saveData();
+    if (typeof window.checkAndRunPeriodicBackup === 'function') {
+        window.checkAndRunPeriodicBackup();
+    }
     showToast("✅ تم حفظ جميع الإعدادات وتخصيصات الأقسام بنجاح!", "success");
 }
 
@@ -126,8 +130,8 @@ function setAllDashboardSectionsVisibility(visible = true) {
 }
 
 function applyStaffPresetVisibility() {
-    // الأقسام اليومية السريعة (الموصى بها للكاشير: البيع، مرتجع البيع، القبض، الصرف، تقرير الحركة، الفواتير، الحسابات، البضاعة، كشف الحساب)
-    const activeStaffSections = ['sales', 'sales-return', 'receipt', 'disbursement', 'daily-report', 'invoices', 'accounts', 'inventory', 'statement'];
+    // الأقسام اليومية السريعة (الموصى بها للكاشير: البيع، مرتجع البيع، القبض، الصرف، تقرير الحركة، الفواتير، الحسابات، البضاعة، كشف الحساب، تحليل المبيعات)
+    const activeStaffSections = ['sales', 'sales-return', 'receipt', 'disbursement', 'daily-report', 'invoices', 'accounts', 'inventory', 'statement', 'analysis'];
     document.querySelectorAll('.dash-sec-toggle').forEach(chk => {
         const sec = chk.getAttribute('data-sec');
         chk.checked = activeStaffSections.includes(sec);
@@ -175,7 +179,15 @@ function applyBusinessTypeUI() {
         'shortcuts', 'adjustment',
         'history', 'price-mgmt', 'transfer', 'warehouse-report', 'purchase', 'purchase-return'
     ];
-    const activeClothingSections = ['sales', 'sales-return', 'receipt', 'disbursement', 'daily-report', 'invoices', 'accounts', 'inventory', 'statement'];
+    const activeClothingSections = ['sales', 'sales-return', 'receipt', 'disbursement', 'daily-report', 'invoices', 'accounts', 'inventory', 'statement', 'analysis'];
+
+    // ترقية تلقائية: ضمان ظهور قسم تحليل المبيعات افتراضياً وعدم إخفائه بسبب حفظ قديم
+    if (sectionsMap && (sectionsMap.analysis === undefined || !settings._hasMigratedAnalysisSec)) {
+        sectionsMap.analysis = true;
+        settings._hasMigratedAnalysisSec = true;
+        settings.visibleDashboardSections = sectionsMap;
+        try { setStore('pos_settings', JSON.stringify(settings)); } catch(e) {}
+    }
 
     allKnownSections.forEach(secKey => {
         let isVisible = true;
@@ -252,8 +264,39 @@ function loadSettings() {
             if (slider) slider.value = window.currentFontSize;
         }
     }
-    if (settings.autoBackup !== undefined) document.getElementById('autoBackupSetting').checked = settings.autoBackup;
-    if (settings.autoBackupInterval !== undefined) document.getElementById('autoBackupInterval').value = settings.autoBackupInterval;
+    const autoBackupEl = document.getElementById('autoBackupSetting');
+    if (autoBackupEl) {
+        autoBackupEl.checked = (settings.autoBackup === true);
+        autoBackupEl.onchange = function() {
+            const cur = JSON.parse(getStore('pos_settings') || '{}');
+            cur.autoBackup = this.checked;
+            setStore('pos_settings', JSON.stringify(cur));
+            if (typeof showToast === 'function') {
+                showToast(this.checked ? "✅ تم تفعيل النسخ الاحتياطي التلقائي" : "⏸️ تم إيقاف النسخ الاحتياطي التلقائي", "info");
+            }
+        };
+    }
+    const autoIntervalEl = document.getElementById('autoBackupInterval');
+    if (autoIntervalEl) {
+        if (settings.autoBackupInterval !== undefined) autoIntervalEl.value = settings.autoBackupInterval;
+        autoIntervalEl.onchange = function() {
+            const cur = JSON.parse(getStore('pos_settings') || '{}');
+            cur.autoBackupInterval = this.value;
+            if (this.value !== 'close') {
+                cur.autoBackup = true;
+                const autoBackupEl = document.getElementById('autoBackupSetting');
+                if (autoBackupEl) autoBackupEl.checked = true;
+            }
+            setStore('pos_settings', JSON.stringify(cur));
+            if (typeof window.checkAndRunPeriodicBackup === 'function') {
+                window.checkAndRunPeriodicBackup();
+            }
+            if (typeof showToast === 'function') {
+                const label = this.options[this.selectedIndex] ? this.options[this.selectedIndex].text : this.value;
+                showToast(`⏰ تكرار النسخ التلقائي: (${label})`, "info");
+            }
+        };
+    }
 
     // Load Financial Settings
     if (settings.currencySymbol) document.getElementById('appCurrencySymbol').value = settings.currencySymbol;
@@ -264,6 +307,9 @@ function loadSettings() {
     if (settings.allowHistoryEdit !== undefined) document.getElementById('allowHistoryEdit').checked = settings.allowHistoryEdit;
     if (settings.showInquiryCostPrice !== undefined && document.getElementById('showInquiryCostPrice')) {
         document.getElementById('showInquiryCostPrice').checked = settings.showInquiryCostPrice;
+    }
+    if (settings.requireOriginalInvoiceForReturn !== undefined && document.getElementById('requireOriginalInvoiceForReturn')) {
+        document.getElementById('requireOriginalInvoiceForReturn').checked = settings.requireOriginalInvoiceForReturn;
     }
 
     // Load Business Profile Settings
@@ -349,6 +395,133 @@ function applyPermissions() {
     } else {
         styleEl.textContent = '';
     }
+
+    // 3. 🔒 التحكم في ظهور أزرار وملخصات الأرباح (شاشة البيع وتقرير الحركة اليومية)
+    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    const profitBtns = document.querySelectorAll('.btn-profit, #btnCurrentBillProfit, .action-btn.btn-profit');
+    profitBtns.forEach(btn => {
+        if (btn) {
+            btn.style.setProperty('display', canViewProfits ? '' : 'none', 'important');
+        }
+    });
+
+    const dailyProfitCard = document.getElementById('dailyReportProfitSummaryCard');
+    if (dailyProfitCard) {
+        dailyProfitCard.style.setProperty('display', canViewProfits ? '' : 'none', 'important');
+    }
+
+    // 4. 🔒 تحديث ضوابط الخصم والتسعير في شاشة المبيعات فور تسجيل الدخول
+    const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+        || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
+    const headerPriceEl = document.getElementById('headerPrice');
+    if (headerPriceEl) {
+        headerPriceEl.readOnly = !canEditPrice;
+        if (!canEditPrice) {
+            headerPriceEl.style.cursor = 'not-allowed';
+            headerPriceEl.style.background = '#f1f5f9';
+            headerPriceEl.style.color = '#64748b';
+            headerPriceEl.title = '🔒 تعديل السعر مقفل للكاشير ومصرح به للمدير فقط';
+        } else {
+            headerPriceEl.style.cursor = '';
+            headerPriceEl.style.background = '#ffffff';
+            headerPriceEl.style.color = '#0f172a';
+            headerPriceEl.title = '';
+        }
+    }
+
+    // 5. 🔒 إخفاء الأقسام غير المصرح بها من الواجهة الرئيسية (الداشبورد) فوراً وبدقة
+    const isSuperOrAdmin = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin');
+    const p = (currentUser && currentUser.permissions) ? currentUser.permissions : {};
+
+    const toggleTile = (selector, hasPerm) => {
+        const tiles = document.querySelectorAll(selector);
+        tiles.forEach(tile => {
+            if (tile) {
+                tile.style.setProperty('display', (isSuperOrAdmin || hasPerm) ? '' : 'none', 'important');
+            }
+        });
+    };
+
+    // 1. قسم المبيعات
+    toggleTile('.dm-sec-sales', typeof hasPermission === 'function' && hasPermission('docs_add'));
+    // 2. قسم مرتجع المبيعات
+    toggleTile('.dm-sec-sales-return', typeof hasPermission === 'function' && hasPermission('docs_return'));
+    // 3. قسم فواتير الشراء
+    toggleTile('.dm-sec-purchase', typeof hasPermission === 'function' && hasPermission('docs_purchase'));
+    // 4. قسم مرتجع الشراء
+    const canPurReturn = (p.docs && p.docs.purchase_return !== undefined) ? !!p.docs.purchase_return : (hasPermission('docs_purchase') || hasPermission('docs_return'));
+    toggleTile('.dm-sec-purchase-return', typeof hasPermission === 'function' && canPurReturn);
+    // 5. قسم سجل واستعراض الفواتير
+    toggleTile('.dm-sec-invoices', typeof hasPermission === 'function' && hasPermission('docs_view'));
+
+    // 6. قسم سندات القبض
+    const canReceipt = (p.accounts && p.accounts.receipt !== undefined) ? !!p.accounts.receipt : hasPermission('accounts_add');
+    toggleTile('.dm-sec-receipt', typeof hasPermission === 'function' && canReceipt);
+    // 7. قسم سندات الصرف
+    const canDisburse = (p.accounts && p.accounts.disbursement !== undefined) ? !!p.accounts.disbursement : hasPermission('accounts_add');
+    toggleTile('.dm-sec-disbursement', typeof hasPermission === 'function' && canDisburse);
+    // 8. قسم الحسابات والعملاء والموردين
+    toggleTile('.dm-sec-accounts', typeof hasPermission === 'function' && hasPermission('accounts_view'));
+    // 9. قسم إضافة حساب جديد
+    toggleTile('.dm-sec-new-account', typeof hasPermission === 'function' && hasPermission('accounts_add'));
+    // 10. قسم كشف حساب
+    const canStatement = typeof hasPermission === 'function' && hasPermission('accounts_statement');
+    toggleTile('.dm-sec-statement', canStatement);
+
+    // 11. قسم مراجعة الخزينة (مقيد بالصلاحيات للموظفين)
+    const canTreasury = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') || (typeof hasPermission === 'function' && hasPermission('accounts_treasury'));
+    toggleTile('.dm-sec-treasury', canTreasury);
+
+    // 12. قسم المخزن وبضاعة الأصناف
+    toggleTile('.dm-sec-inventory', typeof hasPermission === 'function' && hasPermission('stock_view'));
+    // 13. قسم إضافة صنف جديد
+    toggleTile('.dm-sec-new-item', typeof hasPermission === 'function' && hasPermission('stock_add'));
+    // 14. قسم إدارة الأسعار والمخازن
+    toggleTile('.dm-sec-price-mgmt', typeof hasPermission === 'function' && hasPermission('stock_edit'));
+    // 15. قسم تسوية مخزن
+    const canAdjust = (p.stock && p.stock.adjust !== undefined) ? !!p.stock.adjust : (hasPermission('stock_edit') || hasPermission('stock_transfer'));
+    toggleTile('.dm-sec-adjustment', typeof hasPermission === 'function' && canAdjust);
+    // 16. قسم حركة صنف
+    const canHistory = (p.stock && p.stock.history !== undefined) ? !!p.stock.history : (hasPermission('stock_view') || hasPermission('docs_view'));
+    toggleTile('.dm-sec-history', typeof hasPermission === 'function' && canHistory);
+    // 17. قسم تحويل المخزون
+    toggleTile('.dm-sec-transfer', typeof hasPermission === 'function' && hasPermission('stock_transfer'));
+    // 18. قسم أرصدة المخازن التفصيلية
+    const canWarehouseReport = typeof hasPermission === 'function' && hasPermission('stock_warehouse_report');
+    toggleTile('.dm-sec-warehouse-report', canWarehouseReport);
+    // 19. قسم استعلام الأصناف
+    const canInquiry = (p.stock && p.stock.inquiry !== undefined) ? !!p.stock.inquiry : hasPermission('stock_view');
+    toggleTile('.dm-sec-product-inquiry', typeof hasPermission === 'function' && canInquiry);
+
+    // 20. قسم تقارير الحركة اليومية
+    toggleTile('.dm-sec-daily-report', typeof hasPermission === 'function' && hasPermission('general_reports'));
+    // 21. قسم تقارير وتحليل الأرباح
+    toggleTile('.dm-sec-analysis', typeof hasPermission === 'function' && hasPermission('general_profits'));
+    // 22. قسم شاشة الإعدادات
+    toggleTile('.dm-sec-settings', typeof hasPermission === 'function' && hasPermission('general_settings'));
+    // 23. قسم اختصارات الكيبورد (يختفي إذا لم تكن هناك صلاحية للإعدادات)
+    const canShortcuts = typeof hasPermission === 'function' && hasPermission('general_settings') && (p.general && p.general.shortcuts !== undefined ? !!p.general.shortcuts : true);
+    toggleTile('.dm-sec-shortcuts', canShortcuts);
+
+    // 🔒 إخفاء وضبط أزرار شريط الأدوات داخل شاشة الحسابات والعملاء
+    toggleTile('.acc-btn-receipt', typeof hasPermission === 'function' && canReceipt);
+    toggleTile('.acc-btn-disbursement', typeof hasPermission === 'function' && canDisburse);
+    toggleTile('.acc-btn-edit', typeof hasPermission === 'function' && hasPermission('accounts_edit'));
+    toggleTile('.acc-btn-delete', isSuperOrAdmin || (typeof hasPermission === 'function' && hasPermission('accounts_delete')));
+    toggleTile('.acc-btn-statement', canStatement);
+    toggleTile('.acc-btn-settings, [onclick*="exportAccountsToExcel"], [onclick*="importAccountsExcelInput"]', isSuperOrAdmin || (typeof hasPermission === 'function' && hasPermission('general_settings')));
+
+    // 🔒 إدارة مجموعات الصف الأوسط بذكاء لمنع أي فراغات أو انحرافات بصرية
+    const group2 = document.getElementById('dmMidGroup2');
+    const group3 = document.getElementById('dmMidGroup3');
+    if (group2) {
+        const hasG2 = Array.from(group2.children).some(c => c.style.display !== 'none');
+        group2.style.display = hasG2 ? 'flex' : 'none';
+    }
+    if (group3) {
+        const hasG3 = Array.from(group3.children).some(c => c.style.display !== 'none');
+        group3.style.display = hasG3 ? 'flex' : 'none';
+    }
 }
 
 // =========================================================================
@@ -384,13 +557,16 @@ function applyPermissionPreset(presetType) {
     allCheckboxes.forEach(chk => chk.checked = false);
 
     if (presetType === 'cashier_only') {
-        // كاشير بيع فقط: إضافة فواتير بيع فقط وحفظها، وإغلاق سجل الفواتير والمخازن والتقارير وباقي الأقسام
-        const cashierIds = ['perm_docs_add'];
+        // كاشير بيع فقط: إضافة فواتير بيع وخصم محدود (بدون تعديل سعر البيع، بدون ضريبة، بدون حذف)
+        const cashierIds = ['perm_docs_add', 'perm_docs_discount'];
         cashierIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.checked = true;
         });
-        if (typeof showToast === 'function') showToast("🛒 تم تطبيق قالب: كاشير (بيع فقط) بنجاح!", "success");
+        if (document.getElementById('perm_docs_price_edit')) document.getElementById('perm_docs_price_edit').checked = false;
+        if (document.getElementById('perm_docs_tax')) document.getElementById('perm_docs_tax').checked = false;
+        if (document.getElementById('newUserMaxDiscount')) document.getElementById('newUserMaxDiscount').value = '5';
+        if (typeof showToast === 'function') showToast("🛒 تم تطبيق قالب: كاشير (بيع فقط - سعر مقفل وخصم 5%) بنجاح!", "success");
     } else if (presetType === 'stock_manager') {
         // أمين مخزن: بضاعة ومخازن ونقل أصناف فقط
         const stockIds = ['perm_stock_add', 'perm_stock_edit', 'perm_stock_transfer', 'perm_stock_view', 'perm_docs_view'];
@@ -428,6 +604,8 @@ function startNfcRegistration() {
         setTimeout(() => input.focus(), 100);
     }
 }
+window.startNfcScanForUser = startNfcRegistration;
+window.startNfcRegistration = startNfcRegistration;
 
 function closeNfcRegistrationModal() {
     window.isListeningForNfcRegistration = false;
@@ -493,44 +671,82 @@ function renderUsersTable() {
         const isSuperAdmin = (u.id === 1);
         const isFrozen = !!u.isFrozen;
         const nfcBadge = u.nfcUid 
-            ? `<span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 8px; font-size: 0.78rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">💳 ${u.nfcUid}</span>`
-            : `<span style="color: #94a3b8; font-size: 0.78rem; font-weight: bold;">غير مربوط</span>`;
+            ? `<span style="background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 5px;">💳 ${u.nfcUid}</span>`
+            : `<span style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; background: #f8fafc; padding: 3px 8px; border-radius: 6px; border: 1px dashed #cbd5e1;">غير مربوط</span>`;
 
         const statusBadge = isFrozen
-            ? `<span style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; padding: 3px 10px; border-radius: 50px; font-size: 0.75rem; font-weight: 900;">❄️ مجمّد</span>`
-            : `<span style="background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 3px 10px; border-radius: 50px; font-size: 0.75rem; font-weight: 900;">🟢 نشط</span>`;
+            ? `<span style="background: #fef2f2; color: #b91c1c; border: 1.5px solid #fecaca; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">❄️ مجمّد</span>`
+            : `<span style="background: #ecfdf5; color: #047857; border: 1.5px solid #a7f3d0; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🟢 نشط</span>`;
 
-        let whBadge = `<span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">🌐 كافة المخازن</span>`;
+        let whBadge = `<span style="background: #f0fdf4; color: #15803d; border: 1.5px solid #bbf7d0; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">🌐 كافة الفروع</span>`;
         if (u.warehouseScope === 'main') {
-            whBadge = `<span style="background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">🏢 الرئيسي فقط</span>`;
+            whBadge = `<span style="background: #f8fafc; color: #334155; border: 1.5px solid #cbd5e1; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">🏢 المخزن الرئيسي</span>`;
         } else if (u.warehouseScope === 'specific' && u.assignedWarehouse) {
-            whBadge = `<span style="background: #fdf4ff; color: #a21caf; border: 1px solid #f5d0fe; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">🏬 ${u.assignedWarehouse}</span>`;
+            whBadge = `<span style="background: #faf5ff; color: #7e22ce; border: 1.5px solid #e9d5ff; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">🏬 ${u.assignedWarehouse}</span>`;
         }
 
+        const roleBadge = (u.role === 'admin')
+            ? `<span style="background: #fffbeb; color: #b45309; border: 1.5px solid #fde68a; padding: 4px 12px; border-radius: 50px; font-size: 0.82rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">⭐ مدير نظام</span>`
+            : `<span style="background: #f1f5f9; color: #334155; border: 1.5px solid #cbd5e1; padding: 4px 12px; border-radius: 50px; font-size: 0.82rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">👤 موظف</span>`;
+
         rowsHtml += `
-            <tr style="${isFrozen ? 'opacity: 0.65; background: #fff5f5;' : ''}">
-                <td style="font-weight: 800; color: #1e293b;">${u.name}</td>
-                <td style="font-family: monospace; letter-spacing: 1px; text-align: center; font-weight: bold;">${(u.role === 'admin' && !isSuperAdmin) ? '****' : u.pin}</td>
-                <td style="text-align: center;">${nfcBadge}</td>
-                <td style="text-align: center;">
-                    <span class="role-badge ${u.role === 'admin' ? 'role-admin' : 'role-user'}" 
-                          style="padding: 4px 10px; border-radius: 50px; font-size: 0.75rem; font-weight: 900; background: ${u.role === 'admin' ? '#ebfbee' : '#f1f5f9'}; color: ${u.role === 'admin' ? '#1e8449' : '#475569'}; border: 1px solid ${u.role === 'admin' ? '#c3e6cb' : '#e2e8f0'};">
-                        ${u.role === 'admin' ? '⭐ مدير نظام' : '🔹 موظف'}
+            <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.15s; ${isFrozen ? 'opacity: 0.75; background: #fff5f5;' : 'background: #ffffff;'}">
+                <td style="padding: 12px 14px; font-weight: 900; color: #0f172a; font-size: 0.92rem;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #f1f5f9; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; border: 1px solid #e2e8f0;">👤</span>
+                        <div>
+                            <span>${u.name}</span>
+                            ${isSuperAdmin ? '<span style="font-size: 0.72rem; color: #0284c7; font-weight: 800; display: block;">المدير الأساسي</span>' : ''}
+                        </div>
+                    </div>
+                </td>
+                <td style="padding: 12px 14px; text-align: center;">
+                    <span style="font-family: monospace; letter-spacing: 2px; font-weight: 900; font-size: 0.95rem; background: #f8fafc; padding: 4px 10px; border-radius: 8px; border: 1.5px solid #e2e8f0; color: #334155;">
+                        ${(u.role === 'admin' && !isSuperAdmin) ? '••••' : u.pin}
                     </span>
                 </td>
-                <td style="text-align: center;">${whBadge}</td>
-                <td style="text-align: center;">${statusBadge}</td>
-                <td>
-                    <div style="display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap;">
-                        <button class="btn-delete-row" style="color: #6366f1; background: #eef2ff; padding: 4px 8px; font-size: 0.85rem;" onclick="editUser(${idx})" title="تعديل المستخدم">✏️</button>
-                        <button class="btn-delete-row" style="color: #0284c7; background: #f0f9ff; padding: 4px 8px; font-size: 0.85rem;" onclick="openCopyPermissionsModal(${idx})" title="نسخ صلاحيات إلى هذا المستخدم">📋</button>
-                        <button class="btn-delete-row" style="color: #d97706; background: #fefce8; padding: 4px 8px; font-size: 0.85rem;" onclick="changeUserPin(${idx})" title="تغيير رمز PIN">🔑</button>
+                <td style="padding: 12px 14px; text-align: center;">${nfcBadge}</td>
+                <td style="padding: 12px 14px; text-align: center;">${roleBadge}</td>
+                <td style="padding: 12px 14px; text-align: center;">${whBadge}</td>
+                <td style="padding: 12px 14px; text-align: center;">${statusBadge}</td>
+                <td style="padding: 12px 14px; text-align: center;">
+                    <div style="display: inline-flex; gap: 6px; justify-content: center; align-items: center;">
+                        
+                        <!-- زر التعديل -->
+                        <button type="button" onclick="editUser(${idx})" title="تعديل الموظف"
+                            style="background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            <span>✏️</span> تعديل
+                        </button>
+
+                        <!-- زر نسخ الصلاحيات -->
+                        <button type="button" onclick="openCopyPermissionsModal(${idx})" title="نسخ صلاحيات من موظف آخر"
+                            style="background: #f0fdfa; color: #0f766e; border: 1.5px solid #99f6e4; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            <span>📋</span> نسخ
+                        </button>
+
+                        <!-- زر تغيير رمز PIN -->
+                        <button type="button" onclick="changeUserPin(${idx})" title="تغيير رمز الدخول PIN"
+                            style="background: #fffbeb; color: #b45309; border: 1.5px solid #fde68a; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            <span>🔑</span> PIN
+                        </button>
+
                         ${!isSuperAdmin ? `
-                            <button class="btn-delete-row" style="color: ${isFrozen ? '#059669' : '#0284c7'}; background: ${isFrozen ? '#ecfdf5' : '#f0f9ff'}; padding: 4px 8px; font-size: 0.85rem;" onclick="toggleFreezeUser(${idx})" title="${isFrozen ? 'تفعيل الحساب' : 'تجميد الحساب'}">
-                                ${isFrozen ? '🟢 تفعيل' : '❄️ تجميد'}
+                            <!-- زر التجميد / التنشيط -->
+                            <button type="button" onclick="toggleFreezeUser(${idx})" title="${isFrozen ? 'تفعيل الحساب' : 'تجميد الحساب'}"
+                                style="background: ${isFrozen ? '#ecfdf5' : '#f8fafc'}; color: ${isFrozen ? '#047857' : '#475569'}; border: 1.5px solid ${isFrozen ? '#a7f3d0' : '#cbd5e1'}; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                ${isFrozen ? '<span>🟢</span> تنشيط' : '<span>❄️</span> تجميد'}
                             </button>
-                            <button class="btn-delete-row" style="color: #ef4444; background: #fef2f2; padding: 4px 8px; font-size: 0.85rem;" onclick="deleteUser(${idx})" title="حذف">🗑️</button>
-                        ` : '<span title="المدير الرئيسي محمي من التجميد والحذف">🛡️</span>'}
+
+                            <!-- زر الحذف -->
+                            <button type="button" onclick="deleteUser(${idx})" title="حذف الموظف نهائياً"
+                                style="background: #fef2f2; color: #dc2626; border: 1.5px solid #fecaca; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                <span>🗑️</span> حذف
+                            </button>
+                        ` : `
+                            <span style="background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px;" title="حساب المدير محمي من الحذف والتجميد">
+                                <span>🛡️</span> محمي
+                            </span>
+                        `}
                     </div>
                 </td>
             </tr>
@@ -566,26 +782,68 @@ function changeUserPin(idx) {
     const u = users[idx];
     if (!u) return;
 
-    const newPin = prompt(`🔑 أدخل رمز الدخول الجديد (PIN مكون من 4 أرقام) للموظف [${u.name}]:`, u.pin);
-    if (newPin === null) return;
-    const cleanPin = String(newPin).trim();
+    const existingModal = document.getElementById('changePinModalOverlay');
+    if (existingModal) existingModal.remove();
 
+    const modalHtml = `
+        <div id="changePinModalOverlay" class="usr-modal-overlay">
+            <div style="background: #ffffff; border-radius: 22px; width: 100%; max-width: 430px; overflow: hidden; box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.45); border: 1.5px solid #cbd5e1; animation: userModalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+                <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 18px 22px; color: white; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #d97706;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 1.4rem;">🔑</span>
+                        <div>
+                            <h4 style="margin: 0; font-size: 1.05rem; font-weight: 900; color: #ffffff;">تغيير رمز الدخول (PIN)</h4>
+                            <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 700;">الموظف: <strong style="color: #f59e0b;">${u.name}</strong></span>
+                        </div>
+                    </div>
+                    <button type="button" onclick="document.getElementById('changePinModalOverlay').remove()" style="background: rgba(255,255,255,0.1); border: none; color: #cbd5e1; width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font-size: 1.1rem; font-weight: 900;">✕</button>
+                </div>
+                <div style="padding: 22px 24px; display: flex; flex-direction: column; gap: 16px;">
+                    <div>
+                        <label style="display: block; font-weight: 900; font-size: 0.85rem; color: #334155; margin-bottom: 8px;">رمز الدخول الجديد (PIN مكون من 4 أرقام):</label>
+                        <input type="password" id="customNewPinInput" maxlength="4" placeholder="••••" autofocus
+                            style="width: 100%; height: 48px; border: 2px solid #cbd5e1; border-radius: 12px; font-family: monospace; font-size: 1.3rem; font-weight: 900; letter-spacing: 6px; text-align: center; box-sizing: border-box; outline: none; transition: border-color 0.2s;"
+                            onfocus="this.style.borderColor='#d97706'" onblur="this.style.borderColor='#cbd5e1'"
+                            onkeydown="if(event.key==='Enter') executeChangeUserPin(${idx})">
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px;">
+                        <button type="button" onclick="document.getElementById('changePinModalOverlay').remove()" style="background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; padding: 10px 18px; border-radius: 12px; font-weight: 800; font-size: 0.88rem; cursor: pointer;">إلغاء</button>
+                        <button type="button" onclick="executeChangeUserPin(${idx})" style="background: linear-gradient(135deg, #d97706, #b45309); color: white; border: none; padding: 10px 24px; border-radius: 12px; font-weight: 900; font-size: 0.9rem; cursor: pointer; box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);">💾 حفظ الرمز الجديد</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    setTimeout(() => {
+        const inp = document.getElementById('customNewPinInput');
+        if (inp) inp.focus();
+    }, 100);
+}
+window.changeUserPin = changeUserPin;
+
+function executeChangeUserPin(idx) {
+    const u = users[idx];
+    if (!u) return;
+    const inp = document.getElementById('customNewPinInput');
+    if (!inp) return;
+    const cleanPin = String(inp.value).trim();
     if (!cleanPin || cleanPin.length !== 4 || isNaN(cleanPin)) {
         return showToast("⚠️ يجب أن يكون الرمز PIN مكوناً من 4 أرقام عددية!", "error");
     }
-
     const pinExists = users.some((other, i) => i !== idx && other.pin === cleanPin);
     if (pinExists) {
         return showToast("🚫 رمز PIN هذا مستخدم بالفعل لموظف آخر!", "error");
     }
-
     u.pin = cleanPin;
     saveData();
     renderUsersTable();
+    const modal = document.getElementById('changePinModalOverlay');
+    if (modal) modal.remove();
     showToast(`✅ تم تغيير رمز PIN للموظف (${u.name}) بنجاح!`, "success");
-
     if (typeof logAuditAction === 'function') logAuditAction('تغيير PIN لموظف', `الاسم: ${u.name}`);
 }
+window.executeChangeUserPin = executeChangeUserPin;
 
 function openCopyPermissionsModal(targetIdx) {
     const targetUser = users[targetIdx];
@@ -599,21 +857,29 @@ function openCopyPermissionsModal(targetIdx) {
     let optionsHtml = otherUsers.map(u => `<option value="${u.id}">${u.name} (${u.role === 'admin' ? 'مدير' : 'موظف'})</option>`).join('');
 
     const modalHtml = `
-        <div id="copyPermModalOverlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6);  z-index:12000; display:flex; align-items:center; justify-content:center; direction:rtl; font-family:'Cairo',sans-serif;">
-            <div style="background:white; border-radius:20px; width:450px; max-width:90%; padding:25px; box-shadow:0 20px 40px rgba(0,0,0,0.2);">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px solid #f1f5f9; padding-bottom:12px; margin-bottom:18px;">
-                    <h3 style="margin:0; font-size:1.15rem; color:#1e293b; font-weight:900;">📋 نسخ الصلاحيات إلى: <span style="color:#0284c7;">${targetUser.name}</span></h3>
-                    <button onclick="document.getElementById('copyPermModalOverlay').remove()" style="background:transparent; border:none; font-size:1.3rem; cursor:pointer; color:#94a3b8;">&times;</button>
+        <div id="copyPermModalOverlay" class="usr-modal-overlay">
+            <div style="background:white; border-radius:22px; width:480px; max-width:92%; overflow:hidden; box-shadow:0 25px 50px -12px rgba(15,23,42,0.4); border: 1.5px solid #cbd5e1; animation: userModalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+                <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 18px 24px; color: white; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0284c7;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:1.3rem;">📋</span>
+                        <div>
+                            <h4 style="margin:0; font-size:1.05rem; color:#ffffff; font-weight:900;">نسخ الصلاحيات</h4>
+                            <span style="font-size:0.78rem; color:#94a3b8; font-weight:700;">إلى الموظف: <strong style="color:#38bdf8;">${targetUser.name}</strong></span>
+                        </div>
+                    </div>
+                    <button onclick="document.getElementById('copyPermModalOverlay').remove()" style="background:rgba(255,255,255,0.1); border:none; font-size:1.1rem; cursor:pointer; color:#cbd5e1; width:34px; height:34px; border-radius:10px; font-weight:900;">✕</button>
                 </div>
-                <div style="margin-bottom:20px;">
-                    <label style="display:block; font-weight:800; color:#475569; margin-bottom:8px; font-size:0.9rem;">اختر الموظف المُراد نسخ صلاحياته:</label>
-                    <select id="sourceUserSelect" style="width:100%; height:45px; border-radius:12px; border:2px solid #e2e8f0; font-weight:bold; padding:0 12px; font-size:0.9rem;">
-                        ${optionsHtml}
-                    </select>
-                </div>
-                <div style="display:flex; justify-content:flex-end; gap:10px;">
-                    <button onclick="document.getElementById('copyPermModalOverlay').remove()" style="padding:10px 20px; border-radius:10px; background:#f1f5f9; border:none; font-weight:bold; color:#64748b; cursor:pointer;">إلغاء</button>
-                    <button onclick="executeCopyPermissions(${targetIdx})" style="padding:10px 25px; border-radius:10px; background:linear-gradient(135deg, #0284c7, #0369a1); border:none; font-weight:900; color:white; cursor:pointer;">تأكيد النسخ 📋</button>
+                <div style="padding:22px 24px; display:flex; flex-direction:column; gap:16px;">
+                    <div>
+                        <label style="display:block; font-weight:900; color:#334155; margin-bottom:8px; font-size:0.88rem;">اختر الموظف المُراد نسخ صلاحياته:</label>
+                        <select id="sourceUserSelect" style="width:100%; height:46px; border-radius:12px; border:1.5px solid #cbd5e1; font-weight:800; padding:0 14px; font-size:0.92rem; outline:none; background:white; font-family:inherit;">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
+                        <button onclick="document.getElementById('copyPermModalOverlay').remove()" style="padding:10px 20px; border-radius:12px; background:#f1f5f9; border:1.5px solid #cbd5e1; font-weight:800; color:#64748b; cursor:pointer;">إلغاء</button>
+                        <button onclick="executeCopyPermissions(${targetIdx})" style="padding:10px 26px; border-radius:12px; background:linear-gradient(135deg, #0284c7, #0369a1); border:none; font-weight:900; color:white; cursor:pointer; box-shadow:0 4px 12px rgba(2,132,199,0.3);">تأكيد النسخ 📋</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -633,9 +899,14 @@ function executeCopyPermissions(targetIdx) {
 
     if (!sourceUser || !targetUser) return;
 
-    // نسخ الصلاحيات والدور بعمق
-    targetUser.role = sourceUser.role;
+    // نسخ الصلاحيات والدور بعمق (مع حماية رتبة المدير الأساسي رقم 1 من الانخفاض)
+    if (targetUser.id !== 1 && targetUser.id !== '1') {
+        targetUser.role = sourceUser.role;
+    }
     targetUser.permissions = JSON.parse(JSON.stringify(sourceUser.permissions || {}));
+    if (sourceUser.maxDiscountPercent !== undefined) {
+        targetUser.maxDiscountPercent = sourceUser.maxDiscountPercent;
+    }
 
     saveData();
     renderUsersTable();
@@ -683,40 +954,62 @@ function addUser() {
         if (existingUser) return showToast(`🚫 كارت NFC (${nfcUid}) مربوط بالفعل بموظف آخر (${existingUser.name})!`, "error");
     }
 
+    const canReceipt = document.getElementById('perm_sec_receipt') ? document.getElementById('perm_sec_receipt').checked : false;
+    const canDisburse = document.getElementById('perm_sec_disburse') ? document.getElementById('perm_sec_disburse').checked : false;
+    const canPurReturn = document.getElementById('perm_sec_pur_return') ? document.getElementById('perm_sec_pur_return').checked : false;
+    const canWarehouseReport = document.getElementById('perm_sec_warehouse_report') ? document.getElementById('perm_sec_warehouse_report').checked : false;
+    const canTreasury = document.getElementById('perm_sec_treasury') ? document.getElementById('perm_sec_treasury').checked : false;
+
     const permissions = {
         docs: {
-            add: document.getElementById('perm_docs_add').checked,
+            add: document.getElementById('perm_docs_add') ? document.getElementById('perm_docs_add').checked : true,
             purchase: document.getElementById('perm_docs_purchase') ? document.getElementById('perm_docs_purchase').checked : false,
             return: document.getElementById('perm_docs_return') ? document.getElementById('perm_docs_return').checked : false,
-            purchase_price: document.getElementById('perm_docs_purchase_price').checked,
-            edit: document.getElementById('perm_docs_edit').checked,
-            delete: document.getElementById('perm_docs_delete').checked,
-            view: document.getElementById('perm_docs_view').checked
+            purchase_return: canPurReturn,
+            purchase_price: document.getElementById('perm_docs_purchase_price') ? document.getElementById('perm_docs_purchase_price').checked : false,
+            edit: document.getElementById('perm_docs_edit') ? document.getElementById('perm_docs_edit').checked : false,
+            delete: document.getElementById('perm_docs_delete') ? document.getElementById('perm_docs_delete').checked : false,
+            view: document.getElementById('perm_docs_view') ? document.getElementById('perm_docs_view').checked : true,
+            price_edit: document.getElementById('perm_docs_price_edit') ? document.getElementById('perm_docs_price_edit').checked : false,
+            discount: document.getElementById('perm_docs_discount') ? document.getElementById('perm_docs_discount').checked : true,
+            tax: document.getElementById('perm_docs_tax') ? document.getElementById('perm_docs_tax').checked : true
         },
         stock: {
-            add: document.getElementById('perm_stock_add').checked,
-            edit: document.getElementById('perm_stock_edit').checked,
-            delete: document.getElementById('perm_stock_delete').checked,
-            transfer: document.getElementById('perm_stock_transfer').checked,
-            view: document.getElementById('perm_stock_view').checked
+            add: document.getElementById('perm_stock_add') ? document.getElementById('perm_stock_add').checked : false,
+            edit: document.getElementById('perm_stock_edit') ? document.getElementById('perm_stock_edit').checked : false,
+            delete: document.getElementById('perm_stock_delete') ? document.getElementById('perm_stock_delete').checked : false,
+            transfer: document.getElementById('perm_stock_transfer') ? document.getElementById('perm_stock_transfer').checked : false,
+            view: document.getElementById('perm_stock_view') ? document.getElementById('perm_stock_view').checked : false,
+            adjust: document.getElementById('perm_stock_adjust') ? document.getElementById('perm_stock_adjust').checked : false,
+            history: document.getElementById('perm_stock_history') ? document.getElementById('perm_stock_history').checked : false,
+            inquiry: document.getElementById('perm_stock_inquiry') ? document.getElementById('perm_stock_inquiry').checked : false,
+            warehouse_report: canWarehouseReport
         },
         accounts: {
-            add: document.getElementById('perm_acc_add').checked,
-            edit: document.getElementById('perm_acc_edit').checked,
-            delete: document.getElementById('perm_acc_delete').checked,
-            statement: document.getElementById('perm_acc_statement').checked,
-            view: document.getElementById('perm_acc_view').checked
+            add: document.getElementById('perm_acc_add') ? document.getElementById('perm_acc_add').checked : false,
+            receipt: canReceipt,
+            disbursement: canDisburse,
+            edit: document.getElementById('perm_acc_edit') ? document.getElementById('perm_acc_edit').checked : false,
+            delete: document.getElementById('perm_acc_delete') ? document.getElementById('perm_acc_delete').checked : false,
+            statement: document.getElementById('perm_acc_statement') ? document.getElementById('perm_acc_statement').checked : false,
+            treasury: canTreasury,
+            view: document.getElementById('perm_acc_view') ? document.getElementById('perm_acc_view').checked : false
         },
         general: {
-            reports: document.getElementById('perm_gen_reports').checked,
-            profits: document.getElementById('perm_gen_profits').checked,
-            settings: document.getElementById('perm_gen_settings').checked,
-            users: document.getElementById('perm_gen_users').checked
+            reports: document.getElementById('perm_gen_reports') ? document.getElementById('perm_gen_reports').checked : false,
+            profits: (role === 'admin' && document.getElementById('adminAllowProfits')) ? document.getElementById('adminAllowProfits').checked : (document.getElementById('perm_gen_profits') ? document.getElementById('perm_gen_profits').checked : false),
+            settings: document.getElementById('perm_gen_settings') ? document.getElementById('perm_gen_settings').checked : false,
+            shortcuts: document.getElementById('perm_gen_shortcuts') ? document.getElementById('perm_gen_shortcuts').checked : false,
+            users: document.getElementById('perm_gen_users') ? document.getElementById('perm_gen_users').checked : false
         }
     };
 
     const existingTarget = window.editingUserId ? users.find(u => u.id === window.editingUserId) : null;
     const isFrozen = existingTarget ? !!existingTarget.isFrozen : false;
+
+    const maxDiscountPercent = document.getElementById('newUserMaxDiscount') 
+        ? Math.max(0, Math.min(100, parseFloat(document.getElementById('newUserMaxDiscount').value) || 0)) 
+        : 5;
 
     const newUser = { 
         id: window.editingUserId || Date.now(), 
@@ -727,6 +1020,7 @@ function addUser() {
         isFrozen: isFrozen,
         warehouseScope,
         assignedWarehouse,
+        maxDiscountPercent,
         permissions 
     };
 
@@ -744,7 +1038,8 @@ function addUser() {
 
     saveData();
     renderUsersTable();
-    resetUserForm();
+    hideUserFormCard();
+    if (typeof applyPermissions === 'function') applyPermissions();
     
     if (typeof logAuditAction === 'function') logAuditAction(isUpdating ? 'تحديث موظف' : 'إضافة موظف جديد', `الاسم: ${newUser.name}, الدور: ${newUser.role}, المخزن: ${warehouseScope === 'specific' ? assignedWarehouse : (warehouseScope === 'main' ? 'الرئيسي فقط' : 'كافة المخازن')}`);
     if (typeof syncUsersToCloud === 'function') syncUsersToCloud();
@@ -753,13 +1048,19 @@ function addUser() {
 function toggleAdminPermsUI(role) {
     const container = document.getElementById('permPanelsContainer');
     const msg = document.getElementById('adminFullAccessMsg');
-    if (!container || !msg) return;
+    const adminNotice = document.getElementById('adminNotice');
+    const restrictionsBox = document.getElementById('userCashierRestrictionsBox');
+    
     if (role === 'admin') {
-        container.style.display = 'none';
-        msg.style.display = 'block';
+        if (container) container.style.display = 'none';
+        if (msg) msg.style.display = 'block';
+        if (adminNotice) adminNotice.style.display = 'block';
+        if (restrictionsBox) restrictionsBox.style.display = 'none';
     } else {
-        container.style.display = 'block';
-        msg.style.display = 'none';
+        if (container) container.style.display = 'block';
+        if (msg) msg.style.display = 'none';
+        if (adminNotice) adminNotice.style.display = 'none';
+        if (restrictionsBox) restrictionsBox.style.display = 'grid';
     }
 }
 
@@ -791,10 +1092,24 @@ function editUser(idx) {
         document.getElementById('perm_docs_add').checked = !!p.docs.add;
         if (document.getElementById('perm_docs_purchase')) document.getElementById('perm_docs_purchase').checked = !!p.docs.purchase;
         if (document.getElementById('perm_docs_return')) document.getElementById('perm_docs_return').checked = !!p.docs.return;
+        if (document.getElementById('perm_sec_pur_return')) {
+            document.getElementById('perm_sec_pur_return').checked = (p.docs.purchase_return !== undefined) ? !!p.docs.purchase_return : !!(p.docs.purchase || p.docs.return);
+        }
         document.getElementById('perm_docs_purchase_price').checked = !!p.docs.purchase_price;
         document.getElementById('perm_docs_edit').checked = !!p.docs.edit;
         document.getElementById('perm_docs_delete').checked = !!p.docs.delete;
         document.getElementById('perm_docs_view').checked = !!p.docs.view;
+        if (document.getElementById('perm_docs_price_edit')) document.getElementById('perm_docs_price_edit').checked = !!p.docs.price_edit;
+        if (document.getElementById('perm_docs_discount')) document.getElementById('perm_docs_discount').checked = (p.docs.discount !== undefined) ? !!p.docs.discount : true;
+        if (document.getElementById('perm_docs_tax')) document.getElementById('perm_docs_tax').checked = (p.docs.tax !== undefined) ? !!p.docs.tax : true;
+    } else {
+        if (document.getElementById('perm_docs_price_edit')) document.getElementById('perm_docs_price_edit').checked = false;
+        if (document.getElementById('perm_docs_discount')) document.getElementById('perm_docs_discount').checked = true;
+        if (document.getElementById('perm_docs_tax')) document.getElementById('perm_docs_tax').checked = true;
+    }
+
+    if (document.getElementById('newUserMaxDiscount')) {
+        document.getElementById('newUserMaxDiscount').value = (u.maxDiscountPercent !== undefined) ? u.maxDiscountPercent : 5;
     }
     if (p.stock) {
         document.getElementById('perm_stock_add').checked = !!p.stock.add;
@@ -802,21 +1117,61 @@ function editUser(idx) {
         document.getElementById('perm_stock_delete').checked = !!p.stock.delete;
         document.getElementById('perm_stock_transfer').checked = !!p.stock.transfer;
         document.getElementById('perm_stock_view').checked = !!p.stock.view;
+        if (document.getElementById('perm_stock_adjust')) {
+            document.getElementById('perm_stock_adjust').checked = (p.stock.adjust !== undefined) ? !!p.stock.adjust : (!!p.stock.edit || !!p.stock.transfer);
+        }
+        if (document.getElementById('perm_stock_history')) {
+            document.getElementById('perm_stock_history').checked = (p.stock.history !== undefined) ? !!p.stock.history : !!p.stock.view;
+        }
+        if (document.getElementById('perm_stock_inquiry')) {
+            document.getElementById('perm_stock_inquiry').checked = (p.stock.inquiry !== undefined) ? !!p.stock.inquiry : !!p.stock.view;
+        }
+        if (document.getElementById('perm_sec_warehouse_report')) {
+            document.getElementById('perm_sec_warehouse_report').checked = (p.stock.warehouse_report !== undefined) ? !!p.stock.warehouse_report : !!p.stock.view;
+        }
     }
     if (p.accounts) {
         document.getElementById('perm_acc_add').checked = !!p.accounts.add;
+        if (document.getElementById('perm_sec_receipt')) {
+            document.getElementById('perm_sec_receipt').checked = (p.accounts.receipt !== undefined) ? !!p.accounts.receipt : !!p.accounts.add;
+        }
+        if (document.getElementById('perm_sec_disburse')) {
+            document.getElementById('perm_sec_disburse').checked = (p.accounts.disbursement !== undefined) ? !!p.accounts.disbursement : !!p.accounts.add;
+        }
         document.getElementById('perm_acc_edit').checked = !!p.accounts.edit;
         document.getElementById('perm_acc_delete').checked = !!p.accounts.delete;
         document.getElementById('perm_acc_statement').checked = !!p.accounts.statement;
+        if (document.getElementById('perm_sec_treasury')) {
+            document.getElementById('perm_sec_treasury').checked = (p.accounts.treasury !== undefined) ? !!p.accounts.treasury : false;
+        }
         document.getElementById('perm_acc_view').checked = !!p.accounts.view;
     }
     if (p.general) {
         document.getElementById('perm_gen_reports').checked = !!p.general.reports;
         document.getElementById('perm_gen_profits').checked = !!p.general.profits;
         document.getElementById('perm_gen_settings').checked = !!p.general.settings;
+        if (document.getElementById('perm_gen_shortcuts')) {
+            document.getElementById('perm_gen_shortcuts').checked = (p.general.shortcuts !== undefined) ? !!p.general.shortcuts : !!p.general.settings;
+        }
         document.getElementById('perm_gen_users').checked = !!p.general.users;
     }
+
+    const adminAllowProfitsEl = document.getElementById('adminAllowProfits');
+    if (adminAllowProfitsEl) {
+        adminAllowProfitsEl.checked = (p.general && p.general.profits !== undefined) ? !!p.general.profits : true;
+    }
     
+    const formCard = document.getElementById('userFormCard');
+    const titleEl = document.getElementById('userFormCardTitle');
+    if (titleEl) titleEl.innerHTML = '✏️ تعديل بيانات وصلاحيات الموظف: <span style="color:#38bdf8; margin-right: 6px;">' + u.name + '</span>';
+    
+    if (typeof switchPermCategory === 'function') switchPermCategory('sales');
+
+    if (formCard) {
+        formCard.classList.remove('hidden');
+        formCard.style.setProperty('display', 'flex', 'important');
+    }
+
     showToast("✏️ جاري تعديل بيانات " + u.name, "info");
 }
 
@@ -833,10 +1188,222 @@ function resetUserForm() {
         scopeEl.value = 'all';
         onUserWarehouseScopeChange('all');
     }
-    document.querySelectorAll('#permissionsGrid input[type="checkbox"]').forEach(chk => {
-        chk.checked = chk.id.includes('view') || chk.id.includes('reports') || chk.id.includes('add');
-    });
+    if (typeof applyPermissionPreset === 'function') {
+        applyPermissionPreset('cashier_only');
+    }
+    if (document.getElementById('newUserMaxDiscount')) document.getElementById('newUserMaxDiscount').value = '5';
+    if (document.getElementById('adminAllowProfits')) {
+        document.getElementById('adminAllowProfits').checked = true;
+    }
+    if (typeof switchPermCategory === 'function') {
+        switchPermCategory('sales');
+    }
 }
+
+function switchPermCategory(category) {
+    const panels = {
+        sales: document.getElementById('permCategory_sales'),
+        accounts: document.getElementById('permCategory_accounts'),
+        stock: document.getElementById('permCategory_stock'),
+        system: document.getElementById('permCategory_system')
+    };
+    const btns = {
+        sales: document.getElementById('tabBtn_sales'),
+        accounts: document.getElementById('tabBtn_accounts'),
+        stock: document.getElementById('tabBtn_stock'),
+        system: document.getElementById('tabBtn_system'),
+        all: document.getElementById('tabBtn_all')
+    };
+
+    Object.values(btns).forEach(btn => {
+        if (btn) {
+            btn.style.background = '#f8fafc';
+            btn.style.color = '#475569';
+            btn.style.borderColor = '#cbd5e1';
+            btn.classList.remove('active');
+        }
+    });
+
+    if (category === 'all') {
+        Object.values(panels).forEach(p => { if (p) p.style.display = 'block'; });
+        if (btns.all) {
+            btns.all.style.background = '#0284c7';
+            btns.all.style.color = '#ffffff';
+            btns.all.style.borderColor = '#0284c7';
+            btns.all.classList.add('active');
+        }
+    } else {
+        Object.keys(panels).forEach(k => {
+            if (panels[k]) panels[k].style.display = (k === category) ? 'block' : 'none';
+        });
+        if (btns[category]) {
+            btns[category].style.background = '#0284c7';
+            btns[category].style.color = '#ffffff';
+            btns[category].style.borderColor = '#0284c7';
+            btns[category].classList.add('active');
+        }
+    }
+}
+window.switchPermCategory = switchPermCategory;
+
+function applyPermissionPreset(presetKey) {
+    const setChecked = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!val;
+    };
+
+    const maxDiscountEl = document.getElementById('newUserMaxDiscount');
+    const priceEditEl = document.getElementById('perm_docs_price_edit');
+
+    if (presetKey === 'cashier_only') {
+        // كاشير مبيعات: بيع، مرتجع، سند قبض، سجل الفواتير، تقارير يومية
+        toggleAllUserSections(false);
+        setChecked('perm_docs_add', true);
+        setChecked('perm_docs_return', true);
+        setChecked('perm_sec_receipt', true);
+        setChecked('perm_docs_view', true);
+        setChecked('perm_gen_reports', true);
+        setChecked('perm_docs_discount', true);
+        setChecked('perm_docs_tax', true);
+
+        if (priceEditEl) priceEditEl.checked = false;
+        if (maxDiscountEl) maxDiscountEl.value = '5';
+        if (typeof showToast === 'function') showToast("🛒 تم تفعيل أقسام: كاشير مبيعات (بيع ومرتجع وقبض)", "success");
+
+    } else if (presetKey === 'stock_manager') {
+        // أمين مخزن: المخزن وبضاعة الأصناف، أرصدة المخازن، فواتير الشراء، مرتجع الشراء، تسوية، حركة صنف، تحويل، استعلام
+        toggleAllUserSections(false);
+        setChecked('perm_stock_view', true);
+        setChecked('perm_sec_warehouse_report', true);
+        setChecked('perm_stock_add', true);
+        setChecked('perm_stock_edit', true);
+        setChecked('perm_stock_adjust', true);
+        setChecked('perm_stock_history', true);
+        setChecked('perm_stock_transfer', true);
+        setChecked('perm_stock_inquiry', true);
+        setChecked('perm_docs_purchase', true);
+        setChecked('perm_sec_pur_return', true);
+        setChecked('perm_docs_view', true);
+        setChecked('perm_docs_purchase_price', false);
+        setChecked('perm_gen_profits', false);
+
+        if (priceEditEl) priceEditEl.checked = false;
+        if (maxDiscountEl) maxDiscountEl.value = '0';
+        if (typeof showToast === 'function') showToast("📦 تم تفعيل أقسام: أمين مخزن (مخازن وبضاعة ومشتريات)", "success");
+
+    } else if (presetKey === 'accountant') {
+        // محاسب مالي: حسابات، سندات قبض وصرف، فواتير، تقارير، أرباح، أرصدة مخازن، كشف حساب
+        toggleAllUserSections(false);
+        setChecked('perm_sec_receipt', true);
+        setChecked('perm_sec_disburse', true);
+        setChecked('perm_acc_view', true);
+        setChecked('perm_acc_add', true);
+        setChecked('perm_acc_statement', true);
+        setChecked('perm_sec_treasury', true);
+        setChecked('perm_docs_view', true);
+        setChecked('perm_docs_add', true);
+        setChecked('perm_docs_return', true);
+        setChecked('perm_docs_purchase', true);
+        setChecked('perm_sec_warehouse_report', true);
+        setChecked('perm_gen_reports', true);
+        setChecked('perm_gen_profits', true);
+        setChecked('perm_docs_purchase_price', true);
+
+        if (priceEditEl) priceEditEl.checked = true;
+        if (maxDiscountEl) maxDiscountEl.value = '10';
+        if (typeof showToast === 'function') showToast("💼 تم تفعيل أقسام: محاسب مالي (حسابات وقبض وصرف وأرباح)", "success");
+    }
+}
+window.applyPermissionPreset = applyPermissionPreset;
+
+function toggleAllUserSections(checked) {
+    const ids = [
+        'perm_docs_add', 'perm_docs_return', 'perm_docs_purchase', 'perm_sec_pur_return', 'perm_docs_view',
+        'perm_sec_receipt', 'perm_sec_disburse', 'perm_acc_view', 'perm_acc_add', 'perm_acc_statement', 'perm_sec_treasury',
+        'perm_stock_view', 'perm_stock_add', 'perm_stock_edit', 'perm_stock_adjust', 'perm_stock_history',
+        'perm_stock_transfer', 'perm_sec_warehouse_report', 'perm_stock_inquiry',
+        'perm_gen_reports', 'perm_gen_profits', 'perm_gen_settings', 'perm_gen_shortcuts'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!checked;
+    });
+    if (document.getElementById('perm_docs_discount')) document.getElementById('perm_docs_discount').checked = !!checked;
+    if (document.getElementById('perm_docs_tax')) document.getElementById('perm_docs_tax').checked = !!checked;
+    if (typeof showToast === 'function') showToast(checked ? "✔️ تم تحديد كافة الأقسام للموظف" : "❌ تم إلغاء تحديد كافة الأقسام", "info");
+}
+window.toggleAllUserSections = toggleAllUserSections;
+
+function quickSelectUserPreset(presetKey) {
+    if (presetKey === 'admin') {
+        const roleEl = document.getElementById('newUserRole');
+        if (roleEl) roleEl.value = 'admin';
+        toggleAdminPermsUI('admin');
+        const adminProfitsEl = document.getElementById('adminAllowProfits');
+        if (adminProfitsEl) adminProfitsEl.checked = true;
+        const maxDiscountEl = document.getElementById('newUserMaxDiscount');
+        if (maxDiscountEl) maxDiscountEl.value = '100';
+        const priceEditEl = document.getElementById('perm_docs_price_edit');
+        if (priceEditEl) priceEditEl.checked = true;
+        toggleAllUserSections(true);
+        if (typeof showToast === 'function') showToast("⭐ تم تطبيق قالب: مدير عام (كافة الأقسام والصلاحيات)", "success");
+    } else {
+        const roleEl = document.getElementById('newUserRole');
+        if (roleEl) roleEl.value = 'user';
+        toggleAdminPermsUI('user');
+        applyPermissionPreset(presetKey);
+    }
+}
+window.quickSelectUserPreset = quickSelectUserPreset;
+
+function toggleUserPinVisibility() {
+    const pinEl = document.getElementById('newUserPin');
+    if (!pinEl) return;
+    if (pinEl.type === 'password') {
+        pinEl.type = 'text';
+    } else {
+        pinEl.type = 'password';
+    }
+}
+window.toggleUserPinVisibility = toggleUserPinVisibility;
+
+function showAddUserFormCard() {
+    resetUserForm();
+    const formCard = document.getElementById('userFormCard');
+    const titleEl = document.getElementById('userFormCardTitle');
+    if (titleEl) titleEl.innerHTML = '➕ إضافة موظف جديد وتحديد الأقسام المصرّح بها';
+    
+    if (typeof switchPermCategory === 'function') switchPermCategory('sales');
+
+    if (formCard) {
+        formCard.classList.remove('hidden');
+        formCard.style.setProperty('display', 'flex', 'important');
+    }
+}
+window.showAddUserFormCard = showAddUserFormCard;
+
+function hideUserFormCard() {
+    resetUserForm();
+    const formCard = document.getElementById('userFormCard');
+    if (formCard) {
+        formCard.classList.add('hidden');
+        formCard.style.setProperty('display', 'none', 'important');
+    }
+}
+window.hideUserFormCard = hideUserFormCard;
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('userFormCard');
+        if (modal && (!modal.classList.contains('hidden') || modal.style.display !== 'none')) {
+            hideUserFormCard();
+        }
+        const pinModal = document.getElementById('changePinModalOverlay');
+        if (pinModal) pinModal.remove();
+        const copyModal = document.getElementById('copyPermModalOverlay');
+        if (copyModal) copyModal.remove();
+    }
+});
 
 function deleteUser(idx) {
     if (confirm("هل أنت متأكد من حذف هذا المستخدم؟")) {
@@ -886,6 +1453,16 @@ function resolvePermissionKey(action) {
     let act = String(action).toLowerCase().trim();
     
     // توحيد المرادفات
+    if (act === 'sec_receipt' || act === 'receipt') act = 'accounts_receipt';
+    if (act === 'sec_disburse' || act === 'disburse' || act === 'disbursement') act = 'accounts_disbursement';
+    if (act === 'sec_pur_return' || act === 'purchase-return' || act === 'purchase_return') act = 'docs_purchase_return';
+    if (act === 'sec_warehouse_report' || act === 'warehouse_report' || act === 'warehouse-report') act = 'stock_warehouse_report';
+    if (act === 'stock_adjust' || act === 'adjustment') act = 'stock_adjust';
+    if (act === 'stock_history' || act === 'history' || act === 'item-history') act = 'stock_history';
+    if (act === 'stock_inquiry' || act === 'product-inquiry') act = 'stock_inquiry';
+    if (act === 'accounts_statement' || act === 'statement') act = 'accounts_statement';
+    if (act === 'accounts_treasury' || act === 'sec_treasury' || act === 'treasury' || act === 'treasury-audit' || act === 'treasury_audit') act = 'accounts_treasury';
+    if (act === 'general_shortcuts' || act === 'shortcuts') act = 'general_shortcuts';
     if (act.startsWith('acc_')) act = 'accounts_' + act.substring(4);
     if (act.startsWith('gen_')) act = 'general_' + act.substring(4);
     if (act.startsWith('products_')) act = 'stock_' + act.substring(9);
@@ -925,7 +1502,17 @@ function checkPermission(action) {
         }
 
         // نستخدم بيانات المستخدم الحقيقية من IndexedDB (ليس من localStorage)
-        if (realUser.role === 'admin') return true;
+        if (realUser.role === 'admin') {
+            if (action === 'general_profits' && realUser.permissions?.general && realUser.permissions.general.profits === false) {
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '🚫 وصول مرفوض',
+                    msg: 'عذراً، تم تعطيل رؤية الأرباح لهذا الحساب.'
+                });
+                return false;
+            }
+            return true;
+        }
 
         if (!realUser.permissions) {
             showCustomAlert({
@@ -938,7 +1525,49 @@ function checkPermission(action) {
 
         const { module, perm } = resolvePermissionKey(action);
         const userPerms = realUser.permissions[module];
-        if (userPerms && userPerms[perm]) return true;
+        if (userPerms) {
+            if (module === 'docs' && perm === 'purchase_return') {
+                if (userPerms.purchase_return !== undefined) return !!userPerms.purchase_return;
+                return !!(userPerms.purchase || userPerms.return);
+            }
+            if (module === 'accounts' && perm === 'receipt') {
+                if (userPerms.receipt !== undefined) return !!userPerms.receipt;
+                return !!userPerms.add;
+            }
+            if (module === 'accounts' && perm === 'disbursement') {
+                if (userPerms.disbursement !== undefined) return !!userPerms.disbursement;
+                return !!userPerms.add;
+            }
+            if (module === 'stock' && perm === 'warehouse_report') {
+                if (userPerms.warehouse_report !== undefined) return !!userPerms.warehouse_report;
+                return !!(userPerms.view || userPerms.add);
+            }
+            if (module === 'stock' && perm === 'adjust') {
+                if (userPerms.adjust !== undefined) return !!userPerms.adjust;
+                return !!(userPerms.edit || userPerms.transfer);
+            }
+            if (module === 'stock' && perm === 'history') {
+                if (userPerms.history !== undefined) return !!userPerms.history;
+                return !!userPerms.view;
+            }
+            if (module === 'stock' && perm === 'inquiry') {
+                if (userPerms.inquiry !== undefined) return !!userPerms.inquiry;
+                return !!userPerms.view;
+            }
+            if (module === 'accounts' && perm === 'statement') {
+                if (userPerms.statement !== undefined) return !!userPerms.statement;
+                return false;
+            }
+            if (module === 'accounts' && perm === 'treasury') {
+                if (userPerms.treasury !== undefined) return !!userPerms.treasury;
+                return false;
+            }
+            if (module === 'general' && perm === 'shortcuts') {
+                if (userPerms.shortcuts !== undefined) return !!userPerms.shortcuts && !!userPerms.settings;
+                return !!userPerms.settings;
+            }
+            if (userPerms[perm]) return true;
+        }
 
         showCustomAlert({
             type: 'error',
@@ -950,7 +1579,17 @@ function checkPermission(action) {
 
     // Fallback: لو مصفوفة users لم تُحمَّل بعد، نعتمد على currentUser المحمل في الذاكرة
     if (currentUser.isFrozen) return false;
-    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'admin') {
+        if (action === 'general_profits' && currentUser.permissions?.general && currentUser.permissions.general.profits === false) {
+            showCustomAlert({
+                type: 'error',
+                titleText: '🚫 وصول مرفوض',
+                msg: 'عذراً، تم تعطيل رؤية الأرباح لهذا الحساب.'
+            });
+            return false;
+        }
+        return true;
+    }
 
     if (!currentUser.permissions) {
         showCustomAlert({
@@ -963,7 +1602,49 @@ function checkPermission(action) {
 
     const { module, perm } = resolvePermissionKey(action);
     const userPerms = currentUser.permissions[module];
-    if (userPerms && userPerms[perm]) return true;
+    if (userPerms) {
+        if (module === 'docs' && perm === 'purchase_return') {
+            if (userPerms.purchase_return !== undefined) return !!userPerms.purchase_return;
+            return !!(userPerms.purchase || userPerms.return);
+        }
+        if (module === 'accounts' && perm === 'receipt') {
+            if (userPerms.receipt !== undefined) return !!userPerms.receipt;
+            return !!userPerms.add;
+        }
+        if (module === 'accounts' && perm === 'disbursement') {
+            if (userPerms.disbursement !== undefined) return !!userPerms.disbursement;
+            return !!userPerms.add;
+        }
+        if (module === 'stock' && perm === 'warehouse_report') {
+            if (userPerms.warehouse_report !== undefined) return !!userPerms.warehouse_report;
+            return !!(userPerms.view || userPerms.add);
+        }
+        if (module === 'stock' && perm === 'adjust') {
+            if (userPerms.adjust !== undefined) return !!userPerms.adjust;
+            return !!(userPerms.edit || userPerms.transfer);
+        }
+        if (module === 'stock' && perm === 'history') {
+            if (userPerms.history !== undefined) return !!userPerms.history;
+            return !!userPerms.view;
+        }
+        if (module === 'stock' && perm === 'inquiry') {
+            if (userPerms.inquiry !== undefined) return !!userPerms.inquiry;
+            return !!userPerms.view;
+        }
+        if (module === 'accounts' && perm === 'statement') {
+            if (userPerms.statement !== undefined) return !!userPerms.statement;
+            return false;
+        }
+        if (module === 'accounts' && perm === 'treasury') {
+            if (userPerms.treasury !== undefined) return !!userPerms.treasury;
+            return false;
+        }
+        if (module === 'general' && perm === 'shortcuts') {
+            if (userPerms.shortcuts !== undefined) return !!userPerms.shortcuts && !!userPerms.settings;
+            return !!userPerms.settings;
+        }
+        if (userPerms[perm]) return true;
+    }
 
     showCustomAlert({
         type: 'error',
@@ -980,19 +1661,115 @@ function hasPermission(action) {
         const realUser = users.find(u => u.pin === currentUser.pin);
         if (!realUser) return false;
         if (realUser.isFrozen) return false;
-        if (realUser.role === 'admin') return true;
+        if (realUser.role === 'admin') {
+            if (action === 'general_profits' && realUser.permissions?.general && realUser.permissions.general.profits === false) {
+                return false;
+            }
+            return true;
+        }
         if (!realUser.permissions) return false;
         const { module, perm } = resolvePermissionKey(action);
         const userPerms = realUser.permissions[module];
-        return !!(userPerms && userPerms[perm]);
+        if (userPerms) {
+            if (module === 'docs' && perm === 'purchase_return') {
+                if (userPerms.purchase_return !== undefined) return !!userPerms.purchase_return;
+                return !!(userPerms.purchase || userPerms.return);
+            }
+            if (module === 'accounts' && perm === 'receipt') {
+                if (userPerms.receipt !== undefined) return !!userPerms.receipt;
+                return !!userPerms.add;
+            }
+            if (module === 'accounts' && perm === 'disbursement') {
+                if (userPerms.disbursement !== undefined) return !!userPerms.disbursement;
+                return !!userPerms.add;
+            }
+            if (module === 'stock' && perm === 'warehouse_report') {
+                if (userPerms.warehouse_report !== undefined) return !!userPerms.warehouse_report;
+                return !!(userPerms.view || userPerms.add);
+            }
+            if (module === 'stock' && perm === 'adjust') {
+                if (userPerms.adjust !== undefined) return !!userPerms.adjust;
+                return !!(userPerms.edit || userPerms.transfer);
+            }
+            if (module === 'stock' && perm === 'history') {
+                if (userPerms.history !== undefined) return !!userPerms.history;
+                return !!userPerms.view;
+            }
+            if (module === 'stock' && perm === 'inquiry') {
+                if (userPerms.inquiry !== undefined) return !!userPerms.inquiry;
+                return !!userPerms.view;
+            }
+            if (module === 'accounts' && perm === 'statement') {
+                if (userPerms.statement !== undefined) return !!userPerms.statement;
+                return false;
+            }
+            if (module === 'accounts' && perm === 'treasury') {
+                if (userPerms.treasury !== undefined) return !!userPerms.treasury;
+                return false;
+            }
+            if (module === 'general' && perm === 'shortcuts') {
+                if (userPerms.shortcuts !== undefined) return !!userPerms.shortcuts && !!userPerms.settings;
+                return !!userPerms.settings;
+            }
+            return !!userPerms[perm];
+        }
+        return false;
     }
     // Fallback لو users لم تُحمَّل بعد
     if (currentUser.isFrozen) return false;
-    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'admin') {
+        if (action === 'general_profits' && currentUser.permissions?.general && currentUser.permissions.general.profits === false) {
+            return false;
+        }
+        return true;
+    }
     if (!currentUser.permissions) return false;
     const { module, perm } = resolvePermissionKey(action);
     const userPerms = currentUser.permissions[module];
-    return !!(userPerms && userPerms[perm]);
+    if (userPerms) {
+        if (module === 'docs' && perm === 'purchase_return') {
+            if (userPerms.purchase_return !== undefined) return !!userPerms.purchase_return;
+            return !!(userPerms.purchase || userPerms.return);
+        }
+        if (module === 'accounts' && perm === 'receipt') {
+            if (userPerms.receipt !== undefined) return !!userPerms.receipt;
+            return !!userPerms.add;
+        }
+        if (module === 'accounts' && perm === 'disbursement') {
+            if (userPerms.disbursement !== undefined) return !!userPerms.disbursement;
+            return !!userPerms.add;
+        }
+        if (module === 'stock' && perm === 'warehouse_report') {
+            if (userPerms.warehouse_report !== undefined) return !!userPerms.warehouse_report;
+            return !!(userPerms.view || userPerms.add);
+        }
+        if (module === 'stock' && perm === 'adjust') {
+            if (userPerms.adjust !== undefined) return !!userPerms.adjust;
+            return !!(userPerms.edit || userPerms.transfer);
+        }
+        if (module === 'stock' && perm === 'history') {
+            if (userPerms.history !== undefined) return !!userPerms.history;
+            return !!userPerms.view;
+        }
+        if (module === 'stock' && perm === 'inquiry') {
+            if (userPerms.inquiry !== undefined) return !!userPerms.inquiry;
+            return !!userPerms.view;
+        }
+        if (module === 'accounts' && perm === 'statement') {
+            if (userPerms.statement !== undefined) return !!userPerms.statement;
+            return false;
+        }
+        if (module === 'accounts' && perm === 'treasury') {
+            if (userPerms.treasury !== undefined) return !!userPerms.treasury;
+            return false;
+        }
+        if (module === 'general' && perm === 'shortcuts') {
+            if (userPerms.shortcuts !== undefined) return !!userPerms.shortcuts && !!userPerms.settings;
+            return !!userPerms.settings;
+        }
+        return !!userPerms[perm];
+    }
+    return false;
 }
 
 // --- 3. Warehouse Management Logic ---
@@ -1035,6 +1812,37 @@ async function deleteWarehouse(idx) {
     if (currentUser && currentUser.warehouseName === targetWH.name) {
         if (typeof showToast === 'function') showToast("⚠️ لا يمكن حذف المخزن المعتمد للجهاز الحالي! قم بالتبديل إلى مخزن آخر أولاً.", "warning");
         else alert("لا يمكن حذف المخزن المعتمد للجهاز الحالي!");
+        return;
+    }
+
+    // فحص أمني: هل المخزن يحتوي على بضاعة مسجلة؟
+    let totalItemsCount = 0;
+    const prodsList = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB : (window.productsDB || []);
+    if (Array.isArray(prodsList)) {
+        prodsList.forEach(p => {
+            if (!p) return;
+            if (p.warehouseStocks && parseFloat(p.warehouseStocks[targetWH.name]) > 0) {
+                totalItemsCount += parseFloat(p.warehouseStocks[targetWH.name]) || 0;
+            } else if (p.variants && Array.isArray(p.variants)) {
+                p.variants.forEach(v => {
+                    if (v && v.warehouseStocks && parseFloat(v.warehouseStocks[targetWH.name]) > 0) {
+                        totalItemsCount += parseFloat(v.warehouseStocks[targetWH.name]) || 0;
+                    }
+                });
+            }
+        });
+    }
+
+    if (totalItemsCount > 0) {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'error',
+                titleText: '🚫 لا يمكن حذف المخزن',
+                msg: `عذراً، المخزن "<b>${targetWH.name}</b>" يحتوي حالياً على (<b>${totalItemsCount}</b>) قطعة بضاعة مسجلة.<br>يرجى تحويل البضاعة أولاً إلى مخزن آخر أو تصفيرها قبل التمكن من حذف المخزن.`
+            });
+        } else {
+            alert(`🚫 لا يمكن حذف المخزن "${targetWH.name}" لأنه يحتوي على ${totalItemsCount} قطعة بضاعة! يرجى تحويل البضاعة أولاً.`);
+        }
         return;
     }
 
@@ -1187,6 +1995,7 @@ function renderWarehousesTable() {
 
     updateSettingsWarehouseSelect();
     initTransferPriceTypeSetting();
+    initAdjustmentPriceTypeSetting();
     if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
 }
 
@@ -1232,6 +2041,43 @@ window.saveTransferPriceTypeSetting = async function(val) {
     };
     if (typeof showToast === 'function') {
         showToast(`✅ تم حفظ سياسة تسعير التحويل: [ ${labelMap[val] || val} ]`, 'success');
+    }
+};
+
+window.initAdjustmentPriceTypeSetting = function() {
+    const sel = document.getElementById('settingsAdjustmentPriceType');
+    if (!sel) return;
+    const current = (typeof window.getAdjustmentPriceType === 'function')
+        ? window.getAdjustmentPriceType()
+        : ((typeof getStore === 'function' ? getStore('adjustmentPriceType') : null) || 'retail');
+    sel.value = current;
+};
+
+window.saveAdjustmentPriceTypeSetting = async function(val) {
+    if (!val) val = 'retail';
+    if (typeof setStore === 'function') {
+        setStore('adjustmentPriceType', val);
+    }
+
+    try {
+        const settingsObj = JSON.parse((typeof getStore === 'function' ? getStore('pos_settings') : null) || '{}');
+        settingsObj.adjustmentPriceType = val;
+        if (typeof setStore === 'function') setStore('pos_settings', JSON.stringify(settingsObj));
+    } catch(e) {}
+
+    if (typeof saveData === 'function') {
+        await saveData();
+    }
+    const labelMap = {
+        'retail': 'سعر البيع القطاعي (Retail Price)',
+        'cost': 'سعر التكلفة (Cost Price)',
+        'wholesale': 'سعر البيع الجملة (Wholesale Price)'
+    };
+    if (typeof renderAdjTable === 'function') {
+        renderAdjTable();
+    }
+    if (typeof showToast === 'function') {
+        showToast(`✅ تم حفظ سياسة تسعير تسوية وجرد المخزون: [ ${labelMap[val] || val} ]`, 'success');
     }
 };
 
@@ -1349,9 +2195,16 @@ window.switchWarehouseFromHeader = function(val) {
 window.filterInventoryByWarehouse = function(whName) {
     if (!whName) return;
     if (typeof currentUser !== 'undefined' && currentUser) {
+        if (currentUser.role !== 'admin' && currentUser.warehouseScope === 'main' && whName !== 'المخزن الرئيسي') {
+            return showToast("⛔ عذراً، حسابك مقيد بالمخزن الرئيسي فقط ولا يمكنك التبديل لمخزن آخر.", "error");
+        }
+        if (currentUser.role !== 'admin' && currentUser.warehouseScope === 'specific' && currentUser.assignedWarehouse && whName !== currentUser.assignedWarehouse) {
+            return showToast(`⛔ عذراً، حسابك مقيد بـ (${currentUser.assignedWarehouse}) فقط ولا يمكنك التبديل لمخزن آخر.`, "error");
+        }
+
         currentUser.warehouseName = whName;
         if (typeof setStore === 'function') {
-            setStore('pos_session_user', JSON.stringify(currentUser));
+            setStore('pos_session_user', JSON.stringify({ pin: currentUser.pin, warehouseName: whName }));
         }
     }
     if (typeof renderInventoryTable === 'function') renderInventoryTable();
@@ -1492,7 +2345,7 @@ async function confirmFullReset() {
             showToast("⏳ جاري تصفير قاعدة البيانات... يرجى عدم إغلاق المتصفح", "info");
 
             try {
-                // 1. مسح جداول البيانات فقط من Dexie (نحافظ على جدول settings الذي يحتوي HWID + الترخيص + مفتاح AI)
+                // 1. مسح جداول البيانات فقط من Dexie (نحافظ على جدول settings الذي يحتوي HWID + الترخيص)
                 const tables = ['products', 'transactions', 'accounts', 'users', 'trash', 'auditLogs', 'wallpapers'];
                 if (typeof db !== 'undefined') {
                     for (const table of tables) {
@@ -1500,7 +2353,7 @@ async function confirmFullReset() {
                     }
                 }
 
-                // 2. مسح localStorage بالكامل (البيانات الحساسة في IndexedDB settings الآن)
+                // 2. مسح جدول settings في IndexedDB بالكامل عبر clearStore()
                 clearStore();
 
                 showToast("✅ تم تصفير النظام بنجاح. سيتم إعادة تحميل الصفحة الآن.", "success");

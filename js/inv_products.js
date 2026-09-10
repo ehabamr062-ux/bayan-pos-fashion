@@ -55,6 +55,41 @@ async function saveNewItem(mode = 'save') {
         if (wholesale < cost) return alert("❌ خطأ: سعر بيع الجملة أقل من سعر التكلفة!");
     }
 
+    // تعميم الأسعار اختياري وليس إجبارياً: يُسمح بحرية كاملة لكل مقاس أن يحمل سعراً وتكلفة مستقلة
+
+    const activeProductId = (typeof currentEditingProductId !== 'undefined' && currentEditingProductId) ? currentEditingProductId : null;
+
+    // 🛑 فحص أمان صارم: منع تكرار الباركود الأساسي مع أي صنف آخر أو تشكيلة في النظام
+    if (barcode && typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+        const cleanBc = String(barcode).trim();
+        const duplicateProduct = productsDB.find(p => {
+            if (activeProductId && (p.id === activeProductId || String(p.id) === String(activeProductId))) return false;
+            if (p.barcode && String(p.barcode).trim() === cleanBc) return true;
+            if (p.code && String(p.code).trim() === cleanBc) return true;
+            if (p.units && Array.isArray(p.units) && p.units.some(u => u.unitBarcode && String(u.unitBarcode).trim() === cleanBc)) return true;
+            if (p.variants && Array.isArray(p.variants) && p.variants.some(v => v.barcode && String(v.barcode).trim() === cleanBc)) return true;
+            return false;
+        });
+
+        if (duplicateProduct) {
+            const errorMsg = `⚠️ تنبيه أمان: الباركود (${cleanBc}) مسجل مسبقاً للصنف "${duplicateProduct.name}"!\nيرجى استخدام باركود مختلف لمنع تضارب الأصناف في الكاشير.`;
+            if (mode === 'silent') {
+                showToast(errorMsg, "error");
+                return false;
+            }
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '⚠️ تكرار في الباركود',
+                    msg: errorMsg
+                });
+            } else {
+                alert(errorMsg);
+            }
+            return false;
+        }
+    }
+
     const units = [];
     const rows = document.getElementById('productUnitsTableBody')?.rows || [];
     for (let i = 0; i < rows.length; i++) {
@@ -91,6 +126,65 @@ async function saveNewItem(mode = 'save') {
     // تجميع مصفوفة المقاسات والألوان إن وجدت مع ضمان وجود باركود فريد لكل تشكيلة والاحتفاظ بأرصدة المخازن
     const variants = [];
     const vRows = document.getElementById('productVariantsTableBody')?.rows || [];
+    // فحص ما إذا كانت كافة صفوف التشكيلات تمتلك نفس السعر ولم تُخصص لكل مقاس على حدة
+    let allVRowsSamePrice = true;
+    let firstRowPrice = null;
+    let allVRowsSameWs = true;
+    let firstRowWs = null;
+    let allVRowsSameCost = true;
+    let firstRowCost = null;
+
+    for (let j = 0; j < vRows.length; j++) {
+        const pInp = vRows[j].querySelector('.var-price-input');
+        const wInp = vRows[j].querySelector('.var-ws-input');
+        const cInp = vRows[j].querySelector('.var-cost-input');
+
+        const curP = pInp ? parseFloat(pInp.value) : null;
+        if (curP !== null && !isNaN(curP)) {
+            if (firstRowPrice === null) firstRowPrice = curP;
+            else if (Math.abs(curP - firstRowPrice) > 0.01) allVRowsSamePrice = false;
+        }
+
+        const curWs = wInp ? parseFloat(wInp.value) : null;
+        if (curWs !== null && !isNaN(curWs)) {
+            if (firstRowWs === null) firstRowWs = curWs;
+            else if (Math.abs(curWs - firstRowWs) > 0.01) allVRowsSameWs = false;
+        }
+
+        const curCost = cInp ? parseFloat(cInp.value) : null;
+        if (curCost !== null && !isNaN(curCost)) {
+            if (firstRowCost === null) firstRowCost = curCost;
+            else if (Math.abs(curCost - firstRowCost) > 0.01) allVRowsSameCost = false;
+        }
+    }
+
+    // 🛡️ فحص أمني: منع تكرار نفس المقاس واللون في جدول التشكيلات لتفادي تضارب الباركود وتشتت الرصيد
+    const seenVariantKeys = new Set();
+    for (let k = 0; k < vRows.length; k++) {
+        const szInp = vRows[k].querySelector('.var-size-input');
+        const clInp = vRows[k].querySelector('.var-color-input');
+        const checkSz = szInp ? szInp.value.trim() : '';
+        const checkCl = clInp ? clInp.value.trim() : '';
+        if (checkSz || checkCl) {
+            const normKey = `${checkSz.toLowerCase()}___${checkCl.toLowerCase()}`;
+            if (seenVariantKeys.has(normKey)) {
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'warning',
+                        titleText: '⚠️ تشكيلة مكررة',
+                        msg: `عذراً، المقاس "<b>${checkSz || 'عام'}</b>" واللون "<b>${checkCl || 'عام'}</b>" مكرر أكثر من مرة في جدول التشكيلات!<br>يرجى دمج الكميات في صف واحد لحماية دقة الجرد والباركود.`
+                    });
+                } else if (typeof showToast === 'function') {
+                    showToast(`⚠️ تنبيه: المقاس (${checkSz || 'عام'}) واللون (${checkCl || 'عام'}) مكرر في جدول التشكيلات! يرجى دمج الكميات في صف واحد.`, 'warning');
+                } else {
+                    alert(`⚠️ المقاس (${checkSz}) واللون (${checkCl}) مكرر في جدول التشكيلات! يرجى دمجهما.`);
+                }
+                return;
+            }
+            seenVariantKeys.add(normKey);
+        }
+    }
+
     for (let i = 0; i < vRows.length; i++) {
         const sizeInp = vRows[i].querySelector('.var-size-input');
         const colorInp = vRows[i].querySelector('.var-color-input');
@@ -131,16 +225,70 @@ async function saveNewItem(mode = 'save') {
             // حساب الرصيد الإجمالي للـ variant عبر جميع المخازن
             const vTotalStock = Object.values(vWarehouseStocks).reduce((sum, q) => sum + (parseFloat(q) || 0), 0);
 
+            // الحفاظ على السعر والتكلفة المحددة للمقاس بدقة (دعم تخصيص سعر مختلف لكل مقاس بحرية)
+            let itemPrice = (priceInp && priceInp.value !== '' && !isNaN(parseFloat(priceInp.value)) && parseFloat(priceInp.value) > 0)
+                ? parseFloat(priceInp.value)
+                : (price > 0 ? price : 0);
+
+            let itemWs = (wsInp && wsInp.value !== '' && !isNaN(parseFloat(wsInp.value)))
+                ? parseFloat(wsInp.value)
+                : wholesale;
+
+            let itemCost = (costInp && costInp.value !== '' && !isNaN(parseFloat(costInp.value)))
+                ? parseFloat(costInp.value)
+                : cost;
+
             variants.push({
                 size: vSize,
                 color: vColor,
                 barcode: vBarcode,
                 stock: vTotalStock,
                 warehouseStocks: vWarehouseStocks,
-                price: priceInp ? parseFloat(priceInp.value) || price : price,
-                wholesale: wsInp ? parseFloat(wsInp.value) || wholesale : wholesale,
-                cost: costInp ? parseFloat(costInp.value) || cost : cost
+                price: itemPrice,
+                wholesale: itemWs,
+                cost: itemCost
             });
+        }
+    }
+
+    // 🛑 فحص أمان صارم: منع تكرار باركود التشكيلات (المقاسات والألوان) سواء داخلياً أو مع أصناف أخرى
+    if (variants.length > 0) {
+        const vSeen = new Set();
+        if (barcode) vSeen.add(String(barcode).trim());
+
+        for (const v of variants) {
+            const vBc = String(v.barcode || '').trim();
+            if (!vBc) continue;
+
+            if (vSeen.has(vBc)) {
+                const dupMsg = `⚠️ تنبيه أمان: باركود التشكيلة (${vBc}) مكرر داخل نفس الصنف (المقاس: ${v.size || '-'} / اللون: ${v.color || '-'})!`;
+                if (mode === 'silent') { showToast(dupMsg, "error"); return false; }
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({ type: 'error', titleText: '⚠️ تكرار في الباركود', msg: dupMsg });
+                } else { alert(dupMsg); }
+                return false;
+            }
+            vSeen.add(vBc);
+
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                const dupProduct = productsDB.find(p => {
+                    if (activeProductId && (p.id === activeProductId || String(p.id) === String(activeProductId))) return false;
+                    if (p.barcode && String(p.barcode).trim() === vBc) return true;
+                    if (p.code && String(p.code).trim() === vBc) return true;
+                    if (p.units && Array.isArray(p.units) && p.units.some(u => u.unitBarcode && String(u.unitBarcode).trim() === vBc)) return true;
+                    if (p.variants && Array.isArray(p.variants) && p.variants.some(ev => ev.barcode && String(ev.barcode).trim() === vBc)) return true;
+                    return false;
+                });
+
+                if (dupProduct) {
+                    const dupMsg = `⚠️ تنبيه أمان: باركود التشكيلة (${vBc}) مسجل مسبقاً للصنف "${dupProduct.name}"! يرجى تغييره.`;
+                    if (mode === 'silent') { showToast(dupMsg, "error"); return false; }
+                    if (typeof showCustomAlert === 'function') {
+                        showCustomAlert({ type: 'error', titleText: '⚠️ تكرار في الباركود', msg: dupMsg });
+                    } else { alert(dupMsg); }
+                    return false;
+                }
+            }
         }
     }
 
@@ -269,6 +417,12 @@ async function saveNewItem(mode = 'save') {
         productsDB.push(newItem);
         await db.products.add(newItem);
     }
+
+    if (typeof saveData === 'function') {
+        await saveData();
+    }
+    if (typeof updateDatalists === 'function') updateDatalists();
+    if (typeof renderProductsGrid === 'function') renderProductsGrid();
 
     const qAddCtx = typeof currentQuickAddContext !== 'undefined' ? currentQuickAddContext : null;
     if (qAddCtx === 'sales' && typeof addToCart === 'function') addToCart(newItem.id);
@@ -543,6 +697,10 @@ function fillProductModal(p) {
         window.initialModalVariants = [];
         let hasApparelSizes = false;
         if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+            const baseP = parseFloat(p.price) || 0;
+            const baseWs = parseFloat(p.wholesale) || 0;
+            const baseCost = parseFloat(p.cost) || 0;
+
             p.variants.forEach(v => {
                 if (v.size && v.size !== 'موحد' && v.size !== 'قياسي' && v.size.trim() !== '') {
                     hasApparelSizes = true;
@@ -555,16 +713,30 @@ function fillProductModal(p) {
                 } else {
                     vStockForActiveWH = 0;
                 }
+
+                // الحفاظ على السعر والتكلفة والجملة المحددة لكل مقاس بدقة دون إجبار على التوحيد
+                let effectiveVarPrice = (v.price !== undefined && v.price !== null && v.price !== '' && !isNaN(parseFloat(v.price)))
+                    ? parseFloat(v.price)
+                    : baseP;
+
+                let effectiveVarWs = (v.wholesale !== undefined && v.wholesale !== null && v.wholesale !== '' && !isNaN(parseFloat(v.wholesale)))
+                    ? parseFloat(v.wholesale)
+                    : baseWs;
+
+                let effectiveVarCost = (v.cost !== undefined && v.cost !== null && v.cost !== '' && !isNaN(parseFloat(v.cost)))
+                    ? parseFloat(v.cost)
+                    : baseCost;
+
                 window.initialModalVariants.push({
                     size: v.size,
                     color: v.color,
                     barcode: v.barcode,
                     stock: vStockForActiveWH,
-                    price: v.price,
-                    wholesale: v.wholesale,
-                    cost: v.cost
+                    price: effectiveVarPrice,
+                    wholesale: effectiveVarWs,
+                    cost: effectiveVarCost
                 });
-                addVariantRow(v.size, v.color, v.barcode, vStockForActiveWH, v.price, v.wholesale, v.cost);
+                addVariantRow(v.size, v.color, v.barcode, vStockForActiveWH, effectiveVarPrice, effectiveVarWs, effectiveVarCost);
             });
         }
         updateVariantsCountBadge();
@@ -583,6 +755,7 @@ function fillProductModal(p) {
     if (typeof calculateUnitPrices === 'function') calculateUnitPrices();
     if (typeof renderProductWarehouseStocksTable === 'function') renderProductWarehouseStocksTable(p);
     updateProductNavCounter();
+    if (typeof window.updateVariantPriceSyncUI === 'function') window.updateVariantPriceSyncUI();
 }
 
 // عرض توزيع الرصيد على المخازن والفروع المسجلة

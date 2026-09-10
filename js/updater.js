@@ -16,7 +16,7 @@
 
     // بيانات المستودع المربوط على GitHub Releases والرسائل السحابية
     const GITHUB_REPO_OWNER = 'ehabamr062-ux';
-    const GITHUB_REPO_NAME = 'bayan-pos-fashion';
+    const GITHUB_REPO_NAME = 'bayan_fashion_website';
     const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
     const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
     const GITHUB_BROADCAST_URL = `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/main/announcements.json`;
@@ -41,15 +41,15 @@
         style.id = 'bayan-updater-styles';
         style.textContent = `
             #bayan-update-overlay {
-                position: fixed;
-                inset: 0;
-                background: rgba(10, 10, 24, 0.85);
-                
-                -webkit-
-                z-index: 9999999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                position: fixed !important;
+                inset: 0 !important;
+                background: rgba(8, 8, 18, 0.92) !important;
+                -webkit-backdrop-filter: blur(10px) !important;
+                backdrop-filter: blur(10px) !important;
+                z-index: 999999999 !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
                 animation: updaterFadeIn 0.35s ease;
                 font-family: 'Cairo', 'Segoe UI', sans-serif;
             }
@@ -58,16 +58,18 @@
                 to   { opacity: 1; }
             }
             #bayan-update-modal {
-                background: linear-gradient(150deg, #1e113a 0%, #130a24 50%, #0f172a 100%);
-                border: 2px solid rgba(212, 175, 55, 0.5);
+                background: #140b27 !important;
+                background: linear-gradient(150deg, #1e113a 0%, #130a24 50%, #0f172a 100%) !important;
+                border: 2px solid rgba(212, 175, 55, 0.6) !important;
                 border-radius: 28px;
                 padding: 35px 38px;
                 width: 550px;
                 max-width: 95vw;
-                box-shadow: 0 30px 70px rgba(0,0,0,0.8), 0 0 40px rgba(147, 51, 234, 0.3), 0 0 25px rgba(212, 175, 55, 0.25);
+                box-shadow: 0 30px 70px rgba(0,0,0,0.9), 0 0 40px rgba(147, 51, 234, 0.4), 0 0 25px rgba(212, 175, 55, 0.3);
                 direction: rtl;
                 animation: updaterSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-                position: relative;
+                position: relative !important;
+                z-index: 1000000000 !important;
                 overflow: hidden;
             }
             #bayan-update-modal::before {
@@ -235,7 +237,7 @@
     // حالة نظام التحديث
     // =========================================================================
     const state = {
-        currentVersion: window.appVersion || '1.0.3',
+        currentVersion: window.appVersion || '1.0.5',
         latestVersion: null,
         releaseNotes: '',
         downloadUrl: '',
@@ -264,7 +266,7 @@
     }
 
     function getCurrentAppVersion() {
-        return window.appVersion || '1.0.3';
+        return window.appVersion || '1.0.5';
     }
 
     function fmtNotes(notes) {
@@ -471,22 +473,40 @@
         // 🔒 فحص حالة تجميد/إيقاف التحديثات التلقائية مباشرة من قاعدة بيانات IndexedDB
         let isAutoUpdateFrozen = false;
         try {
-            if (typeof db !== 'undefined' && db && db.settings) {
-                const rec = await db.settings.get('pos_auto_updates_disabled');
-                if (rec && rec.value !== undefined) isAutoUpdateFrozen = (rec.value === 'true' || rec.value === true);
-                else {
-                    const main = await db.settings.get('main');
-                    if (main && main.pos_auto_updates_disabled !== undefined) isAutoUpdateFrozen = (main.pos_auto_updates_disabled === true);
+            const storedVal = typeof getStore === 'function' ? getStore('pos_auto_updates_disabled') : null;
+            if (storedVal !== null && storedVal !== undefined) isAutoUpdateFrozen = (storedVal === 'true' || storedVal === true);
+        } catch(e) {}
+
+        if (!isAutoUpdateFrozen) {
+            try {
+                if (typeof db !== 'undefined' && db && db.settings) {
+                    const rec = await db.settings.get('pos_auto_updates_disabled');
+                    if (rec && rec.value !== undefined) isAutoUpdateFrozen = (rec.value === 'true' || rec.value === true);
+                    else {
+                        const main = await db.settings.get('main');
+                        if (main && main.pos_auto_updates_disabled !== undefined) isAutoUpdateFrozen = (main.pos_auto_updates_disabled === true);
+                    }
+                } else if (window.AppStore && window.AppStore.pos_auto_updates_disabled !== undefined) {
+                    isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
                 }
-            } else if (window.AppStore && window.AppStore.pos_auto_updates_disabled !== undefined) {
-                isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
+            } catch (e) {
+                console.warn('[Updater] Could not check update freeze status from IndexedDB:', e);
             }
-        } catch (e) {
-            console.warn('[Updater] Could not check update freeze status from IndexedDB:', e);
         }
 
-        if (isAutoUpdateFrozen && !isManual) {
-            console.log(`[Updater] 🔒 تم تجميد التحديثات التلقائية بناءً على إعدادات العميل في IndexedDB. البقاء على الإصدار v${state.currentVersion}`);
+        if (isAutoUpdateFrozen) {
+            console.log(`[Updater] 🔒 تم تجميد التحديثات التلقائية بناءً على رغبة العميل. البقاء على الإصدار v${state.currentVersion}`);
+            if (isManual) {
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        titleText: '🔒 التحديثات مجمدة حالياً',
+                        msg: `خاصية التحديثات التلقائية معطلة ومجمدة بناءً على اختيارك، والنظام مثبت ومستقر على نسختك الحالية (v${state.currentVersion}).\n\nلن يقوم البرنامج بأي اتصال بسيرفر التحديثات لحماية استقرار بياناتك.\nلتفعيل فحص وتنزيل التحديثات، يرجى تشغيل مفتاح "إدارة وتجميد التحديثات التلقائية" أولاً من قسم الإعدادات.`,
+                        type: 'warning'
+                    });
+                } else if (typeof showToast === 'function') {
+                    showToast(`🔒 التحديثات مجمدة وثابتة على v${state.currentVersion}`, 'warning');
+                }
+            }
             return { hasUpdate: false, frozen: true, version: state.currentVersion };
         }
 
@@ -586,6 +606,9 @@
                 }
 
                 openModal();
+                if (typeof window.notifyLoginBackupForUpdate === 'function') {
+                    window.notifyLoginBackupForUpdate(cleanTag);
+                }
                 return { hasUpdate: true, version: cleanTag };
             } else {
                 console.log(`[Updater] App is up to date: v${state.currentVersion}`);
@@ -651,6 +674,9 @@
             state.isDownloaded   = false;
             state.isDownloading  = false;
             openModal();
+            if (typeof window.notifyLoginBackupForUpdate === 'function') {
+                window.notifyLoginBackupForUpdate(state.newVersion);
+            }
         });
 
         ipcRenderer.on('update-not-available', () => {
@@ -827,10 +853,10 @@
         overlay.id = 'bayan-broadcast-overlay';
         overlay.style.cssText = `
             position: fixed; inset: 0; z-index: 99999;
-            background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px);
+            background: rgba(15, 23, 42, 0.8);
             display: flex; align-items: center; justify-content: center;
             direction: rtl; font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
-            animation: fadeIn 0.3s ease-out;
+            animation: fadeIn 0.15s ease-out;
         `;
 
         const title = item.title || '📢 إشعار هام من إدارة نظام بيان POS';
@@ -863,30 +889,15 @@
     }
 
     // =========================================================================
-    // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر IndexedDB حصراً
+    // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر IndexedDB و Electron Disk
     // =========================================================================
-    window.toggleAutoUpdatesPolicy = async function(isEnabled) {
-        const disabled = !isEnabled;
-
-        // 💾 الحفظ الصارم والمباشر في قاعدة بيانات IndexedDB (Dexie)
-        if (window.AppStore) {
-            window.AppStore['pos_auto_updates_disabled'] = disabled ? 'true' : 'false';
-        }
-        if (typeof db !== 'undefined' && db && db.settings) {
-            try {
-                await db.settings.put({ id: 'pos_auto_updates_disabled', value: disabled ? 'true' : 'false' });
-                const mainSettings = (await db.settings.get('main')) || { id: 'main' };
-                mainSettings.pos_auto_updates_disabled = disabled;
-                await db.settings.put(mainSettings);
-                console.log(`💾 [IndexedDB] تم حفظ سياسة التحديثات في IndexedDB: ${disabled ? 'مجمدة' : 'مفعلة'}`);
-            } catch (err) {
-                console.error('❌ خطأ أثناء حفظ حالة التحديثات في IndexedDB:', err);
-            }
-        }
-
+    function updateAutoUpdatesPolicyDOM(isEnabled) {
+        const curVer = window.appVersion || '1.0.5';
         const badge = document.getElementById('updatePolicyBadge');
         const text = document.getElementById('toggleAutoUpdatesText');
         const toggle = document.getElementById('toggleAutoUpdatesSwitch');
+        const slider = document.getElementById('toggleAutoUpdatesSlider');
+        const knob = document.getElementById('toggleAutoUpdatesKnob');
 
         if (toggle) toggle.checked = isEnabled;
 
@@ -895,53 +906,153 @@
                 badge.style.background = '#ecfdf5';
                 badge.style.color = '#059669';
                 badge.style.borderColor = '#a7f3d0';
-                badge.innerText = 'تلقائي نشط ⚡';
+                badge.innerHTML = `تلقائي نشط ⚡ (v${curVer})`;
             }
             if (text) {
-                text.innerText = 'التحديثات مفعلة';
+                text.innerText = `التحديثات مفعلة (v${curVer})`;
                 text.style.color = '#059669';
             }
-            if (typeof showCustomAlert === 'function') {
-                showCustomAlert({
-                    titleText: '✅ تم تفعيل التحديثات التلقائية',
-                    msg: 'تم حفظ الإعداد في قاعدة البيانات (IndexedDB).\nسيقوم النظام تلقائياً بفحص التحديثات وتنبيهك بأي ميزات أو تحسينات جديدة فور صدورها.',
-                    type: 'success'
-                });
-            } else if (typeof showToast === 'function') {
-                showToast('✅ تم تفعيل التحديثات التلقائية', 'success');
+            if (slider) {
+                slider.style.backgroundColor = '#10b981';
+                slider.style.borderColor = '#059669';
+            }
+            if (knob) {
+                knob.style.right = '4px';
+                knob.style.left = 'auto';
+                knob.innerHTML = '⚡';
             }
         } else {
             if (badge) {
                 badge.style.background = '#fef3c7';
                 badge.style.color = '#d97706';
                 badge.style.borderColor = '#fde68a';
-                badge.innerText = '🔒 التحديثات مجمدة';
+                badge.innerHTML = `🔒 التحديثات مجمدة (ثابت على v${curVer})`;
             }
             if (text) {
-                text.innerText = 'التحديثات متوقفة';
+                text.innerText = `التحديثات متوقفة (ثابت على v${curVer})`;
                 text.style.color = '#d97706';
             }
+            if (slider) {
+                slider.style.backgroundColor = '#94a3b8';
+                slider.style.borderColor = '#64748b';
+            }
+            if (knob) {
+                knob.style.right = '28px';
+                knob.style.left = 'auto';
+                knob.innerHTML = '🔒';
+            }
+        }
+    }
+
+    window.updateAutoUpdatesPolicyDOM = updateAutoUpdatesPolicyDOM;
+
+    window.__isAutoUpdatesFrozenNow = function() {
+        if (typeof window.__isAutoUpdatesFrozen === 'boolean') {
+            return window.__isAutoUpdatesFrozen;
+        }
+        try {
+            const ls = typeof getStore === 'function' ? getStore('pos_auto_updates_disabled') : null;
+            if (ls !== null && ls !== undefined) return (ls === 'true' || ls === true);
+        } catch(e) {}
+        if (window.AppStore && window.AppStore.pos_auto_updates_disabled !== undefined) {
+            return (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
+        }
+        return false;
+    };
+
+    window.toggleAutoUpdatesPolicy = async function(isEnabled) {
+        const disabled = !isEnabled;
+        const curVer = window.appVersion || '1.0.5';
+        window.__isAutoUpdatesFrozen = disabled;
+
+        // 💾 1. التخزين اللحظي في AppStore و IndexedDB
+        if (typeof setStore === 'function') {
+            setStore('pos_auto_updates_disabled', disabled ? 'true' : 'false');
+        } else if (window.AppStore) {
+            window.AppStore['pos_auto_updates_disabled'] = disabled ? 'true' : 'false';
+        }
+
+        // 💾 2. التخزين الصارم في IndexedDB
+        if (typeof db !== 'undefined' && db && db.settings) {
+            try {
+                await db.settings.put({ id: 'pos_auto_updates_disabled', value: disabled ? 'true' : 'false' });
+                const mainSettings = (await db.settings.get('main')) || { id: 'main' };
+                mainSettings.pos_auto_updates_disabled = disabled;
+                await db.settings.put(mainSettings);
+                console.log(`💾 [IndexedDB] تم حفظ سياسة التحديثات: ${disabled ? 'مجمدة ومقفولة' : 'مفعلة'}`);
+            } catch (err) {
+                console.error('❌ خطأ أثناء حفظ حالة التحديثات في IndexedDB:', err);
+            }
+        }
+
+        // 💾 3. المزامنة مع Electron لحفظها على القرص في ملف update-policy.json
+        if (ipcRenderer) {
+            try {
+                await ipcRenderer.invoke('set-auto-updates-policy', disabled);
+            } catch (e) {
+                console.warn('[Updater] Could not sync update policy to Electron:', e);
+            }
+        }
+
+        // 🎨 4. التحديث الفوري للواجهة ومفتاح التبديل
+        updateAutoUpdatesPolicyDOM(isEnabled);
+
+        // 🔔 5. التنبيه الفوري للمستخدم
+        if (isEnabled) {
             if (typeof showCustomAlert === 'function') {
                 showCustomAlert({
-                    titleText: '🔒 تم تجميد التحديثات التلقائية',
-                    msg: 'تم حفظ الإعداد بنجاح في قاعدة البيانات (IndexedDB).\nتم إيقاف فحص التحديثات التلقائية، وسيظل البرنامج ثابتاً ومستقراً على نسختك الحالية v1.0.3 دون أي إشعارات أو ترقيات.',
+                    titleText: '⚡ تم تفعيل التحديثات التلقائية',
+                    msg: `تم حفظ الإعداد بنجاح.\nالنظام متصل الآن بسيرفر التحديثات وسيقوم بفحص وتنبيهك بأي إصدارات جديدة فور صدورها.\nإصدارك الحالي: v${curVer}`,
+                    type: 'success'
+                });
+            } else if (typeof showToast === 'function') {
+                showToast(`⚡ تم تفعيل التحديثات التلقائية (v${curVer})`, 'success');
+            }
+        } else {
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    titleText: '🔒 تم تجميد التحديثات وإيقافها بنجاح',
+                    msg: `تم حفظ الإعداد وتجميد التحديثات التلقائية تماماً.\nسيظل البرنامج مستقراً ومقفولاً على نسختك الحالية (v${curVer}) ولن يتم طلب أي تحديثات من السيرفر أو إظهار أي إشعارات ترقية مستقبلاً.`,
                     type: 'warning'
                 });
             } else if (typeof showToast === 'function') {
-                showToast('🔒 تم تجميد التحديثات التلقائية', 'warning');
+                showToast(`🔒 تم تجميد التحديثات والتثبيت على v${curVer}`, 'warning');
             }
         }
     };
 
     window.initAutoUpdatesPolicyUI = async function() {
         let isAutoUpdateFrozen = false;
+
+        // فحص سريع من قاعدة بيانات IndexedDB عبر getStore للاستجابة اللحظية
+        try {
+            const storedVal = typeof getStore === 'function' ? getStore('pos_auto_updates_disabled') : null;
+            if (storedVal !== null && storedVal !== undefined) {
+                isAutoUpdateFrozen = (storedVal === 'true' || storedVal === true);
+            }
+        } catch (e) {}
+
+        // فحص من Electron Disk Policy إذا توفر IPC
+        if (ipcRenderer) {
+            try {
+                const epRes = await ipcRenderer.invoke('get-auto-updates-policy');
+                if (epRes && typeof epRes.frozen === 'boolean') {
+                    isAutoUpdateFrozen = epRes.frozen;
+                }
+            } catch (e) {}
+        }
+
+        // فحص من IndexedDB كمرجع دائم
         try {
             if (typeof db !== 'undefined' && db && db.settings) {
                 const rec = await db.settings.get('pos_auto_updates_disabled');
-                if (rec && rec.value !== undefined) isAutoUpdateFrozen = (rec.value === 'true' || rec.value === true);
-                else {
+                if (rec && rec.value !== undefined) {
+                    isAutoUpdateFrozen = (rec.value === 'true' || rec.value === true);
+                } else {
                     const main = await db.settings.get('main');
-                    if (main && main.pos_auto_updates_disabled !== undefined) isAutoUpdateFrozen = (main.pos_auto_updates_disabled === true);
+                    if (main && main.pos_auto_updates_disabled !== undefined) {
+                        isAutoUpdateFrozen = (main.pos_auto_updates_disabled === true);
+                    }
                 }
             } else if (window.AppStore && window.AppStore.pos_auto_updates_disabled !== undefined) {
                 isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
@@ -950,36 +1061,8 @@
             console.warn('[Updater] Could not load update policy from IndexedDB:', e);
         }
 
-        const isEnabled = !isAutoUpdateFrozen;
-
-        const badge = document.getElementById('updatePolicyBadge');
-        const text = document.getElementById('toggleAutoUpdatesText');
-        const toggle = document.getElementById('toggleAutoUpdatesSwitch');
-
-        if (toggle) toggle.checked = isEnabled;
-        if (isEnabled) {
-            if (badge) {
-                badge.style.background = '#ecfdf5';
-                badge.style.color = '#059669';
-                badge.style.borderColor = '#a7f3d0';
-                badge.innerText = 'تلقائي نشط ⚡';
-            }
-            if (text) {
-                text.innerText = 'التحديثات مفعلة';
-                text.style.color = '#059669';
-            }
-        } else {
-            if (badge) {
-                badge.style.background = '#fef3c7';
-                badge.style.color = '#d97706';
-                badge.style.borderColor = '#fde68a';
-                badge.innerText = '🔒 التحديثات مجمدة';
-            }
-            if (text) {
-                text.innerText = 'التحديثات متوقفة';
-                text.style.color = '#d97706';
-            }
-        }
+        window.__isAutoUpdatesFrozen = isAutoUpdateFrozen;
+        updateAutoUpdatesPolicyDOM(!isAutoUpdateFrozen);
     };
 
     // =========================================================================
@@ -988,6 +1071,10 @@
     const autoCheck = () => {
         window.initAutoUpdatesPolicyUI();
         setTimeout(() => {
+            if (window.__isAutoUpdatesFrozenNow && window.__isAutoUpdatesFrozenNow()) {
+                console.log('[Updater] 🔒 تخطي الفحص التلقائي السحابي: التحديثات مجمدة بناءً على اختيار العميل.');
+                return;
+            }
             window.checkGitHubReleases(false);
             window.checkCloudAnnouncements();
         }, 3000);

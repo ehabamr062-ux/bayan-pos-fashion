@@ -1,6 +1,6 @@
 {
   "name": "bayan-pos-fashion",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Bayan POS Fashion System",
   "main": "main.js",
   "scripts": {
@@ -37,13 +37,15 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Bayan POS"
+      "shortcutName": "Bayan POS",
+      "installerIcon": "media/logo.ico",
+      "uninstallerIcon": "media/logo.ico"
     },
     "publish": [
       {
         "provider": "github",
         "owner": "ehabamr062-ux",
-        "repo": "Bayan-Pos-System",
+        "repo": "bayan_fashion_website",
         "releaseType": "release"
       }
     ],
@@ -55,8 +57,7 @@
     "electron-updater": "^6.2.1"
   },
   "devDependencies": {
-    "bytenode": "^1.6.0",
-    "electron": "^30.5.1",
+    "electron": "^32.2.8",
     "electron-builder": "^24.13.3",
     "fs-extra": "^11.3.5",
     "javascript-obfuscator": "^5.4.3",

@@ -219,20 +219,121 @@ function downloadAOAAsExcelCSV(aoaData, fileName) {
 }
 window.downloadAOAAsExcelCSV = downloadAOAAsExcelCSV;
 
+// =========================================================================
+// 🛡️ منظومة الفحص والتحقق الصارم من اكتمال البيانات قبل التصدير والمشاركة
+// =========================================================================
+function validateDocumentData(type, actionType = 'التصدير') {
+    let isValid = true;
+    let errorMsg = "";
+
+    if (type === 'receipt') {
+        const amount = parseFloat(document.getElementById('receiptAmount')?.value) || 0;
+        const customer = (document.getElementById('receiptCustomer')?.value || '').trim();
+        const isCustEmpty = (!customer || customer === 'غير محدد' || customer === 'عميل نقدي' || customer === 'عميل');
+
+        if (amount <= 0 && isCustEmpty) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: يرجى كتابة اسم العميل وإدخال مبلغ سند القبض أولاً!`;
+        } else if (amount <= 0) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: يرجى إدخال مبلغ صحيح لسند القبض أولاً!`;
+        } else if (isCustEmpty) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: يرجى كتابة وتحديد اسم العميل أولاً للسند!`;
+        }
+    } else if (type === 'disbursement') {
+        const amount = parseFloat(document.getElementById('disburseAmount')?.value) || 0;
+        const payee = (document.getElementById('disbursePayee')?.value || '').trim();
+        const isPayeeEmpty = (!payee || payee === 'غير محدد' || payee === 'مورد نقدي' || payee === 'جهة');
+
+        if (amount <= 0 && isPayeeEmpty) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: يرجى كتابة اسم المستلم/المورد وإدخال مبلغ سند الصرف أولاً!`;
+        } else if (amount <= 0) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: يرجى إدخال مبلغ صحيح لسند الصرف أولاً!`;
+        } else if (isPayeeEmpty) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: يرجى كتابة اسم المستلم / المورد أولاً للسند!`;
+        }
+    } else if (type === 'dailyReport') {
+        const fromD = document.getElementById('reportDateFrom')?.value || new Date().toLocaleDateString('en-CA');
+        const toD = document.getElementById('reportDateTo')?.value || new Date().toLocaleDateString('en-CA');
+
+        const periodTxs = (typeof transactions !== 'undefined' && Array.isArray(transactions))
+            ? transactions.filter(t => t.dateISO && t.dateISO >= fromD && t.dateISO <= toD)
+            : [];
+
+        const repData = window.dailyReportData || {};
+        const totalSales = parseFloat(repData.totalSales || 0);
+        const totalPurchases = parseFloat(repData.totalPurchases || 0);
+        const totalReceipts = parseFloat(repData.totalReceipts || 0);
+        const totalExpenses = parseFloat(repData.totalExpenses || 0);
+        const grossProfit = parseFloat(repData.grossProfit || 0);
+        const netProfit = parseFloat(repData.netProfit || 0);
+
+        const hasDomTotals = (
+            (document.getElementById('dailyTotalSales')?.innerText && parseFloat(document.getElementById('dailyTotalSales').innerText) > 0) ||
+            (document.getElementById('dailyTotalPurchases')?.innerText && parseFloat(document.getElementById('dailyTotalPurchases').innerText) > 0) ||
+            (document.getElementById('dailyTotalReceipts')?.innerText && parseFloat(document.getElementById('dailyTotalReceipts').innerText) > 0) ||
+            (document.getElementById('dailyTotalExpenses')?.innerText && parseFloat(document.getElementById('dailyTotalExpenses').innerText) > 0)
+        );
+
+        const hasAnyActivity = (periodTxs.length > 0 || totalSales > 0 || totalPurchases > 0 || totalReceipts > 0 || totalExpenses > 0 || grossProfit !== 0 || netProfit !== 0 || hasDomTotals);
+
+        if (!hasAnyActivity) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: لا توجد أي حركات أو معاملات مالية مسجلة في هذا اليوم لتصديرها!`;
+        }
+    } else if (type === 'sales') {
+        const hasCart = (typeof window.cart !== 'undefined' && Array.isArray(window.cart) && window.cart.length > 0);
+        if (!hasCart) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: سلة المبيعات فارغة! يرجى إضافة أصناف أولاً.`;
+        }
+    } else if (type === 'purchase') {
+        const hasPurCart = (typeof window.purchaseCart !== 'undefined' && Array.isArray(window.purchaseCart) && window.purchaseCart.length > 0);
+        if (!hasPurCart) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: فاتورة المشتريات فارغة! يرجى إضافة أصناف أولاً.`;
+        }
+    } else if (type === 'salesReturn') {
+        const hasRetCart = ((typeof window.salesReturnCart !== 'undefined' && Array.isArray(window.salesReturnCart) && window.salesReturnCart.length > 0) ||
+                            (typeof window.returnCart !== 'undefined' && Array.isArray(window.returnCart) && window.returnCart.length > 0));
+        if (!hasRetCart) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: سلة مرتجع المبيعات فارغة! يرجى اختيار أصناف للمرتجع أولاً.`;
+        }
+    } else if (type === 'purchaseReturn') {
+        const hasPurRetCart = ((typeof window.purchaseReturnCart !== 'undefined' && Array.isArray(window.purchaseReturnCart) && window.purchaseReturnCart.length > 0) ||
+                               (typeof window.purReturnCart !== 'undefined' && Array.isArray(window.purReturnCart) && window.purReturnCart.length > 0));
+        if (!hasPurRetCart) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: سلة مرتجع المشتريات فارغة! يرجى اختيار أصناف للمرتجع أولاً.`;
+        }
+    } else if (type === 'adjustment') {
+        const adjTable = document.getElementById('adjustmentTableBody');
+        const hasRows = adjTable && adjTable.children && adjTable.children.length > 0 && !adjTable.innerText.includes('لا توجد أصناف');
+        if (!hasRows) {
+            isValid = false;
+            errorMsg = `⚠️ لا يمكن ${actionType}: جدول التسوية المخزنية فارغ! لا توجد أصناف للتصدير.`;
+        }
+    }
+
+    if (!isValid) {
+        document.querySelectorAll('.share-menu').forEach(m => m.classList.remove('active'));
+        if (typeof showToast === 'function') showToast(errorMsg, "warning");
+        else alert(errorMsg);
+        return false;
+    }
+    return true;
+}
+window.validateDocumentData = validateDocumentData;
+
 // 2.6 دالة مشاركة الفواتير والمستندات عبر الواتساب والتليجرام
 function shareTransaction(type, platform) {
-    let isBillEmpty = false;
-    if (type === 'sales' && (!window.cart || window.cart.length === 0)) isBillEmpty = true;
-    else if (type === 'purchase' && (!window.purchaseCart || window.purchaseCart.length === 0)) isBillEmpty = true;
-    else if (type === 'salesReturn' && (!window.salesReturnCart || window.salesReturnCart.length === 0)) isBillEmpty = true;
-    else if (type === 'purchaseReturn' && (!window.purchaseReturnCart || window.purchaseReturnCart.length === 0)) isBillEmpty = true;
-    else if (type === 'receipt' && (!document.getElementById('receiptAmount')?.value || parseFloat(document.getElementById('receiptAmount')?.value) === 0)) isBillEmpty = true;
-    else if (type === 'disbursement' && (!document.getElementById('disburseAmount')?.value || parseFloat(document.getElementById('disburseAmount')?.value) === 0)) isBillEmpty = true;
-
-    if (isBillEmpty) {
-        document.querySelectorAll('.share-menu').forEach(m => m.classList.remove('active'));
-        if (typeof showToast === 'function') showToast("⚠️ الفاتورة فارغة! يرجى إضافة أصناف أو بيانات أولاً قبل المشاركة.", "warning");
-        else alert("⚠️ الفاتورة فارغة! يرجى إضافة أصناف أو بيانات أولاً قبل المشاركة.");
+    const platformLabel = (platform === 'wa' || platform === 'whatsapp') ? 'المشاركة عبر الواتساب' : 'المشاركة عبر التلجرام';
+    if (typeof validateDocumentData === 'function' && !validateDocumentData(type, platformLabel)) {
         return;
     }
 
@@ -281,22 +382,27 @@ function shareTransaction(type, platform) {
         const fromD = document.getElementById('reportDateFrom')?.value || new Date().toLocaleDateString('en-CA');
         const toD = document.getElementById('reportDateTo')?.value || new Date().toLocaleDateString('en-CA');
         
-        const netProfit = document.getElementById('dailyNetProfit')?.innerText || '0.00';
-        const totalSales = document.getElementById('dailyTotalSales')?.innerText || '0.00';
-        const totalPurchases = document.getElementById('dailyTotalPurchases')?.innerText || '0.00';
-        const totalExpenses = document.getElementById('dailyTotalExpenses')?.innerText || '0.00';
-        const totalReceipts = document.getElementById('dailyTotalReceipts')?.innerText || '0.00';
-        const totalDisbursements = document.getElementById('dailyTotalDisbursements')?.innerText || '0.00';
-        const grossProfit = document.getElementById('dailyGrossProfit')?.innerText || '0.00';
+        const whSelect = document.getElementById('dailyReportWarehouseSelect');
+        const selectedWh = (whSelect && whSelect.value !== 'all') ? whSelect.value : ((window.dailyReportData && window.dailyReportData.selectedWarehouse !== 'all') ? window.dailyReportData.selectedWarehouse : '');
+        const whText = selectedWh ? `🏢 المخزن: ${selectedWh}\n` : '';
 
-        grandTotal = netProfit;
+        const repData = window.dailyReportData || {};
+        const netProfit = repData.netProfit !== undefined ? repData.netProfit.toFixed(2) : (document.getElementById('dailyNetProfit')?.innerText || '0.00');
+        const totalSales = repData.totalSales !== undefined ? repData.totalSales.toFixed(2) : (document.getElementById('dailyTotalSales')?.innerText || '0.00');
+        const totalPurchases = repData.totalPurchases !== undefined ? repData.totalPurchases.toFixed(2) : (document.getElementById('dailyTotalPurchases')?.innerText || '0.00');
+        const totalExpenses = repData.totalExpenses !== undefined ? repData.totalExpenses.toFixed(2) : (document.getElementById('dailyTotalExpenses')?.innerText || '0.00');
+        const totalReceipts = repData.totalReceipts !== undefined ? repData.totalReceipts.toFixed(2) : (document.getElementById('dailyTotalReceipts')?.innerText || '0.00');
+        const grossProfit = repData.grossProfit !== undefined ? repData.grossProfit.toFixed(2) : (document.getElementById('dailyGrossProfit')?.innerText || '0.00');
+
+        const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+        grandTotal = canViewProfits ? netProfit : totalSales;
         itemsText = `\n📅 الفترة: من ${fromD} إلى ${toD}\n` +
+                    whText +
                     `🛍️ إجمالي المبيعات: ${totalSales} ج.م\n` +
                     `📦 إجمالي المشتريات: ${totalPurchases} ج.م\n` +
                     `💵 المقبوضات المالية: ${totalReceipts} ج.م\n` +
-                    `💸 المصروفات / السندات: ${totalExpenses} ج.م\n` +
-                    `📈 مجمل الربح: ${grossProfit} ج.م\n` +
-                    `🎯 صافي الربح النهائي: ${netProfit} ج.م`;
+                    `💸 المصروفات / السندات: ${totalExpenses} ج.م` +
+                    (canViewProfits ? (`\n📈 مجمل الربح: ${grossProfit} ج.م\n🎯 صافي الربح النهائي: ${netProfit} ج.م`) : '');
     }
 
     const shopName = document.getElementById('shopName')?.value || 'بَيَان POS';
@@ -329,6 +435,9 @@ window.shareTransaction = shareTransaction;
 
 // 3. دالة تصدير بيانات الفاتورة والمستندات إلى ملف Excel غني يشمل كافة الحقول والبيانات المطلوبة
 function exportInvoiceDataToExcel(type, fileName, customItems) {
+    if (typeof validateDocumentData === 'function' && !validateDocumentData(type, 'تصدير ملف إكسل')) {
+        return false;
+    }
     const XLSXLib = (typeof getXLSXLibrary === 'function' ? getXLSXLibrary() : (typeof XLSX !== 'undefined' ? XLSX : (typeof window.XLSX !== 'undefined' ? window.XLSX : null)));
 
     const currentUserStr = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'المدير العام';
@@ -509,31 +618,50 @@ function exportInvoiceDataToExcel(type, fileName, customItems) {
         const fromDate = document.getElementById('reportDateFrom')?.value || new Date().toLocaleDateString('en-CA');
         const toDate = document.getElementById('reportDateTo')?.value || new Date().toLocaleDateString('en-CA');
         
-        const netProfit = document.getElementById('dailyNetProfit')?.innerText || '0.00';
-        const totalSales = document.getElementById('dailyTotalSales')?.innerText || '0.00';
-        const totalPurchases = document.getElementById('dailyTotalPurchases')?.innerText || '0.00';
-        const totalExpenses = document.getElementById('dailyTotalExpenses')?.innerText || '0.00';
-        const totalReceipts = document.getElementById('dailyTotalReceipts')?.innerText || '0.00';
-        const totalDisbursements = document.getElementById('dailyTotalDisbursements')?.innerText || '0.00';
-        const grossProfit = document.getElementById('dailyGrossProfit')?.innerText || '0.00';
+        const whSelect = document.getElementById('dailyReportWarehouseSelect');
+        const selectedWh = (whSelect && whSelect.value !== 'all') ? whSelect.value : ((window.dailyReportData && window.dailyReportData.selectedWarehouse !== 'all') ? window.dailyReportData.selectedWarehouse : 'all');
+        const selectedWhLabel = (selectedWh !== 'all') ? selectedWh : 'كافة المخازن والفروع';
 
-        const filtered = (typeof transactions !== 'undefined' ? transactions : []).filter(t => (!fromDate || t.dateISO >= fromDate) && (!toDate || t.dateISO <= toDate));
+        const repData = window.dailyReportData || {};
+        const netProfit = repData.netProfit !== undefined ? repData.netProfit.toFixed(2) : (document.getElementById('dailyNetProfit')?.innerText || '0.00');
+        const totalSales = repData.totalSales !== undefined ? repData.totalSales.toFixed(2) : (document.getElementById('dailyTotalSales')?.innerText || '0.00');
+        const totalPurchases = repData.totalPurchases !== undefined ? repData.totalPurchases.toFixed(2) : (document.getElementById('dailyTotalPurchases')?.innerText || '0.00');
+        const totalExpenses = repData.totalExpenses !== undefined ? repData.totalExpenses.toFixed(2) : (document.getElementById('dailyTotalExpenses')?.innerText || '0.00');
+        const totalReceipts = repData.totalReceipts !== undefined ? repData.totalReceipts.toFixed(2) : (document.getElementById('dailyTotalReceipts')?.innerText || '0.00');
+        const grossProfit = repData.grossProfit !== undefined ? repData.grossProfit.toFixed(2) : (document.getElementById('dailyGrossProfit')?.innerText || '0.00');
+
+        let filtered = (typeof transactions !== 'undefined' ? transactions : []).filter(t => (!fromDate || t.dateISO >= fromDate) && (!toDate || t.dateISO <= toDate) && !(t.type && t.type.includes('تحويل') && t.transferStatus === 'rejected'));
+        if (selectedWh !== 'all') {
+            filtered = filtered.filter(t => {
+                if (t.type && t.type.includes('تحويل')) {
+                    return (t.warehouse === selectedWh || t.sourceWarehouse === selectedWh || t.toWarehouse === selectedWh || t.destWarehouse === selectedWh || t.fromWarehouse === selectedWh);
+                }
+                return (t.warehouse === selectedWh || (!t.warehouse && selectedWh === 'المخزن الرئيسي'));
+            });
+        }
         
+        const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
         const summaryRows = [
             ["📊 ملخص تقرير الحركة والتقفيل اليومي"],
             ["الفترة الزمنية:", `من ${fromDate} إلى ${toDate}`],
+            ["🏢 المخزن:", selectedWhLabel],
             ["تاريخ الاستخراج:", new Date().toLocaleString('ar-EG')],
             [],
             ["البيان المالي", "القيمة الإجمالية (ج.م)"],
             ["🛍️ إجمالي المبيعات", totalSales],
             ["📦 إجمالي المشتريات والتوريد", totalPurchases],
             ["💵 إجمالي المقبوضات (سندات القبض)", totalReceipts],
-            ["💸 إجمالي المصروفات وسندات الصرف", totalExpenses],
-            ["📈 مجمل الربح", grossProfit],
-            ["🎯 صافي الربح النهائي", netProfit],
-            [],
-            ["📋 تفاصيل سجل الحركات والفواتير خلال الفترة:"]
+            ["💸 إجمالي المصروفات وسندات الصرف", totalExpenses]
         ];
+
+        if (canViewProfits) {
+            summaryRows.push(
+                ["📈 مجمل الربح", grossProfit],
+                ["🎯 صافي الربح النهائي", netProfit]
+            );
+        }
+
+        summaryRows.push([], ["📋 تفاصيل سجل الحركات والفواتير خلال الفترة:"]);
 
         const headersRow = ["م", "رقم الفاتورة / المستند", "حالة/نوع الفاتورة", "التاريخ والوقت", "العميل / المورد", "طريقة الدفع", "اسم المنتج / الصنف", "الباركود", "الكمية", "سعر الوحدة", "الخصم", "الضريبة", "إجمالي الحركة", "المستخدم"];
         summaryRows.push(headersRow);
@@ -701,6 +829,7 @@ window.exportInvoiceDataToExcel = exportInvoiceDataToExcel;
 
 // تجهيز كود HTML الفعلي للمستند المخصص قبل تصدير PDF
 function prepareBillHTML(type) {
+    if (typeof validateDocumentData === 'function' && !validateDocumentData(type, 'تجهيز المستند')) return;
     const receiptArea = document.getElementById('receipt-area');
     if (!receiptArea) return;
 
@@ -840,12 +969,15 @@ function prepareBillHTML(type) {
         const fromD = document.getElementById('reportDateFrom')?.value || todayDate;
         const toD = document.getElementById('reportDateTo')?.value || todayDate;
         const data = window.dailyReportData || {};
-        const netProfit = data.netProfit !== undefined ? data.netProfit.toFixed(2) : '0.00';
-        const totalSales = data.totalSales !== undefined ? data.totalSales.toFixed(2) : '0.00';
-        const totalPurchases = data.totalPurchases !== undefined ? data.totalPurchases.toFixed(2) : '0.00';
-        const totalExpenses = data.totalExpenses !== undefined ? data.totalExpenses.toFixed(2) : '0.00';
-        const totalReceipts = data.totalReceipts !== undefined ? data.totalReceipts.toFixed(2) : '0.00';
-        const grossProfit = data.grossProfit !== undefined ? data.grossProfit.toFixed(2) : '0.00';
+        const whSelect = document.getElementById('dailyReportWarehouseSelect');
+        const selectedWh = (whSelect && whSelect.value !== 'all') ? whSelect.value : ((data.selectedWarehouse && data.selectedWarehouse !== 'all') ? data.selectedWarehouse : '');
+
+        const netProfit = data.netProfit !== undefined ? data.netProfit.toFixed(2) : (document.getElementById('dailyNetProfit')?.innerText || '0.00');
+        const totalSales = data.totalSales !== undefined ? data.totalSales.toFixed(2) : (document.getElementById('dailyTotalSales')?.innerText || '0.00');
+        const totalPurchases = data.totalPurchases !== undefined ? data.totalPurchases.toFixed(2) : (document.getElementById('dailyTotalPurchases')?.innerText || '0.00');
+        const totalExpenses = data.totalExpenses !== undefined ? data.totalExpenses.toFixed(2) : (document.getElementById('dailyTotalExpenses')?.innerText || '0.00');
+        const totalReceipts = data.totalReceipts !== undefined ? data.totalReceipts.toFixed(2) : (document.getElementById('dailyTotalReceipts')?.innerText || '0.00');
+        const grossProfit = data.grossProfit !== undefined ? data.grossProfit.toFixed(2) : (document.getElementById('dailyGrossProfit')?.innerText || '0.00');
 
         receiptArea.innerHTML = `
             <div class="print-container" style="direction:rtl; padding:25px; font-family:'Cairo','Arial',sans-serif; background:#fff; color:#000; width:100%; box-sizing:border-box; border:2px solid #0f172a; border-radius:10px;">
@@ -856,7 +988,7 @@ function prepareBillHTML(type) {
                 </div>
 
                 <div style="display:flex; justify-content:space-between; background:#f8fafc; padding:10px 15px; border:1px solid #cbd5e1; border-radius:6px; margin-bottom:15px; font-size:13px; font-weight:bold;">
-                    <div>الفترة من: ${fromD} إلى: ${toD}</div>
+                    <div>الفترة من: ${fromD} إلى: ${toD}${selectedWh ? ` | 🏢 المخزن: ${selectedWh}` : ''}</div>
                     <div>تاريخ الاستخراج: ${todayDate} - ${todayTime}</div>
                     <div>المسؤول: ${userName}</div>
                 </div>
@@ -883,8 +1015,10 @@ function prepareBillHTML(type) {
         `;
     } else {
         // فواتير المبيعات والمشتريات العادية
-        const isSales = (type === 'sales');
-        const title = isSales ? "فاتورة مبيعات" : "فاتورة مشتريات 🚐";
+        const isSalesRet = (type === 'salesReturn' || type === 'sales-return' || type === 'return_sales' || (String(type).includes('مرتجع') && (String(type).includes('بيع') || String(type).includes('مبيعات'))));
+        const isPurRet = (type === 'purchaseReturn' || type === 'purchase-return' || type === 'return_purchase' || (String(type).includes('مرتجع') && (String(type).includes('شراء') || String(type).includes('مشتريات'))));
+        const isSales = (type === 'sales' || type === 'sale' || type === 'بيع');
+        const title = isSalesRet ? "🔄 مرتجع مبيعات" : (isPurRet ? "🔄 مرتجع مشتريات" : (isSales ? "فاتورة مبيعات" : "فاتورة مشتريات 🚐"));
         const partner = isSales ? (document.getElementById('customerName')?.value.trim() || 'عميل نقدي') : (document.getElementById('supplierName')?.value.trim() || 'مورد');
         const method = isSales ? (typeof getSelectedPaymentMethod === 'function' ? getSelectedPaymentMethod('sales-section') : 'نقدي') : (document.getElementById('purchasePaymentMethod')?.value || 'نقدي');
         const dt = (typeof getTransactionDateTime === 'function' ? getTransactionDateTime('salesDate', 'salesTime') : { full: todayDate });
@@ -1037,6 +1171,11 @@ async function exportElementToImage(elementOrId, fileName) {
 window.exportElementToImage = exportElementToImage;
 
 function exportCurrentBill(type, format) {
+    const actionLabel = (format === 'pdf' ? 'تصدير PDF' : (format === 'excel' ? 'تصدير ملف إكسل' : 'تصدير الصورة'));
+    if (typeof validateDocumentData === 'function' && !validateDocumentData(type, actionLabel)) {
+        return false;
+    }
+
     let fileName = "فاتورة";
     let elementId = "";
 
@@ -1086,5 +1225,3 @@ function exportCurrentBill(type, format) {
     }
 }
 window.exportCurrentBill = exportCurrentBill;
-
-// ================= مساعد بَيَان الذكي (Gemini AI Assistant Copilot) =================

@@ -168,34 +168,77 @@
                     if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لقسم المشتريات', 'error');
                     return;
                 }
-            } else if (sectionType === 'sales-return' || sectionType === 'purchase-return') {
+            } else if (sectionType === 'sales-return') {
                 if (typeof hasPermission === 'function' && !hasPermission('docs_return')) {
-                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لقسم المرتجعات', 'error');
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لمرتجع المبيعات', 'error');
                     return;
                 }
-            } else if (sectionType === 'history' || sectionType === 'invoices' || sectionType === 'item-history') {
+            } else if (sectionType === 'purchase-return') {
+                const u = (typeof currentUser !== 'undefined') ? currentUser : null;
+                const canPR = (u && u.role === 'admin') || (typeof hasPermission === 'function' && hasPermission('docs_purchase') && (!u || !u.permissions || !u.permissions.docs || u.permissions.docs.purchase_return !== false));
+                if (!canPR) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لمرتجع المشتريات', 'error');
+                    return;
+                }
+            } else if (sectionType === 'history' || sectionType === 'item-history') {
+                if (typeof hasPermission === 'function' && !hasPermission('stock_history') && !hasPermission('docs_view') && !hasPermission('stock_view')) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لعرض سجل حركة الصنف', 'error');
+                    return;
+                }
+            } else if (sectionType === 'invoices') {
                 if (typeof hasPermission === 'function' && !hasPermission('docs_view')) {
-                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لعرض سجل الفواتير والحركات', 'error');
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لعرض سجل واستعراض الفواتير', 'error');
                     return;
                 }
-            } else if (sectionType === 'inventory' || sectionType === 'warehouse-report' || sectionType === 'product-inquiry') {
+            } else if (sectionType === 'warehouse-report') {
+                const canWR = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+                    || (typeof hasPermission === 'function' && hasPermission('stock_warehouse_report'));
+                if (!canWR) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لقسم أرصدة المخازن', 'error');
+                    return;
+                }
+            } else if (sectionType === 'inventory') {
                 if (typeof hasPermission === 'function' && !hasPermission('stock_view') && !hasPermission('stock_add')) {
                     if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لقسم المخازن والبضاعة', 'error');
                     return;
                 }
-            } else if (sectionType === 'adjustment') {
-                if (typeof hasPermission === 'function' && !hasPermission('stock_edit') && !hasPermission('stock_transfer')) {
-                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للتسويات والتحويلات المخزنية', 'error');
+            } else if (sectionType === 'product-inquiry') {
+                if (typeof hasPermission === 'function' && !hasPermission('stock_inquiry') && !hasPermission('stock_view')) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لاستعلام الأصناف', 'error');
                     return;
                 }
-            } else if (sectionType === 'accounts' || sectionType === 'statement') {
+            } else if (sectionType === 'adjustment') {
+                if (typeof hasPermission === 'function' && !hasPermission('stock_adjust') && !hasPermission('stock_edit') && !hasPermission('stock_transfer')) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لتسوية المخزن', 'error');
+                    return;
+                }
+            } else if (sectionType === 'transfer') {
+                if (typeof hasPermission === 'function' && !hasPermission('stock_transfer')) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للتحويل المخزني', 'error');
+                    return;
+                }
+            } else if (sectionType === 'accounts') {
                 if (typeof hasPermission === 'function' && !hasPermission('accounts_view')) {
                     if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لقسم الحسابات', 'error');
                     return;
                 }
-            } else if (sectionType === 'receipt' || sectionType === 'disbursement') {
-                if (typeof hasPermission === 'function' && !hasPermission('accounts_add')) {
-                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لسندات القبض والصرف', 'error');
+            } else if (sectionType === 'statement') {
+                if (typeof hasPermission === 'function' && !hasPermission('accounts_statement')) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لكشف الحساب', 'error');
+                    return;
+                }
+            } else if (sectionType === 'receipt') {
+                const u = (typeof currentUser !== 'undefined') ? currentUser : null;
+                const canR = (u && u.role === 'admin') || (typeof hasPermission === 'function' && hasPermission('accounts_receipt'));
+                if (!canR) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لسندات القبض', 'error');
+                    return;
+                }
+            } else if (sectionType === 'disbursement') {
+                const u = (typeof currentUser !== 'undefined') ? currentUser : null;
+                const canD = (u && u.role === 'admin') || (typeof hasPermission === 'function' && hasPermission('accounts_disbursement'));
+                if (!canD) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لسندات الصرف', 'error');
                     return;
                 }
             } else if (sectionType === 'analysis') {
@@ -203,9 +246,16 @@
                     if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لرؤية التحليلات والأرباح', 'error');
                     return;
                 }
-            } else if (sectionType === 'daily-report' || sectionType === 'reports-hub' || sectionType === 'treasury-audit') {
+            } else if (sectionType === 'daily-report' || sectionType === 'reports-hub') {
                 if (typeof hasPermission === 'function' && !hasPermission('general_reports')) {
                     if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لقسم التقارير المالية', 'error');
+                    return;
+                }
+            } else if (sectionType === 'treasury-audit') {
+                const u = (typeof currentUser !== 'undefined') ? currentUser : null;
+                const canTreasury = (u && u.role === 'admin') || (typeof hasPermission === 'function' && hasPermission('accounts_treasury'));
+                if (!canTreasury) {
+                    if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية للوصول لمراجعة الخزينة', 'error');
                     return;
                 }
             }
@@ -234,19 +284,31 @@
                     if (!checkPermission('docs_add')) return;
                 } else if (sectionType === 'purchase') {
                     if (!checkPermission('docs_purchase')) return;
-                } else if (sectionType === 'sales-return' || sectionType === 'purchase-return') {
+                } else if (sectionType === 'sales-return') {
                     if (!checkPermission('docs_return')) return;
-                } else if (sectionType === 'receipt' || sectionType === 'disbursement') {
-                    if (!checkPermission('accounts_add')) return;
+                } else if (sectionType === 'purchase-return') {
+                    if (!checkPermission('docs_purchase_return')) return;
+                } else if (sectionType === 'receipt') {
+                    if (!checkPermission('accounts_receipt')) return;
+                } else if (sectionType === 'disbursement') {
+                    if (!checkPermission('accounts_disbursement')) return;
                 } else if (sectionType === 'adjustment') {
-                    if (!checkPermission('stock_edit') && !checkPermission('stock_transfer')) return;
-                } else if (['inventory', 'warehouse-report', 'product-inquiry'].includes(sectionType)) {
+                    if (!checkPermission('stock_adjust')) return;
+                } else if (sectionType === 'warehouse-report') {
+                    if (!checkPermission('stock_warehouse_report')) return;
+                } else if (sectionType === 'product-inquiry') {
+                    if (!checkPermission('stock_inquiry')) return;
+                } else if (sectionType === 'inventory') {
                     if (!checkPermission('stock_view')) return;
-                } else if (['accounts', 'statement'].includes(sectionType)) {
+                } else if (sectionType === 'statement') {
+                    if (!checkPermission('accounts_statement')) return;
+                } else if (sectionType === 'accounts') {
                     if (!checkPermission('accounts_view')) return;
+                } else if (sectionType === 'treasury-audit') {
+                    if (!checkPermission('accounts_treasury')) return;
                 } else if (['analysis'].includes(sectionType)) {
                     if (!checkPermission('general_profits')) return;
-                } else if (['daily-report', 'reports-hub', 'treasury-audit'].includes(sectionType)) {
+                } else if (['daily-report', 'reports-hub'].includes(sectionType)) {
                     if (!checkPermission('general_reports')) return;
                 } else if (['history', 'invoices', 'item-history'].includes(sectionType)) {
                     if (!checkPermission('docs_view')) return;
@@ -351,6 +413,7 @@
                         if (el) { el.focus(); el.select(); }
                     }, 120);
                 } else if (targetTab.type === 'adjustment') {
+                    if (typeof renderAdjTable === 'function') renderAdjTable();
                     setTimeout(() => {
                         const el = document.getElementById('adjSearch');
                         if (el) { el.focus(); el.select(); }
@@ -458,7 +521,7 @@
                     const anVal = document.getElementById('anPeriodFilter')?.value;
                     if (anVal && typeof applyAnalysisPeriodFilter === 'function' && anVal !== 'custom') {
                         applyAnalysisPeriodFilter(anVal);
-                    } else {
+                    } else if (typeof renderAnalysisTable === 'function') {
                         renderAnalysisTable();
                     }
                 }
@@ -468,6 +531,7 @@
                     else renderWarehouseReportTable();
                 }
                 if (targetTab.type === 'history') {
+                    if (typeof populateWarehouseDropdowns === 'function') populateWarehouseDropdowns();
                     const hVal = document.getElementById('historyPeriodFilter')?.value;
                     if (hVal && typeof applyHistoryPeriodFilter === 'function' && hVal !== 'custom') {
                         applyHistoryPeriodFilter(hVal);
@@ -475,7 +539,10 @@
                         renderHistoryTable();
                     }
                 }
-                if (targetTab.type === 'daily-report') generateDailyReport();
+                if (targetTab.type === 'daily-report') {
+                    if (typeof populateWarehouseDropdowns === 'function') populateWarehouseDropdowns();
+                    generateDailyReport();
+                }
                 if (targetTab.type === 'statement') {
                     if (typeof loadSelectedAccountStatement === 'function') loadSelectedAccountStatement();
                 }
@@ -621,7 +688,10 @@
                 const activeItem = document.querySelector('.inquiry-product-item.active');
                 tabStates[activeTabId] = {
                     searchQuery: document.getElementById('inquirySearchInput') ? document.getElementById('inquirySearchInput').value : '',
-                    selectedId: activeItem ? activeItem.id.replace('inquiry-item-', '') : null
+                    selectedId: activeItem ? activeItem.id.replace('inquiry-item-', '') : null,
+                    selectedWarehouse: (typeof selectedSectionInquiryWarehouse !== 'undefined') ? selectedSectionInquiryWarehouse : 'all',
+                    selectedSize: (typeof selectedSectionInquirySize !== 'undefined') ? selectedSectionInquirySize : 'all',
+                    selectedColor: (typeof selectedSectionInquiryColor !== 'undefined') ? selectedSectionInquiryColor : 'all'
                 };
             }
 
@@ -657,13 +727,24 @@
         function restoreTabState(tabId, type) {
             const state = tabStates[tabId];
 
-                        if (type === 'product-inquiry') {
+            if (type === 'product-inquiry') {
                 if (state) {
                     document.getElementById('inquirySearchInput').value = state.searchQuery || '';
                     if (typeof handleInquirySearch === 'function') handleInquirySearch(state.searchQuery || '');
                     if (state.selectedId) {
                         setTimeout(() => {
-                            if (typeof selectProductForInquiry === 'function') selectProductForInquiry(Number(state.selectedId));
+                            if (typeof selectProductForInquiry === 'function') {
+                                selectProductForInquiry(Number(state.selectedId));
+                                if (state.selectedSize && state.selectedSize !== 'all' && typeof window.setSectionInquiryVariantFilter === 'function') {
+                                    window.setSectionInquiryVariantFilter('size', state.selectedSize);
+                                }
+                                if (state.selectedColor && state.selectedColor !== 'all' && typeof window.setSectionInquiryVariantFilter === 'function') {
+                                    window.setSectionInquiryVariantFilter('color', state.selectedColor);
+                                }
+                                if (state.selectedWarehouse && state.selectedWarehouse !== 'all' && typeof window.setSectionInquirySelectedWarehouse === 'function') {
+                                    window.setSectionInquirySelectedWarehouse(state.selectedWarehouse);
+                                }
+                            }
                         }, 50);
                     }
                 } else {
@@ -1283,6 +1364,32 @@
         }
         window.closeTab = closeTab;
         window.actuallyCloseTab = actuallyCloseTab;
+
+        function resetAllTabsForLogout() {
+            openTabs = [{ id: 'dashboard', type: 'dashboard', label: 'الرئيسية' }];
+            tabStates = {};
+            activeTabId = 'dashboard';
+            pendingCloseSection = null;
+
+            if (typeof renderTabs === 'function') {
+                renderTabs();
+            }
+
+            // إخفاء كافة شاشات الأقسام الحساسة وإظهار شاشة لوحة التحكم فقط
+            document.querySelectorAll('.section-view').forEach(s => s.classList.add('hidden'));
+            const dashEl = document.getElementById('dashboard-section');
+            if (dashEl) dashEl.classList.remove('hidden');
+
+            // تصفير سلات البيع والشراء والمدخلات المعلقة لتأمين الخصوصية بين المستخدمين
+            if (typeof cart !== 'undefined') cart = [];
+            if (typeof purchaseCart !== 'undefined') purchaseCart = [];
+            if (typeof returnCart !== 'undefined') returnCart = [];
+            if (typeof purReturnCart !== 'undefined') purReturnCart = [];
+            if (typeof adjCart !== 'undefined') adjCart = [];
+            if (typeof renderCart === 'function') renderCart();
+            if (typeof renderPOSCart === 'function') renderPOSCart();
+        }
+        window.resetAllTabsForLogout = resetAllTabsForLogout;
 
         function closeCurrentSectionTab(sectionType) {
             const tabToClose = openTabs.find(t => t.id === activeTabId && t.type === sectionType) || 

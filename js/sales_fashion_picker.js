@@ -52,13 +52,44 @@ function getVariantPricingAndStock(product, v, context, activeWH, priceLevel) {
             vPrice = parseFloat(v.cost) || parseFloat(product.cost) || 0;
             priceTitle = 'سعر التحويل';
         }
-    } else if (context === 'purchase' || context === 'purReturn' || context === 'adj') {
+    } else if (context === 'adj') {
+        if (typeof window.getEffectiveAdjustmentPrice === 'function') {
+            vPrice = window.getEffectiveAdjustmentPrice(product, v);
+            priceTitle = window.getAdjustmentPriceLabel ? window.getAdjustmentPriceLabel() : 'سعر القطاعي';
+        } else {
+            const basePrice = parseFloat(product.price) || 0;
+            let pVal = parseFloat(v.price) || basePrice;
+            if (Array.isArray(product.variants) && product.variants.length > 0 && basePrice > 0) {
+                const firstP = parseFloat(product.variants[0].price) || 0;
+                const allSameP = product.variants.every(x => (parseFloat(x.price) || 0) === firstP);
+                if (allSameP && Math.abs(pVal - basePrice) > 0.01) pVal = basePrice;
+            }
+            vPrice = pVal || 0;
+            priceTitle = 'سعر القطاعي';
+        }
+    } else if (context === 'purchase' || context === 'purReturn') {
         vPrice = parseFloat(v.cost) || parseFloat(product.cost) || 0;
         priceTitle = 'سعر التكلفة';
     } else {
-        vPrice = (priceLevel === 'wholesale') 
-            ? (parseFloat(v.wholesale) || parseFloat(v.price) || parseFloat(product.wholesale) || parseFloat(product.price) || 0)
-            : (parseFloat(v.price) || parseFloat(product.price) || 0);
+        const basePrice = parseFloat(product.price) || 0;
+        const baseWs = parseFloat(product.wholesale) || parseFloat(product.wholesalePrice) || 0;
+        let pVal = (priceLevel === 'wholesale') 
+            ? (parseFloat(v.wholesale) || parseFloat(v.wholesalePrice) || parseFloat(v.price) || baseWs || basePrice)
+            : (parseFloat(v.price) || basePrice);
+
+        // ذكاء اصطناعي: إذا كانت كافة المقاسات تمتلك نفس السعر ولم يتم تخصيص أسعار منفصلة لكل مقاس
+        if (Array.isArray(product.variants) && product.variants.length > 0) {
+            if (priceLevel === 'wholesale' && baseWs > 0) {
+                const firstWs = parseFloat(product.variants[0].wholesale || product.variants[0].wholesalePrice) || 0;
+                const allSameWs = product.variants.every(x => (parseFloat(x.wholesale || x.wholesalePrice) || 0) === firstWs);
+                if (allSameWs && Math.abs(pVal - baseWs) > 0.01) pVal = baseWs;
+            } else if (basePrice > 0) {
+                const firstP = parseFloat(product.variants[0].price) || 0;
+                const allSameP = product.variants.every(x => (parseFloat(x.price) || 0) === firstP);
+                if (allSameP && Math.abs(pVal - basePrice) > 0.01) pVal = basePrice;
+            }
+        }
+        vPrice = pVal || 0;
         priceTitle = (priceLevel === 'wholesale') ? 'سعر الجملة' : 'سعر البيع';
     }
 
@@ -81,6 +112,29 @@ function renderVariantPickerCardHtml(product, v, context, activeWH, priceLevel, 
     const stockBg = stockVal > 0 ? '#ecfdf5' : '#fef2f2';
     const hasSize = v.size && v.size !== 'موحد' && v.size !== 'قياسي' && v.size.trim() !== '';
 
+    const prodDisc = (context === 'sales' && product.discount) ? parseFloat(product.discount) : 0;
+    let priceSnippet = '';
+    if (prodDisc > 0) {
+        const netPrice = vPrice - (vPrice * prodDisc / 100);
+        priceSnippet = `
+            <div style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1;">
+                <span style="color: #047857; font-weight: 900; font-size: 1.05rem; white-space: nowrap; direction: ltr;">
+                    ${netPrice.toFixed(2)} <span style="font-size: 0.7rem; font-weight: bold;">ج.م</span>
+                </span>
+                <div style="display: flex; gap: 4px; align-items: center; font-size: 0.72rem;">
+                    <span style="text-decoration: line-through; color: #94a3b8; font-weight: 700;">${vPrice.toFixed(2)}</span>
+                    <span style="background: #fee2e2; color: #b91c1c; font-weight: 900; padding: 0 4px; border-radius: 4px;">-${prodDisc}%</span>
+                </div>
+            </div>
+        `;
+    } else {
+        priceSnippet = `
+            <span style="color: #047857; font-weight: 900; font-size: 1.05rem; white-space: nowrap; direction: ltr; display: inline-block;">
+                ${vPrice.toFixed(2)} <span style="font-size: 0.7rem; font-weight: bold;">ج.م</span>
+            </span>
+        `;
+    }
+
     if (isVerticalMode) {
         // الوضع الرأسي (طلب العميل: تتابع المقاسات تحت اللون بشكل طولي متناسق بدون أي تداخل أو خروج للكلام)
         return `
@@ -99,9 +153,7 @@ function renderVariantPickerCardHtml(product, v, context, activeWH, priceLevel, 
                         }
                     </div>
                     <div style="text-align: left; flex-shrink: 0;">
-                        <span style="color: #047857; font-weight: 900; font-size: 1.05rem; white-space: nowrap; direction: ltr; display: inline-block;">
-                            ${vPrice.toFixed(2)} <span style="font-size: 0.7rem; font-weight: bold;">ج.م</span>
-                        </span>
+                        ${priceSnippet}
                     </div>
                 </div>
 
@@ -128,9 +180,9 @@ function renderVariantPickerCardHtml(product, v, context, activeWH, priceLevel, 
                 <span class="variant-size-badge" style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     🎨 ${v.color || 'موحد'}
                 </span>
-                <span style="color: #047857; font-weight: 900; font-size: 1.05rem; white-space: nowrap; flex-shrink: 0; direction: ltr; display: inline-block;">
-                    ${vPrice.toFixed(2)} <span style="font-size: 0.7rem; font-weight: bold;">ج.م</span>
-                </span>
+                <div style="text-align: left; flex-shrink: 0;">
+                    ${priceSnippet}
+                </div>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px dashed #e2e8f0; padding-top: 6px; box-sizing: border-box; gap: 6px;">
                 <span style="color: ${stockColor}; background: ${stockBg}; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%;" title="المخزن: ${activeWH}">
@@ -877,21 +929,38 @@ function selectVariantAndAddToCart(productId, variantIndex, context = 'sales') {
         }
     } else if (context === 'adj') {
         // تعبئة هيدر الجرد والتسوية
+        const effPrice = (typeof window.getEffectiveAdjustmentPrice === 'function')
+            ? window.getEffectiveAdjustmentPrice(product, variant, defUnit)
+            : (parseFloat(variant.price) || parseFloat(product.price) || 0);
+        
+        const activeWH = (typeof getVariantModalActiveWH === 'function') 
+            ? getVariantModalActiveWH('adj') 
+            : ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+
+        let liveStockVal = 0;
+        if (variant && variant.warehouseStocks && typeof variant.warehouseStocks === 'object' && variant.warehouseStocks[activeWH] !== undefined) {
+            liveStockVal = parseFloat(variant.warehouseStocks[activeWH]) || 0;
+        } else if (activeWH === 'المخزن الرئيسي' || !variant || !variant.warehouseStocks) {
+            liveStockVal = variant ? (parseFloat(variant.stock) || 0) : (parseFloat(product.stock) || 0);
+        } else {
+            liveStockVal = 0;
+        }
+
         window.selectedAdjItem = {
             ...product,
             selectedSize: variant.size || '',
             selectedColor: variant.color || '',
             size: variant.size || '',
             color: variant.color || '',
-            cost: parseFloat(variant.cost) || parseFloat(product.cost) || 0,
-            stock: variant.stock !== undefined ? variant.stock : product.stock
+            cost: effPrice,
+            stock: liveStockVal
         };
         const sEl = document.getElementById('adjSearch');
         const pEl = document.getElementById('adjPrice');
         const qEl = document.getElementById('adjQty');
         if (sEl) sEl.value = product.name + (variant.size ? ` [${variant.size}]` : '') + (variant.color ? ` (${variant.color})` : '');
-        if (pEl) pEl.value = (parseFloat(variant.cost) || parseFloat(product.cost) || 0).toFixed(2);
-        document.querySelectorAll('.adj-current-stock-val').forEach(el => el.innerText = variant.stock !== undefined ? variant.stock : (product.stock || 0));
+        if (pEl) pEl.value = effPrice.toFixed(2);
+        document.querySelectorAll('.adj-current-stock-val').forEach(el => el.innerText = liveStockVal);
         if (qEl) {
             qEl.value = '1';
             qEl.focus();
@@ -970,14 +1039,28 @@ window.selectVariantAndAddToCart = selectVariantAndAddToCart;
 window.showVariantSelectionModal = showVariantSelectionModal;
 
 function renderVariantSelectElements(item, index, cartType = 'sales') {
+    // 🔒 إذا كان المرتجع مربوطاً بفاتورة أصلية، يتم تثبيت المقاس واللون منعاً للتلاعب أو تغيير التشكيلة
+    if (cartType === 'return' && item.invoiceId) {
+        const displaySize = item.selectedSize || item.size || 'عام';
+        const displayColor = item.selectedColor || item.color || 'عام';
+        const sizeElement = `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:3px 10px; border-radius:6px; font-weight:900; font-size:0.82rem; display:inline-flex; align-items:center; gap:3px;" title="المقاس مثبت من الفاتورة الأصلية">${displaySize} <span style="font-size:0.7rem;">🔒</span></span>`;
+        const colorElement = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:3px 10px; border-radius:6px; font-weight:900; font-size:0.82rem; display:inline-flex; align-items:center; gap:3px;" title="اللون مثبت من الفاتورة الأصلية">${displayColor} <span style="font-size:0.7rem;">🔒</span></span>`;
+        return { sizeElement, colorElement };
+    }
+
     const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
     const variants = (pInfo && pInfo.variants && Array.isArray(pInfo.variants)) ? pInfo.variants : [];
-    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+    
+    // تحديد المخزن الفعلي للتحقق من الرصيد (في حالة التحويل نأخذ المخزن المصدر)
+    let activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+    if (cartType === 'transfer') {
+        activeWH = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || 'المخزن الرئيسي').trim();
+    }
 
     const currentSize = item.selectedSize || item.size || '';
     const currentColor = item.selectedColor || item.color || '';
 
-    // دالة مساعدة لحساب رصيد تشكيلة معينة في المخزن النشط
+    // دالة مساعدة لحساب رصيد تشكيلة معينة في المخزن الفعلي المحدد
     const getVarStockInWH = (s, c) => {
         const v = variants.find(varObj => 
             (!s || String(varObj.size || '').trim() === String(s).trim()) &&
@@ -986,7 +1069,7 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
         if (!v) return 0;
         if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[activeWH] !== undefined) {
             return parseFloat(v.warehouseStocks[activeWH]) || 0;
-        } else if (activeWH === 'المخزن الرئيسي' || !v.warehouseStocks) {
+        } else if (activeWH === 'المخزن الرئيسي') {
             return parseFloat(v.stock) || 0;
         }
         return 0;
@@ -1002,13 +1085,15 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
         item.size = availableSizes[0];
     }
 
+    const showStock = (cartType === 'sales' || cartType === 'transfer');
+
     let sizeElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
     if (availableSizes.length > 1) {
         const sizeOptions = availableSizes.map(s => {
             const st = getVarStockInWH(s, currentColor);
             const isSelected = (item.selectedSize || currentSize) === s;
-            const stockLabel = cartType === 'sales' ? ` (${st > 0 ? st : '0 ❌'})` : '';
-            return `<option value="${s}" ${isSelected ? 'selected' : ''} ${cartType === 'sales' && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${s}${stockLabel}</option>`;
+            const stockLabel = showStock ? ` (${st > 0 ? st : '0 ❌'})` : '';
+            return `<option value="${s}" ${isSelected ? 'selected' : ''} ${showStock && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${s}${stockLabel}</option>`;
         }).join('');
         sizeElement = `<select onchange="updateItemVariantAttr(${index}, 'size', this.value, '${cartType}')" title="اختر المقاس"
             style="width: 90px; max-width: 100%; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer; text-align: center;">
@@ -1034,8 +1119,8 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
         const colorOptions = availableColors.map(c => {
             const st = getVarStockInWH(currentSize, c);
             const isSelected = currentColor === c;
-            const stockLabel = cartType === 'sales' ? ` (${st > 0 ? st : '0 ❌'})` : '';
-            return `<option value="${c}" ${isSelected ? 'selected' : ''} ${cartType === 'sales' && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${c}${stockLabel}</option>`;
+            const stockLabel = showStock ? ` (${st > 0 ? st : '0 ❌'})` : '';
+            return `<option value="${c}" ${isSelected ? 'selected' : ''} ${showStock && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${c}${stockLabel}</option>`;
         }).join('');
         colorElement = `<select onchange="updateItemVariantAttr(${index}, 'color', this.value, '${cartType}')" title="اختر اللون"
             style="width: 90px; max-width: 100%; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer; text-align: center;">
@@ -1067,11 +1152,15 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
     let candidateSize = (attr === 'size') ? value : prevSize;
     let candidateColor = (attr === 'color') ? value : prevColor;
 
-    // فحص المخزن النشط ورصيد المقاس/اللون المطلوب في حالة المبيعات لمنع بيع رصيد غير متاح
-    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+    // تحديد المخزن المستهدف للفحص: في التحويل نأخذ المخزن المحول منه، وفي المبيعات نأخذ المخزن الحالي
+    let targetWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+    if (cartType === 'transfer') {
+        targetWH = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || 'المخزن الرئيسي').trim();
+    }
     const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
 
-    if (cartType === 'sales' && pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {
+    // التحقق الصارم من رصيد المقاس واللون في المخزن المحدد (للمبيعات وتحويلات المخازن)
+    if ((cartType === 'sales' || cartType === 'transfer') && pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {
         const matchedVar = pInfo.variants.find(v => 
             (!candidateSize || String(v.size || '').trim() === String(candidateSize).trim()) && 
             (!candidateColor || String(v.color || '').trim() === String(candidateColor).trim())
@@ -1079,9 +1168,9 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
 
         let candidateStock = 0;
         if (matchedVar) {
-            if (matchedVar.warehouseStocks && typeof matchedVar.warehouseStocks === 'object' && matchedVar.warehouseStocks[activeWH] !== undefined) {
-                candidateStock = parseFloat(matchedVar.warehouseStocks[activeWH]) || 0;
-            } else if (activeWH === 'المخزن الرئيسي' || !matchedVar.warehouseStocks) {
+            if (matchedVar.warehouseStocks && typeof matchedVar.warehouseStocks === 'object' && matchedVar.warehouseStocks[targetWH] !== undefined) {
+                candidateStock = parseFloat(matchedVar.warehouseStocks[targetWH]) || 0;
+            } else if (targetWH === 'المخزن الرئيسي') {
                 candidateStock = parseFloat(matchedVar.stock) || 0;
             } else {
                 candidateStock = 0;
@@ -1091,15 +1180,23 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
         const factor = parseFloat(item.unitFactor) || 1;
         const requestedBaseQty = (parseFloat(item.qty) || 1) * factor;
 
-        if (candidateStock < requestedBaseQty) {
+        if (!matchedVar || candidateStock < requestedBaseQty || candidateStock <= 0) {
+            const attrLabel = attr === 'size' ? 'المقاس' : 'اللون';
+            const varDesc = candidateSize && candidateColor ? `[${candidateSize} - ${candidateColor}]` : `[${value}]`;
+            const actionDesc = cartType === 'transfer' ? 'للتحويل من' : 'للبيع من';
+
             if (typeof showToast === 'function') {
-                showToast(`🚫 التشكيلة [${candidateSize || ''} ${candidateColor || ''}] غير متوفرة في مخزن (${activeWH})! الرصيد المتاح (${candidateStock}) فقط`, 'error');
+                showToast(`🚫 ${attrLabel} ${varDesc} غير متوفر ${actionDesc} مخزن (${targetWH})! الرصيد المتاح (${candidateStock}) فقط`, 'error', 4500);
             }
             if (typeof BayanBarcode !== 'undefined' && typeof BayanBarcode.playBeep === 'function') {
                 BayanBarcode.playBeep(false);
             }
-            // إعادة رسم السلة للتراجع عن الاختيار غير المتاح في الـ select
-            renderCart();
+            // إعادة رسم الجدول للتراجع عن الاختيار غير المتاح في الـ select وإبقائه على القيمة السابقة
+            if (cartType === 'sales') {
+                renderCart();
+            } else if (cartType === 'transfer') {
+                if (typeof renderTransferTable === 'function') renderTransferTable();
+            }
             return;
         }
     }
@@ -1132,9 +1229,9 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
             }
 
             let variantLiveStock = 0;
-            if (matchedVariant.warehouseStocks && typeof matchedVariant.warehouseStocks === 'object' && matchedVariant.warehouseStocks[activeWH] !== undefined) {
-                variantLiveStock = parseFloat(matchedVariant.warehouseStocks[activeWH]) || 0;
-            } else if (activeWH === 'المخزن الرئيسي' || !matchedVariant.warehouseStocks) {
+            if (matchedVariant.warehouseStocks && typeof matchedVariant.warehouseStocks === 'object' && matchedVariant.warehouseStocks[targetWH] !== undefined) {
+                variantLiveStock = parseFloat(matchedVariant.warehouseStocks[targetWH]) || 0;
+            } else if (targetWH === 'المخزن الرئيسي') {
                 variantLiveStock = parseFloat(matchedVariant.stock) || 0;
             } else {
                 variantLiveStock = 0;
@@ -1146,15 +1243,17 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
             if (cartType === 'adj' || cartType === 'sales' || cartType === 'return' || cartType === 'purReturn') {
                 item.stock = variantLiveStock / factor;
             } else if (cartType === 'transfer') {
-                const wFrom = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || activeWH).trim();
+                const wFrom = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || 'المخزن الرئيسي').trim();
                 let srcStock = 0;
                 if (matchedVariant.warehouseStocks && typeof matchedVariant.warehouseStocks === 'object' && matchedVariant.warehouseStocks[wFrom] !== undefined) {
                     srcStock = parseFloat(matchedVariant.warehouseStocks[wFrom]) || 0;
-                } else if (wFrom === 'المخزن الرئيسي' || !matchedVariant.warehouseStocks) {
+                } else if (wFrom === 'المخزن الرئيسي') {
                     srcStock = parseFloat(matchedVariant.stock) || 0;
+                } else {
+                    srcStock = 0;
                 }
-                item.stock = srcStock;
-                item.sourceStock = srcStock;
+                item.stock = srcStock / factor;
+                item.sourceStock = item.stock;
             }
 
             if (cartType === 'transfer') {
@@ -1163,7 +1262,13 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
                 } else {
                     item.price = parseFloat(matchedVariant.cost) || item.price;
                 }
-            } else if (matchedVariant.cost && (cartType === 'purchase' || cartType === 'purReturn' || cartType === 'adj')) {
+            } else if (cartType === 'adj') {
+                if (typeof window.getEffectiveAdjustmentPrice === 'function') {
+                    item.price = window.getEffectiveAdjustmentPrice(item, matchedVariant);
+                } else {
+                    item.price = parseFloat(matchedVariant.price) || item.price;
+                }
+            } else if (matchedVariant.cost && (cartType === 'purchase' || cartType === 'purReturn')) {
                 item.price = parseFloat(matchedVariant.cost) || item.price;
             }
             if (matchedVariant.price && (cartType === 'sales' || cartType === 'return') && parseFloat(matchedVariant.price) > 0) {

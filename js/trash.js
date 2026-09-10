@@ -4,6 +4,31 @@
  * إدارة العناصر المحذوفة مؤقتاً وإمكانية استعادتها
  */
 
+window.purgedTrashIds = window.purgedTrashIds || [];
+try {
+    const savedPurged = typeof getStore === 'function' ? getStore('bayan_purged_trash_ids') : null;
+    if (savedPurged) {
+        window.purgedTrashIds = JSON.parse(savedPurged);
+    }
+} catch(e) {}
+
+function registerPurgedTrashId(id) {
+    if (!id) return;
+    if (!window.purgedTrashIds) window.purgedTrashIds = [];
+    const sId = String(id);
+    if (!window.purgedTrashIds.includes(sId)) {
+        window.purgedTrashIds.push(sId);
+        if (window.purgedTrashIds.length > 300) {
+            window.purgedTrashIds = window.purgedTrashIds.slice(-300);
+        }
+        if (typeof setStore === 'function') {
+            try {
+                setStore('bayan_purged_trash_ids', JSON.stringify(window.purgedTrashIds));
+            } catch(e) {}
+        }
+    }
+}
+
 const trashManager = {
     // جلب كافة المحذوفات من قاعدة البيانات
     async loadTrash() {
@@ -16,6 +41,8 @@ const trashManager = {
                 }
                 return t;
             });
+            window.trash = window.trashBin;
+            if (typeof trashBin !== 'undefined') trashBin = window.trashBin;
             this.renderTrashTable();
         } catch (error) {
             console.error("خطأ في تحميل سلة المحذوفات:", error);
@@ -103,7 +130,9 @@ const trashManager = {
             if (!window.trashBin) window.trashBin = [];
             window.trashBin.push(...trashItems);
             window.trash = window.trashBin;
+            if (typeof trashBin !== 'undefined') trashBin = window.trashBin;
             this.renderTrashTable();
+            if (typeof saveData === 'function') await saveData();
         } catch (error) {
             console.error("فشل النقل الجماعي للسلة:", error);
         }
@@ -271,11 +300,15 @@ const trashManager = {
                                 p.stock = (parseFloat(p.stock) || 0) + baseQty;
                                 p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + baseQty;
                             } else if (tType.includes('تحويل')) {
-                                const srcWH = t.sourceWarehouse || 'المخزن الرئيسي';
-                                const dstWH = t.warehouse || '';
-                                p.warehouseStocks[srcWH] = Math.max(0, (parseFloat(p.warehouseStocks[srcWH]) || 0) - baseQty);
-                                if (dstWH) {
-                                    p.warehouseStocks[dstWH] = (parseFloat(p.warehouseStocks[dstWH]) || 0) + baseQty;
+                                if (t.transferStatus === 'received') {
+                                    const srcWH = t.sourceWarehouse || 'المخزن الرئيسي';
+                                    const dstWH = t.warehouse || '';
+                                    p.warehouseStocks[srcWH] = Math.max(0, (parseFloat(p.warehouseStocks[srcWH]) || 0) - baseQty);
+                                    if (dstWH) {
+                                        p.warehouseStocks[dstWH] = (parseFloat(p.warehouseStocks[dstWH]) || 0) + baseQty;
+                                    }
+                                    if (srcWH === 'المخزن الرئيسي') p.stock = p.warehouseStocks[srcWH];
+                                    if (dstWH === 'المخزن الرئيسي') p.stock = p.warehouseStocks[dstWH];
                                 }
                             }
 
@@ -306,12 +339,19 @@ const trashManager = {
                                             matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
                                             matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
                                         } else if (tType.includes('تحويل')) {
-                                            const srcWH = t.sourceWarehouse || 'المخزن الرئيسي';
-                                            const dstWH = t.warehouse || '';
-                                            matchedVar.warehouseStocks[srcWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) - baseQty);
-                                            if (dstWH) matchedVar.warehouseStocks[dstWH] = (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) + baseQty;
+                                            if (t.transferStatus === 'received') {
+                                                const srcWH = t.sourceWarehouse || 'المخزن الرئيسي';
+                                                const dstWH = t.warehouse || '';
+                                                matchedVar.warehouseStocks[srcWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) - baseQty);
+                                                if (dstWH) matchedVar.warehouseStocks[dstWH] = (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) + baseQty;
+                                                if (srcWH === 'المخزن الرئيسي') matchedVar.stock = matchedVar.warehouseStocks[srcWH];
+                                                if (dstWH === 'المخزن الرئيسي') matchedVar.stock = matchedVar.warehouseStocks[dstWH];
+                                            }
                                         }
                                     }
+                                }
+                                if (p.variants.length > 0) {
+                                    p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                                 }
                             }
                         }
@@ -373,6 +413,10 @@ const trashManager = {
             }
 
             // الحذف من السلة بعد الاستعادة الناجحة
+            registerPurgedTrashId(id);
+            if (item) {
+                registerPurgedTrashId(`${item.type}_${item.label}_${item.deletedAt}`);
+            }
             await db.trash.delete(Number(id) || id);
             window.trashBin = window.trashBin.filter(x => String(x.id) !== String(id));
             await this.loadTrash();
@@ -399,6 +443,9 @@ const trashManager = {
                 showCancel: true,
                 onConfirm: async () => {
                     try {
+                        registerPurgedTrashId(id);
+                        const item = (window.trashBin || []).find(x => String(x.id) === String(id));
+                        if (item) registerPurgedTrashId(`${item.type}_${item.label}_${item.deletedAt}`);
                         await db.trash.delete(id);
                         await this.loadTrash();
                         if (typeof saveData === 'function') await saveData();
@@ -411,6 +458,9 @@ const trashManager = {
         } else {
             if (!confirm("🚨 هل أنت متأكد من حذف هذا العنصر نهائياً؟ لا يمكن الاستعادة بعدها!")) return;
             try {
+                registerPurgedTrashId(id);
+                const item = (window.trashBin || []).find(x => String(x.id) === String(id));
+                if (item) registerPurgedTrashId(`${item.type}_${item.label}_${item.deletedAt}`);
                 await db.trash.delete(id);
                 await this.loadTrash();
                 if (typeof saveData === 'function') await saveData();
@@ -437,6 +487,10 @@ const trashManager = {
                 showCancel: true,
                 onConfirm: async () => {
                     try {
+                        (window.trashBin || []).forEach(it => {
+                            registerPurgedTrashId(it.id);
+                            registerPurgedTrashId(`${it.type}_${it.label}_${it.deletedAt}`);
+                        });
                         await db.trash.clear();
                         window.trashBin = [];
                         await this.loadTrash();
@@ -450,6 +504,10 @@ const trashManager = {
         } else {
             if (!confirm("🚨 هل أنت متأكد من إفراغ سلة المحذوفات بالكامل؟\nسيتم حذف كافة العناصر نهائياً!")) return;
             try {
+                (window.trashBin || []).forEach(it => {
+                    registerPurgedTrashId(it.id);
+                    registerPurgedTrashId(`${it.type}_${it.label}_${it.deletedAt}`);
+                });
                 await db.trash.clear();
                 window.trashBin = [];
                 await this.loadTrash();

@@ -67,9 +67,19 @@
 
             if (!isEdit && !checkPermission('accounts_add')) return;
 
-            const name = document.getElementById('accName').value;
+            const name = (document.getElementById('accName').value || '').trim();
 
             if (!name) return alert("يرجى إدخال اسم الحساب");
+
+            // منع تكرار اسم الحساب لتفادي تداخل المعاملات المالية
+            const cleanArabic = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+            const targetClean = cleanArabic(name);
+            const isDuplicate = accounts.some(a => cleanArabic(a.name) === targetClean && (!editId || a.id != editId));
+            if (isDuplicate) {
+                if (typeof showToast === 'function') showToast(`🚫 يوجد حساب مسجل بالفعل باسم "${name}"! يرجى اختيار اسم فريد.`, "error");
+                else alert(`🚫 يوجد حساب مسجل بالفعل باسم "${name}"!`);
+                return;
+            }
 
             const landValue = (document.getElementById('accLandline')?.value || '').trim();
 
@@ -130,19 +140,38 @@
                 const targetId = Number(editId);
 
                 const idx = accounts.findIndex(a => a.id == targetId);
+                let oldName = '';
 
                 if (idx !== -1) {
-
+                    oldName = accounts[idx].name;
                     accounts[idx] = accountData;
-
                 } else {
-
                     // إذا لم نجد الحساب في المصفوفة لسبب ما، نبحث عنه بالاسم كبديل
-
                     const idxByName = accounts.findIndex(a => a.name === accountData.name);
+                    if (idxByName !== -1) {
+                        oldName = accounts[idxByName].name;
+                        accounts[idxByName] = accountData;
+                    }
+                }
 
-                    if (idxByName !== -1) accounts[idxByName] = accountData;
-
+                // 🔄 تحديث متتالي لسجل الحركات عند تغيير اسم الحساب لمنع اختفاء الفواتير التاريخية
+                if (oldName && oldName !== accountData.name && typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+                    const cleanOld = (oldName || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                    let changedTx = false;
+                    transactions.forEach(t => {
+                        const tClean = (t.partner || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                        if (t.partner === oldName || tClean === cleanOld) {
+                            t.partner = accountData.name;
+                            changedTx = true;
+                        }
+                    });
+                    if (changedTx && typeof db !== 'undefined' && db.transactions) {
+                        try {
+                            await db.transactions.bulkPut(transactions);
+                        } catch (txErr) {
+                            console.warn("⚠️ تعذر تحديث اسم الطرف في قاعدة البيانات محلياً:", txErr);
+                        }
+                    }
                 }
 
                 await db.accounts.put(accountData); // حفظ مباشر وإلزامي في قاعدة البيانات
@@ -233,11 +262,29 @@
 
         // --- تحسينات إدارة الحسابات (Accounts Enhancements) ---
 
-        // تهيئة التخصيص لجدول الحسابات (إضافة عمود الكود)
+        // تهيئة التخصيص لجدول الحسابات (الترتيب المعتمد الجديد: تحديد، م، الكود، الاسم، مدين، دائن، إجمالي البيع، آخر حركة، آخر قبض، طبيعة الحساب، التصنيف)
+        const DEFAULT_ACCOUNTS_COL_ORDER = [10, 0, 1, 2, 5, 6, 7, 9, 8, 3, 4];
 
         let accountsColumnVisibility = JSON.parse(getStore('pos_acc_cols') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true}');
 
-        let accountsColumnOrder = JSON.parse(getStore('pos_acc_cols_order') || '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]');
+        let accountsColumnOrder;
+        try {
+            const savedOrder = getStore('pos_acc_cols_order_v2');
+            if (savedOrder) {
+                const parsed = JSON.parse(savedOrder);
+                if (Array.isArray(parsed) && parsed.length === 11) {
+                    accountsColumnOrder = parsed;
+                } else {
+                    accountsColumnOrder = [...DEFAULT_ACCOUNTS_COL_ORDER];
+                    setStore('pos_acc_cols_order_v2', JSON.stringify(accountsColumnOrder));
+                }
+            } else {
+                accountsColumnOrder = [...DEFAULT_ACCOUNTS_COL_ORDER];
+                setStore('pos_acc_cols_order_v2', JSON.stringify(accountsColumnOrder));
+            }
+        } catch (e) {
+            accountsColumnOrder = [...DEFAULT_ACCOUNTS_COL_ORDER];
+        }
 
         function toggleAccountsColumn(index, isVisible) {
 
@@ -249,91 +296,91 @@
         }
 
         function showInventoryColumnCustomizer() {
-
             const cols = [
-
-                { id: 0, name: "تحديد" },
-
-                { id: 1, name: "م" },
-
-                { id: "quick", name: "صنف سريع ⭐" },
-
+                { id: 0, name: "مربع التحديد (✔️)" },
+                { id: 1, name: "م (الترقيم)" },
+                { id: "quick", name: "صنف سريع ⚡" },
                 { id: 2, name: "كود الصنف" },
-
                 { id: "internal", name: "كود داخلي" },
-
                 { id: 3, name: "اسم الصنف" },
-
                 { id: 4, name: "الباركود" },
-
                 { id: 5, name: "المكان / الرف" },
-
                 { id: 6, name: "رصيد البداية" },
-
                 { id: 7, name: "الوارد (+)" },
-
                 { id: 8, name: "المنصرف (-)" },
-
                 { id: 13, name: "بيع جملة" },
-
                 { id: 10, name: "بيع قطاعي" },
-
                 { id: "margin", name: "نسبة الربح %" },
-
                 { id: 11, name: "آخر شراء" },
-
                 { id: 12, name: "متوسط التكلفة" },
-
-                { id: "detailed", name: "الوحدات" },
-
+                { id: "detailed", name: "الوحدات والعبوات" },
                 { id: 9, name: "الرصيد النهائي" }
-
             ];
 
-            let html = `<div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; padding:15px;">`;
-
+            let html = `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 15px; max-height: 55vh; overflow-y: auto;">`;
             cols.forEach(c => {
-
                 const checked = inventoryColumnVisibility[c.id] !== false ? 'checked' : '';
-
-                // تم وضع c.id بين علامات تنصيص مفردة لضمان عمل المعرفات النصية مثل 'margin'
-
-                html += `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:5px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0; font-size:0.85rem;">
-
-                            <input type="checkbox" ${checked} onchange="toggleInventoryColumn('${c.id}', this.checked)"> ${c.name}
-
-                         </label>`;
-
+                html += `
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: #f8fafc; border-radius: 10px; border: 1.5px solid #e2e8f0; font-size: 0.88rem; font-weight: 700; color: #1e293b; transition: all 0.2s;"
+                           onmouseover="this.style.background='#eff6ff'; this.style.borderColor='#3b82f6';"
+                           onmouseout="this.style.background='#f8fafc'; this.style.borderColor='#e2e8f0';">
+                        <input type="checkbox" class="inv-col-custom-chk" data-col-id="${c.id}" ${checked} 
+                               onchange="toggleInventoryColumn('${c.id}', this.checked)"
+                               style="width: 17px; height: 17px; cursor: pointer; accent-color: #7c3aed;">
+                        <span>${c.name}</span>
+                    </label>`;
             });
-
             html += `</div>`;
 
             const modal = document.createElement('div');
-
             modal.className = 'modal-overlay';
+            modal.style.cssText = 'position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 99999; animation: fadeIn 0.2s ease-out;';
 
             modal.innerHTML = `
-
-                <div class="login-box" style="width: 480px; text-align: right; padding: 25px; border: 2px solid var(--gold); background: #fff;">
-
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">
-
-                        <h3 style="margin:0; color:#1e293b;">⚙️ تخصيص أعمدة المخزن</h3>
-
-                        <button onclick="this.closest('.modal-overlay').remove()" style="background:none; border:none; font-size:1.8rem; cursor:pointer; color:#94a3b8;">&times;</button>
-
+                <div style="width: 520px; max-width: 95vw; background: #ffffff; border-radius: 20px; box-shadow: 0 25px 60px rgba(0,0,0,0.35); border: 2.5px solid #7c3aed; overflow: hidden; display: flex; flex-direction: column; text-align: right; direction: rtl;">
+                    <!-- هيدر النافذة -->
+                    <div style="background: linear-gradient(135deg, #1e1b4b, #3730a3); padding: 14px 20px; border-bottom: 2px solid #7c3aed; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 1.3rem;">⚙️</span>
+                            <h3 style="margin: 0; color: #ffffff; font-size: 1.1rem; font-weight: 900;">تخصيص أعمدة جدول المخزن</h3>
+                        </div>
+                        <button onclick="this.closest('.modal-overlay').remove()" 
+                                style="background: rgba(255,255,255,0.15); border: none; border-radius: 50%; width: 32px; height: 32px; font-size: 1.1rem; cursor: pointer; color: #ffffff; display: flex; align-items: center; justify-content: center; transition: 0.2s;"
+                                onmouseover="this.style.background='rgba(239, 68, 68, 0.8)';"
+                                onmouseout="this.style.background='rgba(255,255,255,0.15)';">&times;</button>
                     </div>
 
+                    <!-- شريط إجراءات سريعة لتحديد الكل أو إلغاء الكل -->
+                    <div style="padding: 10px 20px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.82rem; font-weight: 700; color: #64748b;">اختر الأعمدة التي ترغب في إظهارها:</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button onclick="document.querySelectorAll('.inv-col-custom-chk').forEach(chk => { chk.checked = true; toggleInventoryColumn(chk.getAttribute('data-col-id'), true); });"
+                                    style="padding: 4px 10px; font-size: 0.78rem; font-weight: 800; background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 6px; cursor: pointer;">
+                                تحديد الكل
+                            </button>
+                            <button onclick="document.querySelectorAll('.inv-col-custom-chk').forEach(chk => { chk.checked = false; toggleInventoryColumn(chk.getAttribute('data-col-id'), false); });"
+                                    style="padding: 4px 10px; font-size: 0.78rem; font-weight: 800; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 6px; cursor: pointer;">
+                                إلغاء الكل
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- قائمة مربعات الأعمدة -->
                     ${html}
 
-                    <button class="action-btn btn-save" style="width:100%; margin-top:15px; background:var(--main-blue); color:white;" onclick="this.closest('.modal-overlay').remove()">حفظ وإغلاق</button>
-
+                    <!-- فوتر النافذة -->
+                    <div style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+                        <button style="width: 100%; height: 44px; background: linear-gradient(135deg, #7c3aed, #6d28d9); color: white; border: none; border-radius: 12px; font-weight: 900; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3); transition: all 0.2s;"
+                                onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(124, 58, 237, 0.4)';"
+                                onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(124, 58, 237, 0.3)';"
+                                onclick="this.closest('.modal-overlay').remove()">
+                            💾 حفظ التخصيص وإغلاق
+                        </button>
+                    </div>
                 </div>
-
             `;
 
             document.body.appendChild(modal);
-
         }
 
         // ================= تخصيص أعمدة كشف الحساب (Statement Columns) =================
@@ -416,128 +463,172 @@
 
         }
 
-        function moveAccountsColumn(index, direction) {
+        function toggleAccountsColumn(index, isVisible) {
+            accountsColumnVisibility[index] = isVisible;
+            setStore('pos_acc_cols', JSON.stringify(accountsColumnVisibility));
+            renderAccountsTable();
 
-            const pos = accountsColumnOrder.indexOf(index);
+            // تحديث البطاقة والمفتاح فورياً في النافذة إذا كانت مفتوحة
+            const card = document.getElementById(`accColCard_${index}`);
+            const input = document.getElementById(`accColInput_${index}`);
+            const slider = document.getElementById(`accColSlider_${index}`);
+            const circle = document.getElementById(`accColCircle_${index}`);
 
-            if (pos === -1) return;
-
-            const newPos = pos + direction;
-
-            if (newPos >= 0 && newPos < accountsColumnOrder.length) {
-
-                const temp = accountsColumnOrder[pos];
-
-                accountsColumnOrder[pos] = accountsColumnOrder[newPos];
-
-                accountsColumnOrder[newPos] = temp;
-
-                setStore('pos_acc_cols_order', JSON.stringify(accountsColumnOrder));
-
-                showAccountsColumnCustomizer(); // لإعادة رسم الواجهة بإبقاء المودال مفتوحاً
-
-                renderAccountsTable();
-
+            if (card) {
+                if (isVisible) {
+                    card.style.background = '#fdf2f8';
+                    card.style.borderColor = '#ec4899';
+                } else {
+                    card.style.background = '#f8fafc';
+                    card.style.borderColor = '#e2e8f0';
+                }
             }
+            if (slider) {
+                slider.style.background = isVisible ? '#be185d' : '#cbd5e1';
+            }
+            if (circle) {
+                circle.style.left = isVisible ? '23px' : '3px';
+            }
+            if (input && input.checked !== isVisible) {
+                input.checked = isVisible;
+            }
+        }
 
+        function setAccountsAllColumns(isVisible) {
+            const allIds = [10, 0, 1, 2, 5, 6, 7, 9, 8, 3, 4];
+            allIds.forEach(id => {
+                accountsColumnVisibility[id] = isVisible;
+            });
+            setStore('pos_acc_cols', JSON.stringify(accountsColumnVisibility));
+            renderAccountsTable();
+            showAccountsColumnCustomizer();
+            if (typeof showToast === 'function') {
+                showToast(isVisible ? '👁️ تم إظهار جميع الأعمدة بنجاح' : '⚠️ تم إخفاء جميع الأعمدة', isVisible ? 'success' : 'info');
+            }
+        }
+
+        function resetAccountsColumnsToDefault() {
+            accountsColumnOrder = [...DEFAULT_ACCOUNTS_COL_ORDER];
+            setStore('pos_acc_cols_order_v2', JSON.stringify(accountsColumnOrder));
+            accountsColumnVisibility = {"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true};
+            setStore('pos_acc_cols', JSON.stringify(accountsColumnVisibility));
+            renderAccountsTable();
+            showAccountsColumnCustomizer();
+            if (typeof showToast === 'function') showToast('✅ تم إعادة ضبط الأعمدة للوضع الافتراضي', 'success');
         }
 
         function showAccountsColumnCustomizer() {
-
             const allCols = [
-
-                { id: 0, name: "م" },
-
-                { id: 1, name: "كود الحساب" },
-
-                { id: 2, name: "اسم الحساب" },
-
-                { id: 3, name: "طبيعة الحساب" },
-
-                { id: 4, name: "التصنيف" },
-
-                { id: 5, name: "مدين (عليه)" },
-
-                { id: 6, name: "دائن (له)" },
-
-                { id: 7, name: "إجمالي البيع" },
-
-                { id: 8, name: "آخر تاريخ قبض" },
-
-                { id: 9, name: "آخر حركة" },
-
-                { id: 10, name: "تحديد" }
-
+                { id: 10, name: "تحديد الحساب", icon: "🔘", desc: "دائرة اختيار وتحديد الحساب" },
+                { id: 0, name: "م (المسلسل)", icon: "🔢", desc: "الترقيم التلقائي للأسطر" },
+                { id: 1, name: "كود الحساب", icon: "🏷️", desc: "كود العميل أو المورد" },
+                { id: 2, name: "اسم الحساب", icon: "👤", desc: "الاسم وشارات التجميد والتنبيه" },
+                { id: 5, name: "مدين (عليه)", icon: "🔴", desc: "المبالغ المطلوبة من العميل" },
+                { id: 6, name: "دائن (له)", icon: "🟢", desc: "المبالغ المستحقة للطرف" },
+                { id: 7, name: "إجمالي البيع", icon: "📊", desc: "صافي مسحوبات ومبيعات العميل" },
+                { id: 9, name: "آخر حركة", icon: "⏱️", desc: "تاريخ آخر عملية مسجلة" },
+                { id: 8, name: "آخر تاريخ قبض", icon: "💰", desc: "تاريخ آخر سند قبض مستلم" },
+                { id: 3, name: "طبيعة الحساب", icon: "🤝", desc: "عميل / مورد / مندوب..." },
+                { id: 4, name: "التصنيف", icon: "📁", desc: "عام / جملة / قطاعي / موزع" }
             ];
 
-            // ترتيب الأعمدة حسب الاختيار الحالي
+            let cardsHtml = '';
 
-            const orderedCols = accountsColumnOrder.map(id => allCols.find(c => c.id === id));
+            allCols.forEach(c => {
+                const isChecked = accountsColumnVisibility[c.id] !== false;
+                const activeBg = isChecked ? '#fdf2f8' : '#f8fafc';
+                const activeBorder = isChecked ? '#ec4899' : '#e2e8f0';
 
-            let html = `<div style="display:flex; flex-direction:column; gap:8px; padding:15px; max-height:400px; overflow-y:auto;">`;
-
-            orderedCols.forEach((c, idx) => {
-
-                const checked = accountsColumnVisibility[c.id] ? 'checked' : '';
-
-                html += `<div style="display:flex; align-items:center; gap:8px; background:var(--bg-color); padding:8px; border-radius:8px; border:1.5px solid var(--border-color); transition:0.3s; animation: slideIn 0.3s forwards;">
-
-                            <div style="display:flex; flex-direction:column; gap:2px;">
-
-                                <button onclick="moveAccountsColumn(${c.id}, -1)" style="background:none; border:none; cursor:pointer; font-size:0.7rem; padding:0; ${(idx===0)?'opacity:0.3;pointer-events:none;':''}">🔼</button>
-
-                                <button onclick="moveAccountsColumn(${c.id}, 1)" style="background:none; border:none; cursor:pointer; font-size:0.7rem; padding:0; ${(idx===orderedCols.length-1)?'opacity:0.3;pointer-events:none;':''}">🔽</button>
-
+                cardsHtml += `
+                    <div id="accColCard_${c.id}" 
+                         onclick="toggleAccountsColumn(${c.id}, !document.getElementById('accColInput_${c.id}').checked)"
+                         style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:${activeBg}; border:2px solid ${activeBorder}; border-radius:12px; cursor:pointer; transition:all 0.2s ease; user-select:none; box-shadow:0 2px 5px rgba(0,0,0,0.03);">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:1.3rem; display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; background:#ffffff; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 1px 3px rgba(0,0,0,0.05); flex-shrink:0;">${c.icon}</span>
+                            <div>
+                                <div style="font-weight:900; font-size:0.95rem; color:#0f172a;">${c.name}</div>
+                                <div style="font-size:0.75rem; color:#64748b; margin-top:2px;">${c.desc}</div>
                             </div>
-
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1;">
-
-                                <input type="checkbox" ${checked} onchange="toggleAccountsColumn(${c.id}, this.checked)"> ${c.name}
-
+                        </div>
+                        <div onclick="event.stopPropagation();" style="display:flex; align-items:center;">
+                            <label style="position:relative; display:inline-block; width:44px; height:24px; margin:0; cursor:pointer;">
+                                <input type="checkbox" id="accColInput_${c.id}" ${isChecked ? 'checked' : ''} 
+                                       onchange="toggleAccountsColumn(${c.id}, this.checked)"
+                                       style="opacity:0; width:0; height:0; position:absolute;">
+                                <span id="accColSlider_${c.id}" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:${isChecked ? '#be185d' : '#cbd5e1'}; transition:0.3s; border-radius:24px; box-shadow:inset 0 1px 3px rgba(0,0,0,0.2);">
+                                    <span id="accColCircle_${c.id}" style="position:absolute; content:''; height:18px; width:18px; left:${isChecked ? '23px' : '3px'}; bottom:3px; background:white; transition:0.3s; border-radius:50%; box-shadow:0 2px 4px rgba(0,0,0,0.25);"></span>
+                                </span>
                             </label>
-
-                            <span style="opacity:0.3; font-size:0.7rem;">#${c.id}</span>
-
-                         </div>`;
-
+                        </div>
+                    </div>
+                `;
             });
 
-            html += `</div>`;
-
-            // إزالة المودال القديم إذا وجد (لتحديث الترتيب)
-
+            // إزالة المودال القديم إذا وجد
             const oldModal = document.querySelector('.accounts-cols-customizer');
-
             if (oldModal) oldModal.remove();
 
             const modal = document.createElement('div');
-
             modal.className = 'modal-overlay accounts-cols-customizer';
-
             modal.style.zIndex = '10006';
+            modal.style.backgroundColor = 'rgba(15, 23, 42, 0.75)';
+            modal.style.backdropFilter = 'none';
 
             modal.innerHTML = `
-
-                <div class="login-box" style="width: 450px; text-align: right; padding: 25px; background:white; border:2px solid var(--gold); box-shadow:0 20px 50px rgba(0,0,0,0.3);">
-
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid var(--gold); padding-bottom:12px;">
-
-                        <h3 style="margin:0; font-weight:900;">📤 ترتيب وتخصيص الأعمدة (إدارة الحسابات)</h3>
-
-                        <button onclick="this.closest('.modal-overlay').remove()" style="background:none; border:none; font-size:1.8rem; cursor:pointer; color:#95a5a6; line-height:1;">&times;</button>
-
+                <div style="width: 600px; max-width: 95vw; background:#ffffff; border:2.5px solid #1e293b; border-radius:18px; box-shadow:0 25px 60px rgba(15, 23, 42, 0.5); overflow:hidden; display:flex; flex-direction:column; text-align:right; animation:modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+                    
+                    <!-- الهيدر الكحلي الفاخر -->
+                    <div style="background: linear-gradient(135deg, #0f172a, #1e293b); color:#ffffff; padding:18px 24px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #334155;">
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <div style="width:42px; height:42px; border-radius:10px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; font-size:1.35rem;">
+                                ⚙️
+                            </div>
+                            <div>
+                                <h3 style="margin:0; font-size:1.15rem; font-weight:900; color:#ffffff; letter-spacing:-0.3px;">إظهار وإخفاء أعمدة الحسابات</h3>
+                                <p style="margin:2px 0 0 0; font-size:0.8rem; color:#94a3b8;">تحكّم في إظهار أو إخفاء أي عمود في جدول الحسابات بكل سهولة</p>
+                            </div>
+                        </div>
+                        <button onclick="this.closest('.modal-overlay').remove()" 
+                                style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); width:34px; height:34px; border-radius:8px; font-size:1.4rem; cursor:pointer; color:#ffffff; display:flex; align-items:center; justify-content:center; line-height:1; transition:0.2s;"
+                                onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">&times;</button>
                     </div>
 
-                    ${html}
+                    <!-- شريط أدوات سريع (إظهار الكل / استعادة الافتراضي) -->
+                    <div style="background:#f1f5f9; padding:10px 20px; border-bottom:1.5px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:0.82rem; font-weight:bold; color:#475569;">💡 انقر على أي خانة لتفعيلها أو إخفائها فوراً:</span>
+                        <div style="display:flex; gap:8px;">
+                            <button type="button" onclick="setAccountsAllColumns(true)" 
+                                    style="background:#ffffff; border:1.5px solid #cbd5e1; color:#0f172a; padding:5px 12px; border-radius:7px; font-size:0.8rem; font-weight:bold; cursor:pointer; transition:0.2s;"
+                                    onmouseover="this.style.borderColor='#be185d'; this.style.color='#be185d';" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#0f172a';">
+                                👁️ إظهار الكل
+                            </button>
+                            <button type="button" onclick="resetAccountsColumnsToDefault()" 
+                                    style="background:#ffffff; border:1.5px solid #cbd5e1; color:#0f172a; padding:5px 12px; border-radius:7px; font-size:0.8rem; font-weight:bold; cursor:pointer; transition:0.2s;"
+                                    onmouseover="this.style.borderColor='#0284c7'; this.style.color='#0284c7';" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#0f172a';">
+                                🔄 الوضع الافتراضي
+                            </button>
+                        </div>
+                    </div>
 
-                    <button class="action-btn btn-save" style="width:100%; margin-top:15px; height:50px; background:linear-gradient(135deg, var(--accent-gold), var(--gold)); color:white; font-weight:900;" onclick="this.closest('.modal-overlay').remove()">✅ حفظ الترتيب الجديد</button>
+                    <!-- شبكة الأعمدة (Cards Grid) -->
+                    <div style="padding:16px 20px; max-height:430px; overflow-y:auto; display:grid; grid-template-columns: 1fr 1fr; gap:10px; background:#f8fafc;">
+                        ${cardsHtml}
+                    </div>
+
+                    <!-- الفوتر وزر الإغلاق -->
+                    <div style="background:#ffffff; padding:14px 20px; border-top:1.5px solid #e2e8f0; display:flex; justify-content:flex-end;">
+                        <button type="button" onclick="this.closest('.modal-overlay').remove()" 
+                                style="width:100%; height:46px; background:linear-gradient(135deg, #0f172a, #1e293b); color:#ffffff; font-size:0.95rem; font-weight:900; border:none; border-radius:10px; cursor:pointer; transition:0.2s; box-shadow:0 4px 12px rgba(15, 23, 42, 0.2);"
+                                onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(15, 23, 42, 0.3)'" 
+                                onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(15, 23, 42, 0.2)'">
+                            ✅ حفظ وإغلاق
+                        </button>
+                    </div>
 
                 </div>
-
             `;
 
             document.body.appendChild(modal);
-
         }
 
         function renderAccountsTable() {
@@ -636,11 +727,19 @@
 
             if (tfoot) tfoot.innerHTML = tfOrderHtml;
 
-            const search = document.getElementById('accSearchName').value.toLowerCase();
+            const cleanArabicStr = (str) => (str || '').toString().trim().toLowerCase()
+                .replace(/[أإآ]/g, 'ا')
+                .replace(/ة/g, 'ه')
+                .replace(/[ىي]/g, 'ي')
+                .replace(/\s+/g, ' ');
 
-            const typeFilter = document.getElementById('accFilterType').value;
+            const searchInput = document.getElementById('accSearchName');
+            const rawSearch = (searchInput ? searchInput.value : '').trim().toLowerCase();
+            const searchClean = cleanArabicStr(rawSearch);
 
-            const catFilter = document.getElementById('accFilterCat').value;
+            const typeFilter = document.getElementById('accFilterType')?.value || 'all';
+
+            const catFilter = document.getElementById('accFilterCat')?.value || 'all';
 
             let globalTotalDebit = 0;
 
@@ -648,52 +747,68 @@
 
             const filtered = accounts.filter(acc => {
 
-                const matchName = acc.name.toLowerCase().includes(search);
+                const nameClean = cleanArabicStr(acc.name);
+                const matchName = nameClean.includes(searchClean);
 
-                const matchCode = (acc.code || '').toString().toLowerCase().includes(search);
+                const matchCode = (acc.code || '').toString().toLowerCase().includes(rawSearch);
+
+                const phoneStr = (acc.phone || acc.mobile || '').toString().toLowerCase();
+                const matchPhone = phoneStr.includes(rawSearch);
 
                 const matchType = typeFilter === 'all' || acc.type === typeFilter || (acc.type === 'mixed' && (typeFilter === 'client' || typeFilter === 'supplier'));
 
                 const matchCat = catFilter === 'all' || acc.category === catFilter;
 
-                return (matchName || matchCode) && matchType && matchCat;
+                return (matchName || matchCode || matchPhone) && matchType && matchCat;
 
             });
 
             filtered.forEach((acc, idx) => {
 
+                const targetAccNameClean = cleanArabicStr(acc.name);
+                const targetAccCode = (acc.code || '').toString().trim();
+
                 const currentBalance = getAccountBalance(acc.name);
 
                 let lastTransDate = acc.balanceDate || '-';
-
                 let totalSales = 0;
-
                 let lastReceiptDate = '-';
 
-                const accTrans = transactions.filter(t => t.partner === acc.name);
+                // فلترة حركات الحساب بدقة مع مراعاة توحيد الهمزات والمسافات والكود
+                const accTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => {
+                    if (!t) return false;
+                    if (t.partner === acc.name) return true;
+                    if (targetAccNameClean && cleanArabicStr(t.partner) === targetAccNameClean) return true;
+                    if (targetAccCode && (t.partnerCode === targetAccCode || t.accountCode === targetAccCode)) return true;
+                    return false;
+                });
 
                 accTrans.forEach(t => {
+                    const transType = (t.type || '');
+                    const val = parseFloat(t.total !== undefined ? t.total : (t.price || 0)) || 0;
 
-                    if (t.type.includes('بيع') && !t.type.includes('مرتجع')) {
+                    // حساب صافي المبيعات (خصم أي مرتجع بيع أو مرتجع مبيعات)
+                    const isSale = transType.includes('بيع') && !transType.includes('مرتجع');
+                    const isSaleReturn = transType.includes('مرتجع') && (transType.includes('بيع') || transType.includes('مبيعات'));
 
-                        totalSales += (parseFloat(t.total) || 0);
-
-                    } else if (t.type.includes('مرتجع بيع')) {
-
-                        totalSales -= (parseFloat(t.total) || 0);
-
+                    if (isSale) {
+                        totalSales += val;
+                    } else if (isSaleReturn) {
+                        totalSales -= val;
                     }
 
-                    if (t.type.includes('قبض') && (lastReceiptDate === '-' || t.dateISO > lastReceiptDate)) {
-
-                        lastReceiptDate = t.dateISO;
-
+                    // تاريخ آخر سند قبض
+                    if (transType.includes('قبض') && t.dateISO) {
+                        if (lastReceiptDate === '-' || t.dateISO > lastReceiptDate) {
+                            lastReceiptDate = t.dateISO;
+                        }
                     }
 
-                    if (t.dateISO > lastTransDate || lastTransDate === '-') {
-
-                        lastTransDate = t.dateISO;
-
+                    // تاريخ آخر حركة مسجلة
+                    if (t.dateISO) {
+                        if (lastTransDate === '-' || t.dateISO > lastTransDate) {
+                            lastTransDate = t.dateISO;
+                        }
                     }
 
                 });
@@ -728,7 +843,13 @@
                     row.classList.add('acc-selected-row');
                 }
                 row.onclick = () => selectAccountRow(acc.id);
-                row.ondblclick = () => openSelectedAccountStatement();
+                row.ondblclick = () => {
+                    if (typeof hasPermission === 'function' && !hasPermission('accounts_statement')) {
+                        if (typeof showToast === 'function') showToast('⛔ عذراً، لا تمتلك صلاحية لعرض كشف الحساب', 'warning');
+                        return;
+                    }
+                    openSelectedAccountStatement();
+                };
 
                 const frozenBadge = (acc.inactive === true || acc.inactive === 'true' || acc.isFrozen === true) 
                     ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: #ffffff; font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 12px; margin-right: 6px; display: inline-flex; align-items: center; gap: 3px;">❄️ مجمد</span>` 
@@ -799,6 +920,9 @@
         }
 
         window.openSelectedAccountStatement = function() {
+            if (typeof checkPermission === 'function' && !checkPermission('accounts_statement')) {
+                return;
+            }
             if (!selectedAccountID) {
                 if (typeof showToast === 'function') showToast("⚠️ يرجى تحديد واختيار حساب من الجدول أولاً!", "warning");
                 else alert("⚠️ يرجى تحديد واختيار حساب من الجدول أولاً!");
@@ -811,7 +935,10 @@
             }
 
             if (typeof switchSection === 'function') switchSection('statement');
-            if (document.getElementById('stmtAccountSelector')) document.getElementById('stmtAccountSelector').value = acc.name;
+            if (document.getElementById('stmtAccountSelector')) {
+                document.getElementById('stmtAccountSelector').value = acc.name;
+                if (typeof toggleStmtClearBtn === 'function') toggleStmtClearBtn();
+            }
             if (typeof updateActiveTabTitle === 'function') updateActiveTabTitle(acc.name, 'كشف حساب');
             generateAccountStatement(acc.id);
         };
@@ -896,8 +1023,6 @@
 
                 const val = (acc.maxDebt !== undefined && acc.maxDebt !== null) ? acc.maxDebt : 0;
 
-                showToast(`جاري تحميل حد المديونية: ${val}`, "info");
-
                 // تعيين فوري
 
                 debtField.value = val;
@@ -941,7 +1066,8 @@
             const acc = accounts.find(a => a.id === selectedAccountID);
             if (!acc) return;
 
-            const bal = Math.abs((parseFloat(acc.debit) || 0) - (parseFloat(acc.credit) || 0));
+            const actualBal = typeof getAccountBalance === 'function' ? getAccountBalance(acc.name) : ((parseFloat(acc.debit) || 0) - (parseFloat(acc.credit) || 0));
+            const bal = Math.abs(actualBal);
             if (bal > 0.01) {
                 if (typeof showToast === 'function') showToast(`⚠️ لا يمكن حذف الحساب "${acc.name}" لأنه يحتوي على رصيد قائم (${bal.toFixed(2)} ج.م)! يرجى تسوية الحساب أولاً.`, "warning");
                 else alert(`لا يمكن حذف الحساب "${acc.name}" لأنه يحتوي على رصيد قائم!`);
@@ -1063,6 +1189,7 @@
                     <table>
                         <thead>${tableElement.querySelector('thead').innerHTML}</thead>
                         <tbody>${tableElement.querySelector('tbody').innerHTML}</tbody>
+                        ${tableElement.querySelector('tfoot') && tableElement.querySelector('tfoot').innerHTML.trim() ? `<tfoot>${tableElement.querySelector('tfoot').innerHTML}</tfoot>` : ''}
                     </table>
                     <div class="signatures">
                         <div class="sig-box">
@@ -1087,14 +1214,6 @@
 
         // تم دمج دالة تعديل الحساب مع الدالة الأساسية في الأعلى لمنع التكرار وحل مشكلة اختفاء الحقول (الكود، الحد الأقصى للمديونية، ومستوى السعر)
 
-            // ================= منطق تحويل المخزون المجمّع (Enhanced Batch Transfer) =================
-
-        let transferItemsBatch = [];
-
-        let selectedTransferProductId = null;
-
-        let transferSearchSelectedIndex = -1;
-
         window.initStatementSection = function() {
             // No need to populate datalist anymore since we use custom dropdown
         };
@@ -1107,51 +1226,105 @@
             }
         };
 
-        window.clearStmtAccountSearch = function() {
+        window.clearStmtAccountSearch = function(event) {
+            if (event) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
             const input = document.getElementById('stmtAccountSelector');
             const dropdown = document.getElementById('stmtAccountDropdown');
+            const clearBtn = document.getElementById('stmtClearSearchBtn');
+
+            selectedAccountID = null;
+            window.selectedAccountID = null;
+            window.currentStmtInvoiceId = null;
+
             if (input) {
                 input.value = '';
-                input.focus();
             }
+            if (clearBtn) {
+                clearBtn.style.display = 'none';
+            }
+            if (dropdown) {
+                dropdown.style.display = 'none';
+                dropdown.innerHTML = '';
+            }
+            generateAccountStatement(null);
+        };
+
+        window.selectStmtAccount = function(accountId) {
+            const acc = accounts.find(a => a.id === accountId);
+            if (!acc) return;
+
+            selectedAccountID = acc.id;
+            window.selectedAccountID = acc.id;
+            const input = document.getElementById('stmtAccountSelector');
+            if (input) {
+                input.value = acc.name;
+            }
+            const dropdown = document.getElementById('stmtAccountDropdown');
             if (dropdown) {
                 dropdown.style.display = 'none';
             }
             window.toggleStmtClearBtn();
-            window.loadSelectedAccountStatement();
+            if (typeof updateActiveTabTitle === 'function') updateActiveTabTitle(acc.name, 'كشف حساب');
+            generateAccountStatement(acc.id);
         };
 
-        window.filterStmtAccounts = function() {
+        window.filterStmtAccounts = function(e) {
             const input = document.getElementById('stmtAccountSelector');
             const dropdown = document.getElementById('stmtAccountDropdown');
             if (!input || !dropdown) return;
             
             window.toggleStmtClearBtn();
             
-            const filter = input.value.trim().toLowerCase();
+            const rawVal = input.value;
+            const filter = rawVal.trim().toLowerCase();
             dropdown.innerHTML = '';
             
+            const cleanAr = (str) => (str || '').trim().toLowerCase()
+                .replace(/[أإآ]/g, 'ا')
+                .replace(/ة/g, 'ه')
+                .replace(/[ىي]/g, 'ي')
+                .replace(/\s+/g, ' ');
+
+            const filterClean = cleanAr(filter);
+
+            const matched = accounts.filter(a => {
+                if (!a) return false;
+                const nameClean = cleanAr(a.name);
+                const codeStr = String(a.code || '').toLowerCase();
+                const mobileStr = String(a.mobile || '').toLowerCase();
+                return nameClean.includes(filterClean) || (filter && (codeStr.includes(filter) || mobileStr.includes(filter)));
+            });
+            
+            // عند الضغط على زر Enter واختيار أول نتيجة متطابقة مباشرة
+            if (e && e.key === 'Enter') {
+                if (matched.length > 0) {
+                    window.selectStmtAccount(matched[0].id);
+                    return;
+                }
+            }
+
             if (filter === '' && document.activeElement !== input) {
                 dropdown.style.display = 'none';
                 return;
             }
             
-            const matched = accounts.filter(a => a.name && a.name.toLowerCase().includes(filter));
-            
             if (matched.length === 0) {
-                dropdown.innerHTML = '<div style="padding: 10px; color: #94a3b8; text-align: center;">لا يوجد نتائج</div>';
+                dropdown.innerHTML = '<div style="padding: 12px; color: #94a3b8; text-align: center; font-weight: bold;">⚠️ لا توجد حسابات مطابقة</div>';
             } else {
                 matched.forEach(acc => {
                     const div = document.createElement('div');
-                    div.style.cssText = 'padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: bold; transition: 0.2s;';
-                    div.textContent = acc.name;
-                    div.onmouseover = () => div.style.background = '#f8fafc';
+                    div.style.cssText = 'padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: bold; transition: 0.15s; display: flex; justify-content: space-between; align-items: center;';
+                    const codeBadge = acc.code ? `<span style="font-size:0.8rem; background:#e2e8f0; color:#475569; padding:2px 7px; border-radius:4px; font-family:monospace;">#${acc.code}</span>` : '';
+                    const phoneText = acc.mobile ? `<span style="font-size:0.8rem; color:#64748b;">📞 ${acc.mobile}</span>` : '';
+                    div.innerHTML = `<span>${acc.name}</span><div style="display:flex; gap:6px; align-items:center;">${codeBadge}${phoneText}</div>`;
+                    div.onmouseover = () => div.style.background = '#f1f5f9';
                     div.onmouseout = () => div.style.background = 'transparent';
-                    div.onclick = () => {
-                        input.value = acc.name;
-                        dropdown.style.display = 'none';
-                        window.toggleStmtClearBtn();
-                        window.loadSelectedAccountStatement();
+                    div.onclick = (ev) => {
+                        ev.stopPropagation();
+                        window.selectStmtAccount(acc.id);
                     };
                     dropdown.appendChild(div);
                 });
@@ -1170,15 +1343,37 @@
         });
 
         window.loadSelectedAccountStatement = function() {
-            const val = document.getElementById('stmtAccountSelector').value;
+            const input = document.getElementById('stmtAccountSelector');
+            if (!input) return;
+            const val = input.value.trim();
             if (!val) {
+                selectedAccountID = null;
+                window.selectedAccountID = null;
                 generateAccountStatement(null);
                 return;
             }
-            const acc = accounts.find(a => a.name === val);
+
+            const cleanAr = (str) => (str || '').trim().toLowerCase()
+                .replace(/[أإآ]/g, 'ا')
+                .replace(/ة/g, 'ه')
+                .replace(/[ىي]/g, 'ي')
+                .replace(/\s+/g, ' ');
+            const valClean = cleanAr(val);
+
+            // مطابقة ذكية: بالاسم الدقيق، أو الكود، أو الاسم بعد تنظيف الهمزات
+            let acc = accounts.find(a => a.name === val || String(a.code || '').trim() === val);
+            if (!acc) {
+                acc = accounts.find(a => cleanAr(a.name) === valClean);
+            }
+            if (!acc) {
+                acc = accounts.find(a => cleanAr(a.name).includes(valClean) || String(a.code || '').includes(val));
+            }
+
             if (acc) {
-                generateAccountStatement(acc.id);
+                window.selectStmtAccount(acc.id);
             } else {
+                selectedAccountID = null;
+                window.selectedAccountID = null;
                 generateAccountStatement(null);
             }
         };
@@ -1192,7 +1387,9 @@
                 const typedVal = selectorInput ? selectorInput.value.trim() : '';
                 
                 if (typedVal) {
-                    const matchedAcc = accounts.find(a => a.name === typedVal || String(a.code) === typedVal);
+                    const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                    const typedClean = cleanAr(typedVal);
+                    const matchedAcc = accounts.find(a => a.name === typedVal || String(a.code || '').trim() === typedVal || cleanAr(a.name) === typedClean);
                     if (matchedAcc) targetId = matchedAcc.id;
                 }
                 
@@ -1203,7 +1400,8 @@
 
             if (!targetId) {
                 document.getElementById('statementTableBody').innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 30px; font-weight: bold; color: #64748b;">الرجاء اختيار الحساب أولاً لعرض التقرير</td></tr>';
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="8" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
+                if (document.getElementById('statementTableFoot')) document.getElementById('statementTableFoot').innerHTML = '';
                 document.getElementById('stmtFinalBalance').innerText = '0.00';
                 document.getElementById('statementHeaderAccName').style.display = 'none';
                 
@@ -1220,7 +1418,10 @@
             selectedAccountID = acc.id;
             window.selectedAccountID = acc.id;
 
-            if (document.getElementById('stmtAccountSelector')) document.getElementById('stmtAccountSelector').value = acc.name;
+            if (document.getElementById('stmtAccountSelector')) {
+                document.getElementById('stmtAccountSelector').value = acc.name;
+                window.toggleStmtClearBtn();
+            }
             if (document.getElementById('statementHeaderAccName')) {
                 document.getElementById('statementHeaderAccName').innerText = acc.name;
                 document.getElementById('statementHeaderAccName').style.display = 'block';
@@ -1242,16 +1443,13 @@
 
             // تحديث خانة المجموع السابقة لتفادي ترحيل الأعمدة
 
-            const prevBalanceRow = document.querySelector('#statementModal tr[style*="background-color: #e9ecef"]');
-
-            if (prevBalanceRow) {
-
-                 prevBalanceRow.querySelectorAll('td').forEach((td, i) => {
-
-                     td.style.display = statementColumnVisibility[i] ? '' : 'none';
-
-                 });
-
+            if (typeof statementColumnVisibility !== 'undefined' && Array.isArray(statementColumnVisibility)) {
+                const prevBalanceRow = document.querySelector('#stmtMasterTable tr[style*="background-color: #f1f5f9"]');
+                if (prevBalanceRow) {
+                    prevBalanceRow.querySelectorAll('td').forEach((td, i) => {
+                        td.style.display = statementColumnVisibility[i] ? '' : 'none';
+                    });
+                }
             }
 
             // 1. تجميع الحركات الخاصة بالحساب
@@ -1292,8 +1490,11 @@
                 if (isInvoice) {
 
                     const isReturn = t.type.includes('مرتجع');
-
-                    const key = (isReturn ? "RET_" : "") + t.type.split(' ')[0] + "_" + t.invoiceId; 
+                    const isSale = t.type.includes('بيع');
+                    const isPurchase = t.type.includes('شراء');
+                    const prefix = isReturn ? "RET_" : "INV_";
+                    const cat = isSale ? "SALE_" : (isPurchase ? "PURCH_" : (t.type.split(' ')[0] + "_"));
+                    const key = prefix + cat + t.invoiceId; 
 
                     if (!ivMap[key]) {
                         ivMap[key] = {
@@ -1315,11 +1516,12 @@
 
                     ivMap[key].total += (parseFloat(t.total) || 0);
 
-                    if (t.isInvoiceHead) {
-
-                        ivMap[key].paid = parseFloat(t.paidAmount) || 0;
+                    if (t.isInvoiceHead || t.paidAmount !== undefined || t.paid !== undefined) {
+                        const pVal = parseFloat(t.paidAmount != null ? t.paidAmount : (t.paid != null ? t.paid : 0));
+                        if (!isNaN(pVal)) {
+                            ivMap[key].paid = pVal;
+                        }
                         if (t.editDate || t.updatedAt) ivMap[key].editDate = t.editDate || t.updatedAt;
-
                     }
 
                 } else {
@@ -1344,6 +1546,9 @@
             });
 
             // إعادة الفلترة للعرض بعد التجميع
+
+            let priorDebit = 0;
+            let priorCredit = 0;
 
             if (fromDate) {
 
@@ -1381,17 +1586,20 @@
 
                 });
 
+                priorDebit = (runningBalance > 0) ? runningBalance : 0;
+                priorCredit = (runningBalance < 0) ? Math.abs(runningBalance) : 0;
+
                 rowsHTML += `
-                    <tr style="background-color: #e9ecef; font-weight:bold;">
+                    <tr style="background-color: #f1f5f9; font-weight:bold; border-bottom: 2px solid #cbd5e1;">
+                        <td>${fromDate}</td>
                         <td>-</td>
                         <td>-</td>
+                        <td style="font-weight:900; color:#334155;">رصيد سابق (حتى ${fromDate})</td>
                         <td>-</td>
-                        <td>رصيد سابق</td>
+                        <td>-</td>
+                        <td style="font-weight:900; color:${runningBalance >= 0 ? '#c0392b' : 'var(--main-green)'};">${runningBalance.toFixed(2)}</td>
                         <td>-</td>
                         <td>-</td>
-                        <td style="font-weight:bold;">${runningBalance.toFixed(2)}</td>
-                        <td>-</td>
-                        <td>حتى ${fromDate}</td>
                         <td>-</td>
                     </tr>`;
 
@@ -1400,19 +1608,21 @@
             } else {
 
                 rowsHTML += `
-                    <tr style="background-color: #fff3cd;">
+                    <tr style="background-color: #fff3cd; font-weight:bold; border-bottom: 2px solid #fde047;">
                         <td>${acc.balanceDate || '-'}</td>
                         <td>-</td>
                         <td>-</td>
-                        <td>رصيد افتتاحي</td>
-                        <td style="color:#c0392b;">${openDebit > 0 ? openDebit.toFixed(2) : '-'}</td>
-                        <td style="color:var(--main-green);">${openCredit > 0 ? openCredit.toFixed(2) : '-'}</td>
-                        <td style="font-weight:bold;">${runningBalance.toFixed(2)}</td>
+                        <td style="font-weight:900; color:#854d0e;">رصيد افتتاحي (بداية المدة)</td>
+                        <td style="color:#c0392b; font-weight:bold;">${openDebit > 0 ? openDebit.toFixed(2) : '-'}</td>
+                        <td style="color:var(--main-green); font-weight:bold;">${openCredit > 0 ? openCredit.toFixed(2) : '-'}</td>
+                        <td style="font-weight:900; color:${runningBalance >= 0 ? '#c0392b' : 'var(--main-green)'};">${runningBalance.toFixed(2)}</td>
                         <td>-</td>
-                        <td>بداية المدة</td>
+                        <td>-</td>
                         <td>-</td>
                     </tr>`;
 
+                priorDebit = openDebit;
+                priorCredit = openCredit;
                 displayTrans = groupedTrans;
 
                 if (toDate) displayTrans = displayTrans.filter(t => t.dateISO <= toDate);
@@ -1424,6 +1634,8 @@
             let periodDebit = 0;
 
             let periodCredit = 0;
+
+            let filteredRunningBal = runningBalance;
 
             displayTrans.forEach(t => {
 
@@ -1499,6 +1711,10 @@
 
                     periodCredit += credit;
 
+                    filteredRunningBal += (debit - credit);
+
+                    const rowDisplayBalance = (typeFilter === 'all') ? runningBalance : filteredRunningBal;
+
                     rowsHTML += `
                         <tr data-trans-id="${t.invoiceId || ''}" data-type="${t.type}" data-total="${t.total}" onclick="loadStatementDetails('${t.invoiceId || ''}', '${t.type}', this)">
                             <td>${t.dateISO || '-'}</td>
@@ -1507,7 +1723,7 @@
                             <td>${t.type}</td>
                             <td style="color:#c0392b; font-weight:bold;">${debit > 0 ? debit.toFixed(2) : '-'}</td>
                             <td style="color:var(--main-green); font-weight:bold;">${credit > 0 ? credit.toFixed(2) : '-'}</td>
-                            <td style="font-weight:bold; background:rgba(0,0,0,0.02);">${runningBalance.toFixed(2)}</td>
+                            <td style="font-weight:bold; background:rgba(0,0,0,0.02); color:${rowDisplayBalance >= 0 ? '#c0392b' : 'var(--main-green)'};">${rowDisplayBalance.toFixed(2)}</td>
                             <td>${t.invoiceId || '-'}</td>
                             <td>${t.method || 'نقدي'}</td>
                             <td>${t.warehouse || (window.currentUser ? window.currentUser.warehouseName : 'المخزن الرئيسي')}</td>
@@ -1516,9 +1732,47 @@
                 }
             });
 
-            // عرض البيانات في النافذة
+            // إعداد شريط الإجماليات الختامي (الخيار 2: سطر لحركات الفترة وسطر للرصيد الختامي الشامل)
+            const netPeriod = periodDebit - periodCredit;
+            const totalGrandDebit = priorDebit + periodDebit;
+            const totalGrandCredit = priorCredit + periodCredit;
             const finalBalance = runningBalance;
-            
+
+            const footEl = document.getElementById('statementTableFoot');
+            if (footEl) {
+                footEl.innerHTML = `
+                    <!-- 1. سطر حركات الفترة المعروضة فقط -->
+                    <tr style="background: #f8fafc; font-weight: 800; border-top: 2px solid #cbd5e1; border-bottom: 1px dashed #cbd5e1; font-size: 0.88rem;">
+                        <td colspan="4" style="text-align: right; color: #475569; padding: 7px 12px;">
+                            📊 حركات الفترة المعروضة:
+                        </td>
+                        <td style="color:#c0392b; font-weight:800; text-align: center;">${periodDebit > 0 ? periodDebit.toFixed(2) : '0.00'}</td>
+                        <td style="color:var(--main-green); font-weight:800; text-align: center;">${periodCredit > 0 ? periodCredit.toFixed(2) : '0.00'}</td>
+                        <td style="font-weight:800; text-align: center; color: ${netPeriod >= 0 ? '#c0392b' : 'var(--main-green)'};">
+                            ${netPeriod.toFixed(2)}
+                        </td>
+                        <td colspan="3" style="color: #64748b; font-size: 0.8rem; text-align: center;">
+                            صافي حركات الفترة: <b>${Math.abs(netPeriod).toFixed(2)} ${netPeriod >= 0 ? 'مدين (عليه)' : 'دائن (له)'}</b>
+                        </td>
+                    </tr>
+                    <!-- 2. سطر الرصيد النهائي الشامل (شاملاً الرصيد السابق) -->
+                    <tr style="background: #e2e8f0; font-weight: 900; border-bottom: 2.5px solid #0f172a; font-size: 0.95rem;">
+                        <td colspan="4" style="text-align: right; color: #0f172a; padding: 9px 12px; font-weight: 900;">
+                            🏁 الرصيد الختامي الإجمالي (شاملاً الرصيد السابق):
+                        </td>
+                        <td style="color:#b91c1c; font-weight:900; text-align: center; font-size: 1rem;">${totalGrandDebit.toFixed(2)}</td>
+                        <td style="color:#047857; font-weight:900; text-align: center; font-size: 1rem;">${totalGrandCredit.toFixed(2)}</td>
+                        <td style="font-weight:900; text-align: center; font-size: 1.05rem; background: #ffffff; color: ${finalBalance >= 0 ? '#b91c1c' : '#047857'}; border-left: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;">
+                            ${Math.abs(finalBalance).toFixed(2)}
+                        </td>
+                        <td colspan="3" style="color: #0f172a; font-size: 0.9rem; text-align: center; font-weight: 900;">
+                            الرصيد النهائي: <span style="color: ${finalBalance >= 0 ? '#b91c1c' : '#047857'};">${Math.abs(finalBalance).toFixed(2)} ${finalBalance >= 0 ? 'مدين (عليه)' : 'دائن (له)'}</span>
+                        </td>
+                    </tr>
+                `;
+            }
+
+            // عرض البيانات في النافذة
             document.getElementById('statementHeaderAccName').innerText = acc.name;
             const balBox = document.getElementById('stmtBalanceBox');
             const balText = document.getElementById('stmtFinalBalance');
@@ -1532,7 +1786,7 @@
             }
 
             document.getElementById('statementTableBody').innerHTML = rowsHTML;
-            document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="7" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
+            document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
             document.getElementById('stmtActionPrintDoc').disabled = true;
             document.getElementById('stmtActionEdit').disabled = true;
             document.getElementById('stmtActionDelete').disabled = true;
@@ -1564,19 +1818,32 @@
 
             // الحركات المالية (قبض وصرف) لا تحتوي على أصناف
             if (type && (type.includes('قبض') || type.includes('صرف'))) {
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="9" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية)</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية)</td></tr>';
                 return;
             }
             
             if (!invoiceId) {
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="9" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف لهذه الحركة</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف لهذه الحركة</td></tr>';
                 return;
             }
             
-            let invoiceItems = transactions.filter(t => String(t.invoiceId) === String(invoiceId) && t.type === type && t.product);
+            const matchesStmtType = (tType, targetType) => {
+                if (!targetType || !tType) return true;
+                if (typeof window.isMatchingInvoiceType === 'function') {
+                    return window.isMatchingInvoiceType(tType, targetType);
+                }
+                const clean = (s) => String(s || '').replace(/[^\u0621-\u064A]/g, '').trim();
+                return clean(tType) === clean(targetType) || clean(tType).includes(clean(targetType)) || clean(targetType).includes(clean(tType));
+            };
+
+            let invoiceItems = transactions.filter(t => String(t.invoiceId) === String(invoiceId) && matchesStmtType(t.type, type) && t.product);
             
             if (invoiceItems.length === 0) {
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="9" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية أو قيد)</td></tr>';
+                invoiceItems = transactions.filter(t => String(t.invoiceId) === String(invoiceId) && matchesStmtType(t.type, type));
+            }
+            
+            if (invoiceItems.length === 0) {
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية أو قيد)</td></tr>';
                 return;
             }
 
@@ -1676,45 +1943,10 @@
                     else alert('دالة التعديل غير متوفرة حالياً.');
                 }
             } else if (action === 'delete') {
-                // Modern Delete Modal
-                const overlay = document.createElement('div');
-                overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);  z-index: 10000; display: flex; align-items: center; justify-content: center; opacity: 0; transition: 0.3s;';
-                
-                const box = document.createElement('div');
-                box.style.cssText = 'background: white; padding: 30px; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); text-align: center; max-width: 400px; width: 90%; transform: scale(0.9); transition: 0.3s; font-family: "Cairo", sans-serif;';
-                
-                box.innerHTML = `
-                    <div style="font-size: 3rem; margin-bottom: 15px;">⚠️</div>
-                    <h3 style="margin: 0 0 10px 0; color: #1e293b; font-weight: 900; font-size: 1.5rem;">تأكيد الحذف</h3>
-                    <p style="color: #64748b; margin-bottom: 25px; font-weight: bold; line-height: 1.6;">هل أنت متأكد من حذف هذه الحركة نهائياً؟<br>لا يمكن التراجع عن هذا الإجراء.</p>
-                    <div style="display: flex; gap: 10px; justify-content: center;">
-                        <button id="stmtConfirmDeleteBtn" style="padding: 10px 20px; background: #ef4444; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(239, 68, 68, 0.3);">نعم، احذف</button>
-                        <button id="stmtCancelDeleteBtn" style="padding: 10px 20px; background: #f1f5f9; color: #475569; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s;">إلغاء</button>
-                    </div>
-                `;
-                
-                overlay.appendChild(box);
-                document.body.appendChild(overlay);
-                
-                setTimeout(() => {
-                    overlay.style.opacity = '1';
-                    box.style.transform = 'scale(1)';
-                }, 10);
-                
-                const close = () => {
-                    overlay.style.opacity = '0';
-                    box.style.transform = 'scale(0.9)';
-                    setTimeout(() => overlay.remove(), 300);
-                };
-                
-                document.getElementById('stmtCancelDeleteBtn').onclick = close;
-                document.getElementById('stmtConfirmDeleteBtn').onclick = () => {
-                    close();
-                    if (typeof deleteInvoiceGlobal === 'function') {
-                        deleteInvoiceGlobal(id, type);
-                    }
-                    setTimeout(() => { if (typeof generateAccountStatement === 'function') generateAccountStatement(); }, 1000);
-                };
+                if (typeof deleteInvoiceGlobal === 'function') {
+                    deleteInvoiceGlobal(id, type);
+                }
+                setTimeout(() => { if (typeof generateAccountStatement === 'function') generateAccountStatement(); }, 1200);
             }
         };
 
@@ -1798,12 +2030,42 @@
             if (!tableEl) return alert('❌ لا يوجد بيانات للطباعة');
 
             // نسخ الجدول وتنظيفه من أزرار الاختيار والتحديد
-
             const tableClone = tableEl.cloneNode(true);
 
-            tableClone.querySelectorAll('input[type="radio"], input[type="checkbox"], button').forEach(el => el.remove());
+            // إزالة عمود التحديد (الراديو) من كل صف لضمان تطابق الأعمدة المطبوعة
+            tableClone.querySelectorAll('tr').forEach(tr => {
+                const radioInput = tr.querySelector('input[type="radio"], input[name="accSelect"]');
+                if (radioInput && radioInput.closest('td')) {
+                    radioInput.closest('td').remove();
+                } else if (tr.children.length === accountsColumnOrder.length && accountsColumnOrder[0] === 10) {
+                    tr.children[0].remove();
+                }
+            });
+            tableClone.querySelectorAll('input[type="checkbox"], button').forEach(el => el.remove());
 
             const rowsHTML = tableClone.innerHTML;
+
+            // توليد رؤوس الأعمدة المطبوعة ديناميكياً بنفس ترتيب الشاشة
+            const colTitles = {
+                0: 'م',
+                1: 'كود الحساب',
+                2: 'اسم الحساب',
+                3: 'طبيعة الحساب',
+                4: 'التصنيف',
+                5: 'مدين (عليه)',
+                6: 'دائن (له)',
+                7: 'إجمالي البيع',
+                8: 'آخر تاريخ قبض',
+                9: 'آخر حركة'
+            };
+
+            let printTheadHtml = '<tr>';
+            accountsColumnOrder.forEach(colId => {
+                if (colId === 10) return; // تخطي عمود التحديد في الطباعة
+                if (!accountsColumnVisibility[colId]) return;
+                printTheadHtml += `<th>${colTitles[colId] || ''}</th>`;
+            });
+            printTheadHtml += '</tr>';
 
             // حساب الإجماليات من السطر الأخير المرئي
 
@@ -1924,31 +2186,7 @@
                     <table>
 
                         <thead>
-
-                            <tr>
-
-                                <th>#</th>
-
-                                <th>كود الحساب</th>
-
-                                <th>اسم الحساب</th>
-
-                                <th>طبيعة الحساب</th>
-
-                                <th>التصنيف</th>
-
-                                <th>مدين (عليه)</th>
-
-                                <th>دائن (له)</th>
-
-                                <th>إجمالي البيع</th>
-
-                                <th>آخر تاريخ قبض</th>
-
-                                <th>آخر حركة</th>
-
-                            </tr>
-
+                            ${printTheadHtml}
                         </thead>
 
                         <tbody>${rowsHTML}</tbody>
@@ -1981,126 +2219,6 @@
 
         }
 
-        // --- إدارة أعمدة تعديل الأسعار (Price Adj Column Manager) ---
-
-        const priceAdjColumns = [
-
-            { id: 1, name: "المسلسل (#)" },
-
-            { id: 'internal', name: "الكود الداخلي" },
-
-            { id: 2, name: "كود الصنف" },
-
-            { id: 3, name: "اسم الصنف" },
-
-            { id: 4, name: "الباركود" },
-
-            { id: 6, name: "الوحدة" },
-
-            { id: 12, name: "متوسط التكلفة" },
-
-            { id: 11, name: "آخر شراء" },
-
-            { id: 13, name: "سعر الجملة" },
-
-            { id: 10, name: "سعر القطاعي" },
-
-            { id: 'profit', name: "الربح %" },
-
-            { id: 'min', name: "أدنى سعر" },
-
-            { id: 9, name: "الرصيد" }
-
-        ];
-
-        function togglePriceAdjColumnManager() {
-
-            const manager = document.getElementById('priceAdjColumnManager');
-
-            if (manager) {
-
-                manager.classList.toggle('hidden');
-
-                if (!manager.classList.contains('hidden')) {
-
-                    initPriceAdjColumnManager();
-
-                }
-
-            }
-
-        }
-
-        function initPriceAdjColumnManager() {
-
-            const container = document.getElementById('priceAdjColumnChecklist');
-
-            if (!container) return;
-
-            let saved = getStore('priceAdjHiddenCols');
-
-            let hiddenCols = saved ? JSON.parse(saved) : [];
-
-            container.innerHTML = '';
-
-            priceAdjColumns.forEach(col => {
-
-                const isChecked = !hiddenCols.includes(String(col.id));
-
-                const div = document.createElement('div');
-
-                div.style.display = 'flex';
-
-                div.style.alignItems = 'center';
-
-                div.style.gap = '10px';
-
-                div.style.fontSize = '0.85rem';
-
-                div.style.padding = '3px 0';
-
-                div.innerHTML = `
-
-                    <input type="checkbox" id="chkColAdj${col.id}" ${isChecked ? 'checked' : ''} 
-
-                        onchange="applyPriceAdjColumnVisibility()">
-
-                    <label for="chkColAdj${col.id}" style="cursor:pointer; user-select:none; font-weight:bold;">${col.name}</label>
-
-                `;
-
-                container.appendChild(div);
-
-            });
-
-        }
-
-        function applyPriceAdjColumnVisibility() {
-
-            let hiddenCols = [];
-
-            priceAdjColumns.forEach(col => {
-
-                const chk = document.getElementById(`chkColAdj${col.id}`);
-
-                const isVisible = chk ? chk.checked : true;
-
-                const cells = document.querySelectorAll(`.col-adj-${col.id}`);
-
-                cells.forEach(c => {
-
-                    c.style.display = isVisible ? '' : 'none';
-
-                });
-
-                if (!isVisible) hiddenCols.push(String(col.id));
-
-            });
-
-            setStore('priceAdjHiddenCols', JSON.stringify(hiddenCols));
-
-        }
-
         // --- تصدير قائمة الحسابات إلى إكسيل ---
 
         function exportAccountsToExcel() {
@@ -2122,30 +2240,49 @@
                 const typeLabels = { client: 'عميل', supplier: 'مورد', delegate: 'مندوب', mixed: 'عميل ومورد', other: 'أخرى' };
                 const exportData = [];
 
+                const cleanArabicStr = (str) => (str || '').trim().toLowerCase()
+                    .replace(/[أإآ]/g, 'ا')
+                    .replace(/ة/g, 'ه')
+                    .replace(/[ىي]/g, 'ي')
+                    .replace(/\s+/g, ' ');
+
                 filtered.forEach((acc, idx) => {
                     let initialDebit = parseFloat(acc.debit) || 0;
                     let initialCredit = parseFloat(acc.credit) || 0;
                     let currentBalance = getAccountBalance(acc.name);
                     let totalSales = 0;
 
-                    const accTrans = transactions.filter(t => t.partner === acc.name);
+                    const targetAccNameClean = cleanArabicStr(acc.name);
+                    const targetAccCode = (acc.code || '').toString().trim();
+
+                    const accTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => {
+                        if (!t) return false;
+                        if (t.partner === acc.name) return true;
+                        if (targetAccNameClean && cleanArabicStr(t.partner) === targetAccNameClean) return true;
+                        if (targetAccCode && (t.partnerCode === targetAccCode || t.accountCode === targetAccCode)) return true;
+                        return false;
+                    });
+
                     accTrans.forEach(t => {
-                        let val = parseFloat(t.total || t.price) || 0;
-                        if (t.type && t.type.includes('بيع') && !t.type.includes('مرتجع')) totalSales += val;
+                        const transType = (t.type || '');
+                        const val = parseFloat(t.total !== undefined ? t.total : (t.price || 0)) || 0;
+                        const isSale = transType.includes('بيع') && !transType.includes('مرتجع');
+                        const isSaleReturn = transType.includes('مرتجع') && (transType.includes('بيع') || transType.includes('مبيعات'));
+                        if (isSale) totalSales += val;
+                        else if (isSaleReturn) totalSales -= val;
                     });
 
                     exportData.push({
                         "م": idx + 1,
-                        "اسم الحساب": acc.name || '',
                         "كود الحساب": acc.code || '---',
-                        "نوع الحساب": typeLabels[acc.type] || acc.type || 'عام',
+                        "اسم الحساب": acc.name || '',
+                        "مدين (عليه)": currentBalance > 0 ? currentBalance.toFixed(2) : '0.00',
+                        "دائن (له)": currentBalance < 0 ? Math.abs(currentBalance).toFixed(2) : '0.00',
+                        "إجمالي البيع": totalSales.toFixed(2),
+                        "طبيعة الحساب": typeLabels[acc.type] || acc.type || 'عام',
                         "التصنيف": acc.category || 'عام',
                         "رقم الهاتف": acc.phone || '---',
-                        "العنوان": acc.address || '---',
-                        "مدين (عليه)": initialDebit.toFixed(2),
-                        "دائن (له)": initialCredit.toFixed(2),
-                        "الرصيد الحالى": currentBalance.toFixed(2),
-                        "إجمالي المبيعات": totalSales.toFixed(2)
+                        "العنوان": acc.address || '---'
                     });
                 });
 
@@ -2365,5 +2502,11 @@
             reader.readAsArrayBuffer(file);
         }
 
+        window.renderAccountsTable = renderAccountsTable;
+        window.selectAccountRow = selectAccountRow;
+        window.editSelectedAccount = editSelectedAccount;
+        window.deleteSelectedAccount = deleteSelectedAccount;
+        window.printAccountStatement = printAccountStatement;
         window.exportAccountsToExcel = exportAccountsToExcel;
         window.importAccountsFromExcel = importAccountsFromExcel;
+

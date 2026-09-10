@@ -223,38 +223,262 @@
             background-color: #922b21;
         }
 
-        /* تخصيص لقسم تحليل المبيعات (Sales Analysis) */
-        .analysis-theme .products-panel {
-            border-top: 5px solid #117864;
+        /* تخصيص لقسم تحليل المبيعات (Sales Analysis - Modern Luxury) */
+        #analysis-section,
+        body #analysis-section,
+        body.has-wallpaper #analysis-section,
+        body.has-wallpaper #analysis-section.section-view,
+        body.dark-mode.has-wallpaper #analysis-section,
+        body.dark-mode.has-wallpaper #analysis-section.section-view {
+            background: #f1f5f9 !important;
+            background-color: #f1f5f9 !important;
+            opacity: 1 !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            width: 100vw !important;
+            max-width: 100vw !important;
+            min-width: 100vw !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+        }
+
+        body.dark-mode #analysis-section,
+        body.dark-mode.has-wallpaper #analysis-section {
+            background: #0f172a !important;
+            background-color: #0f172a !important;
+        }
+
+        #analysis-section .products-panel,
+        body #analysis-section .products-panel,
+        body.has-wallpaper #analysis-section .products-panel,
+        body.dark-mode.has-wallpaper #analysis-section .products-panel {
+            background: #f1f5f9 !important;
+            background-color: #f1f5f9 !important;
+            border-radius: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            box-shadow: none !important;
+            border: none !important;
+            border-top: none !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+        }
+
+        body.dark-mode #analysis-section .products-panel,
+        body.dark-mode.has-wallpaper #analysis-section .products-panel {
+            background: #0f172a !important;
+            background-color: #0f172a !important;
+        }
+
+        /* مؤشر التحديد الدائري الأملس الفاخر (Smooth Circular Radio Indicator) */
+        .an-radio-circle {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #cbd5e1;
+            background: #ffffff;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+            box-sizing: border-box;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .an-row {
+            cursor: pointer !important;
+            transition: background-color 0.15s ease !important;
+            user-select: none;
+        }
+
+        .an-row:hover {
+            background-color: #f8fafc !important;
+        }
+
+        .an-row:hover .an-radio-circle {
+            border-color: #6366f1;
+            transform: scale(1.12);
+        }
+
+        /* حالة الصف المختار - إضاءة ناعمة وتحديد الدائرة */
+        .an-row.selected-row {
+            background-color: #eef2ff !important;
+            border-right: 4px solid #4f46e5 !important;
+            box-shadow: inset 0 0 10px rgba(79, 70, 229, 0.08);
+        }
+
+        .an-row.selected-row .an-radio-circle {
+            border-color: #4f46e5;
+            background: #4f46e5;
+            box-shadow: 0 0 0 3.5px rgba(79, 70, 229, 0.25);
+            transform: scale(1.08);
+        }
+
+        .an-row.selected-row .an-radio-circle::after {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #ffffff;
+            display: block;
+            animation: anRadioPop 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes anRadioPop {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        body.dark-mode .an-row.selected-row {
+            background-color: #1e1b4b !important;
+            border-right: 4px solid #818cf8 !important;
+        }
+
+        body.dark-mode .an-row.selected-row .an-radio-circle {
+            border-color: #818cf8;
+            background: #818cf8;
+            box-shadow: 0 0 0 3.5px rgba(129, 140, 248, 0.3);
+        }
+
+        body.dark-mode .an-radio-circle {
+            border-color: #475569;
+            background: #1e293b;
+        }
+
+        .an-btn-mode {
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+        }
+
+        .an-btn-mode:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .an-btn-mode.active {
+            background: linear-gradient(135deg, #4f46e5, #4338ca) !important;
+            color: white !important;
+            border: none !important;
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35) !important;
         }
 
         .profit-header {
-            background-color: #16a085 !important;
-            color: white;
+            background: linear-gradient(135deg, #059669, #047857) !important;
+            color: white !important;
+            font-weight: 900 !important;
+            text-align: center;
         }
 
         .profit-col {
-            background-color: #e8f8f5;
-            color: #117864;
-            font-weight: bold;
+            font-weight: 900;
+            text-align: center;
+        }
+
+        .return-row {
+            background-color: #fef2f2 !important;
+            border-right: 4px solid #ef4444 !important;
+        }
+
+        .return-row:hover {
+            background-color: #fee2e2 !important;
         }
 
         .loss-row {
-            background-color: #fadbd8 !important;
+            background-color: #fff1f2 !important;
+            border-right: 4px solid #f43f5e !important;
         }
 
         .loss-row td {
-            color: #c0392b;
+            color: #be123c;
+        }
+
+        #analysisTableContainer table tbody tr {
+            transition: background-color 0.15s ease;
+        }
+
+        #analysisTableContainer table tbody tr:hover {
+            background-color: #f8fafc;
+        }
+
+        body.dark-mode .analysis-theme #analysisTableContainer {
+            background: #0f172a;
+            border-color: #334155;
+        }
+
+        body.dark-mode .analysis-theme table thead th {
+            background: #1e293b;
+            color: #f8fafc;
+            border-color: #334155;
         }
 
         body.dark-mode .profit-col {
-            background-color: #0e6251;
-            color: #2ecc71;
-            text-shadow: 0 0 5px rgba(46, 204, 113, 0.2);
+            color: #34d399;
+        }
+
+        body.dark-mode .return-row {
+            background-color: #450a0a !important;
         }
 
         body.dark-mode .loss-row {
-            background-color: #641e16 !important;
+            background-color: #4c0519 !important;
+        }
+
+        /* دعم المظهر الليلي الفاخر لكافة بطاقات وعناصر قسم التحليل */
+        body.dark-mode #analysis-section .panel-header,
+        body.dark-mode #analysis-section .adj-top-bar,
+        body.dark-mode #analysis-section #analysis-charts-area > div {
+            background: #1e293b !important;
+            border-color: #334155 !important;
+            color: #f8fafc !important;
+        }
+
+        body.dark-mode #analysis-section #anPeakHourBadge {
+            background: #431407 !important;
+            border-color: #9a3412 !important;
+            color: #fed7aa !important;
+        }
+
+        body.dark-mode #analysis-section #anTopCustomerBadge {
+            background: #052e16 !important;
+            border-color: #166534 !important;
+            color: #bbf7d0 !important;
+        }
+
+        body.dark-mode #analysis-section .panel-header h2 {
+            color: #f8fafc !important;
+        }
+
+        body.dark-mode #analysis-section .panel-header span {
+            color: #94a3b8 !important;
+        }
+
+        body.dark-mode #analysis-section #anSearchInput {
+            color: #f8fafc !important;
+        }
+
+        body.dark-mode #analysis-section select {
+            background: #1e293b !important;
+            color: #f8fafc !important;
+        }
+
+        body.dark-mode #analysis-section select option {
+            background: #1e293b;
+            color: #f8fafc;
+        }
+
+        body.dark-mode #analysis-section table tbody td {
+            color: #f8fafc;
+            border-color: #334155;
+        }
+
+        body.dark-mode #analysis-section table tbody tr:hover {
+            background-color: #1e293b !important;
         }
 
         /* --- تنسيقات قسم الإعدادات --- */

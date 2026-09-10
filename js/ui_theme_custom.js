@@ -26,17 +26,23 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             const daysUsedEl = document.getElementById('modalSubDaysUsed');
             const transferPhoneEl = document.getElementById('modalSubTransferPhone');
 
-            if (displayHwid) displayHwid.innerText = hwid;
+            const displayMachineId = document.getElementById('displayMachineId');
+
+            if (typeof window.updateUnifiedHwidDisplay === 'function') {
+                window.updateUnifiedHwidDisplay(hwid);
+            } else {
+                if (displayHwid) displayHwid.innerText = hwid;
+                if (displayMachineId) displayMachineId.innerText = hwid;
+                if (hwidEl) hwidEl.innerText = hwid;
+            }
 
             // تمييز كارت الباقة النشط
             const oldPlan = window.currentBayanPlanUIState || 'باقة نسخة المجانية';
             window.currentBayanPlanUIState = plan;
 
-            // إذا انتقل المستخدم من النسخة المجانية إلى باقة مدفوعة، نسجل تاريخ بداية الاشتراك الفعلي
             if (oldPlan === 'باقة نسخة المجانية' && plan !== 'باقة نسخة المجانية') {
                 setStore('bayan_paid_start_date', new Date().toISOString());
             }
-            // إذا كان المستخدم أصلاً على باقة مدفوعة ولم نسجل تاريخ البدء بعد
             if (plan !== 'باقة نسخة المجانية' && !getStore('bayan_paid_start_date')) {
                 setStore('bayan_paid_start_date', new Date().toISOString());
             }
@@ -46,9 +52,6 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             if (activeCard) activeCard.classList.add('active-plan');
 
             if (!hwidEl || !planEl || !countEl) return;
-
-            // عرض أول 8 أرقام من HWID
-            hwidEl.innerText = String(hwid).substring(0, 8);
             planEl.innerText = plan;
 
             // حساب تاريخ التفعيل والأيام المستخدمة
@@ -283,6 +286,15 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                         const cost = p ? (parseFloat(p.cost) || 0) : 0;
                         totalCost += cost * (parseFloat(t.qty) || 0);
                     }
+                } else if (t.type && t.type.includes('مرتجع بيع')) {
+                    totalSales -= parseFloat(t.total) || 0;
+                    if (t.profit !== undefined && t.profit !== null && t.profit !== '') {
+                        totalCost -= Math.max(0, (parseFloat(t.total) || 0) - Math.abs(parseFloat(t.profit) || 0));
+                    } else {
+                        const p = productsDB.find(prod => prod.name === t.product);
+                        const cost = p ? (parseFloat(p.cost) || 0) : 0;
+                        totalCost -= cost * (parseFloat(t.qty) || 0);
+                    }
                 }
                 if (t.type === 'قبض' && !t.isSale) {
                     totalReceiptsOther += parseFloat(t.total) || 0;
@@ -453,6 +465,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 const base64 = e.target.result;
                 try {
                     setStore('bayan_business_logo', base64);
+                    setStore('bayan_user_confirmed_custom_logo', 'true');
                     updateLogoDisplays(base64);
                     // عرض تنبيه نجاح (إذا كانت الدالة موجودة)
                     if (typeof showToast === 'function') showToast("تم تحديث الشعار بنجاح ✅");
@@ -486,8 +499,39 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                     settingsPreview.style.backgroundImage = `url(${src})`;
                     settingsPreview.innerHTML = '';
                 }
+            } else {
+                if (headerLogo) {
+                    headerLogo.src = '';
+                    headerLogo.style.display = 'none';
+                }
+                if (placeholder) placeholder.style.display = 'block';
+
+                if (dashboardLogo) {
+                    dashboardLogo.style.backgroundImage = 'none';
+                    dashboardLogo.innerHTML = '<span style="font-size: 2rem;">🏪</span>';
+                }
+
+                if (settingsPreview) {
+                    settingsPreview.style.backgroundImage = 'none';
+                    settingsPreview.innerHTML = '<span style="font-size: 3rem; opacity: 0.25;">🏢</span>';
+                }
             }
         }
+
+        window.removeBusinessLogo = function() {
+            try {
+                if (typeof removeStore === 'function') removeStore('bayan_business_logo');
+                if (window.AppStore) delete window.AppStore['bayan_business_logo'];
+                updateLogoDisplays(null);
+                if (window.BayanNetworkHub && typeof window.BayanNetworkHub.pushLocalDbToServer === 'function') {
+                    window.BayanNetworkHub.pushLocalDbToServer();
+                }
+                if (typeof showToast === 'function') showToast("تم حذف الشعار بنجاح ✅");
+                else alert("تم حذف الشعار بنجاح ✅");
+            } catch(e) {
+                console.error("Error removing business logo:", e);
+            }
+        };
 
         // --- نظام مغير الخلفيات (Wallpaper Logic) المطوّر ---
         function toggleWallpaperMenu() {
@@ -745,16 +789,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
 
             // تهيئة رقم الجهاز الحديث
             const hwid = await getUniqueHWID();
-
-            // تحديث العرض في قسم "حول النظام" المطور
-            const mainHwidEl = document.getElementById('displayHwid');
-            if (mainHwidEl) mainHwidEl.innerText = hwid;
-
-            // تحديث العرض القديم (Machine ID) للتوافق
-            const display = document.getElementById('displayMachineId');
-            if (display) display.innerText = hwid;
-
-            // checkAccess(); removed redundant call
+            updateUnifiedHwidDisplay(hwid);
 
             // تحديث قائمة التصنيفات في المخزن عند البداية لضمان عمل الفلتر
             setTimeout(() => {
@@ -762,9 +797,49 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             }, 1500);
         }
 
-        // --- توليد رقم فريد للجهاز (Machine ID) ---
+        // تحديث وعرض كود الجهاز الموحد للمنظومة بالكامل
+        function updateUnifiedHwidDisplay(customHwid) {
+            let hwid = customHwid;
+            const isPairedClient = (typeof BayanNetworkHub !== 'undefined' && !BayanNetworkHub.isMasterServer);
+            if (!hwid || hwid === 'LOCAL_DEVICE' || hwid === '---') {
+                if (isPairedClient) {
+                    hwid = getStore('bayan_master_hwid');
+                }
+                if (!hwid) hwid = getStore('bayan_hwid') || '---';
+            }
+
+            const mainHwidEl = document.getElementById('displayHwid');
+            if (mainHwidEl) mainHwidEl.innerText = hwid;
+
+            const display = document.getElementById('displayMachineId');
+            if (display) display.innerText = hwid;
+
+            const hwidEl = document.getElementById('modalSubHwid');
+            if (hwidEl) hwidEl.innerText = hwid;
+
+            // توضيح شارة اقتران الجهاز بالماستر
+            const subNoticeEl = document.getElementById('unifiedHwidNotice');
+            if (isPairedClient && hwid && !hwid.includes('جاري') && !hwid.includes('---')) {
+                if (!subNoticeEl && display && display.parentElement) {
+                    const badge = document.createElement('div');
+                    badge.id = 'unifiedHwidNotice';
+                    badge.style.cssText = 'display:inline-flex; align-items:center; gap:4px; font-size:0.75rem; color:#047857; background:#d1fae5; padding:2px 8px; border-radius:12px; margin-right:6px; font-weight:bold;';
+                    badge.innerHTML = '💻 كود ترخيص المنظومة (مقترن بالماستر) ✓';
+                    display.parentElement.appendChild(badge);
+                }
+            } else if (!isPairedClient && subNoticeEl) {
+                subNoticeEl.remove();
+            }
+        }
+        window.updateUnifiedHwidDisplay = updateUnifiedHwidDisplay;
+
+        // --- توليد وقراءة كود ترخيص المنظومة الموحد (Machine ID) ---
         function getMachineId() {
-            return getStore('bayan_hwid') || 'LOCAL_DEVICE';
+            if (typeof BayanNetworkHub !== 'undefined' && !BayanNetworkHub.isMasterServer) {
+                const masterHwid = getStore('bayan_master_hwid');
+                if (masterHwid) return masterHwid;
+            }
+            return getStore('bayan_master_hwid') || getStore('bayan_hwid') || 'LOCAL_DEVICE';
         }
 
         function requestActivation(plan, price) {
@@ -802,9 +877,9 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '1.0.3';
+            const version = window.appVersion || '1.0.5';
 
-            const message = `السلام عليكم\nأريد الاشتراك في Bayan POS\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة: ${plan}\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ.`;
+            const message = `السلام عليكم\nأريد الاشتراك في Bayan POS Fashion (بَيَان فاشون للملابس والأحذية)\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة المطلوبة: ${plan}\nالمبلغ: ${price} ج.م\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ وجاري انتظار كود التفعيل.`;
             
             const whatsappUrl = `https://wa.me/201006825905?text=${encodeURIComponent(message)}`;
 

@@ -5,7 +5,7 @@
             align-items: stretch;
             justify-content: stretch;
             z-index: 10005 !important;
-            backdrop-filter: blur(8px);
+            background: rgba(15, 23, 42, 0.75);
         }
 
         .bayan-modal-content {
@@ -556,25 +556,79 @@
         }
 
         #adjustment-section table tbody tr:hover td,
-        #adjustment-section table tbody tr:hover span,
-        #adjustment-section table tbody tr:hover b,
         #adjTableBody tr:hover td,
-        #adjTableBody tr:hover span,
-        #adjTableBody tr:hover b,
         #historyTableBody tr:hover td,
+        #historyTableBody tr.selected-row-gold td,
+        #inquiryVariantsTableBody tr:hover td,
+        #inquiryWarehouseStockTableBody tr:hover td,
+        #inquiryUnitsTableBody tr:hover td {
+            background: transparent !important;
+            color: #ffffff !important;
+        }
+
         #historyTableBody tr:hover span,
         #historyTableBody tr:hover b,
-        #historyTableBody tr.selected-row-gold td,
         #historyTableBody tr.selected-row-gold span,
         #historyTableBody tr.selected-row-gold b,
-        #inquiryVariantsTableBody tr:hover td,
-        #inquiryVariantsTableBody tr:hover span,
-        #inquiryVariantsTableBody tr:hover b,
-        #inquiryWarehouseStockTableBody tr:hover td,
-        #inquiryWarehouseStockTableBody tr:hover span,
-        #inquiryUnitsTableBody tr:hover td,
-        #inquiryUnitsTableBody tr:hover span {
+        #adjustment-section table tbody tr:hover span,
+        #adjustment-section table tbody tr:hover b,
+        #adjTableBody tr:hover span,
+        #adjTableBody tr:hover b {
             color: #ffffff !important;
+        }
+
+        /* 🌟 استعلام الأصناف: حماية ووضوح الكبسولات والبادجات عند الوقوف بالماوس */
+        #inquiryVariantsTableBody tr:hover td span,
+        #inquiryWarehouseStockTableBody tr:hover td span {
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
+        }
+
+        /* بادج المقاس عند الهوفر: كارت أبيض ناصع بخط زيتي داكن عالي التباين */
+        #inquiryVariantsTableBody tr:hover td .inquiry-variant-size-badge,
+        #inquiryVariantsTableBody tr:hover td span[style*="#ecfdf5"] {
+            background: #ffffff !important;
+            color: #065f46 !important;
+            border: 1.5px solid #10b981 !important;
+            font-weight: 900 !important;
+        }
+
+        /* بادج اللون عند الهوفر: كارت أبيض ناصع بخط أزرق كحلي داكن عالي التباين */
+        #inquiryVariantsTableBody tr:hover td .inquiry-variant-color-badge,
+        #inquiryVariantsTableBody tr:hover td span[style*="#eff6ff"] {
+            background: #ffffff !important;
+            color: #1d4ed8 !important;
+            border: 1.5px solid #60a5fa !important;
+            font-weight: 900 !important;
+        }
+
+        /* بادج الباركود القابل للنسخ عند الهوفر */
+        #inquiryVariantsTableBody tr:hover td .inquiry-barcode-badge {
+            background: #ffffff !important;
+            color: #1e3a8a !important;
+            border: 1.5px solid #93c5fd !important;
+            font-weight: 900 !important;
+        }
+
+        /* بادجات الأرصدة والكميات المتوفرة عند الهوفر: بيضاء بخط أخضر داكن واضح جداً */
+        #inquiryVariantsTableBody tr:hover td .inquiry-stock-badge.positive,
+        #inquiryVariantsTableBody tr:hover td span[style*="#dcfce7"],
+        #inquiryVariantsTableBody tr:hover td span[style*="#fef08a"],
+        #inquiryWarehouseStockTableBody tr:hover td span[style*="#dcfce7"],
+        #inquiryWarehouseStockTableBody tr:hover td span[style*="#ecfdf5"] {
+            background: #ffffff !important;
+            color: #047857 !important;
+            border: 1.5px solid #34d399 !important;
+            font-weight: 900 !important;
+        }
+
+        /* بادجات الرصيد صفر أو الكميات النافذة عند الهوفر: بيضاء/حمراء بخط أحمر داكن واضح */
+        #inquiryVariantsTableBody tr:hover td .inquiry-stock-badge.zero,
+        #inquiryVariantsTableBody tr:hover td span[style*="#fee2e2"],
+        #inquiryWarehouseStockTableBody tr:hover td span[style*="#fee2e2"] {
+            background: #fee2e2 !important;
+            color: #b91c1c !important;
+            border: 1.5px solid #f87171 !important;
+            font-weight: 900 !important;
         }
 
         #adjustment-section table tbody tr:hover td input,
@@ -1714,4 +1768,85 @@ body.dark-mode #historySummaryStatsCards > div:nth-child(4) #histCardTotalAmount
     border-color: #93c5fd;
     color: #1d4ed8;
     transform: scale(1.05);
+}
+
+/* --- بانر التنبيه الإجباري لتعميم وتوحيد الأسعار على المقاسات والألوان --- */
+.bayan-sync-banner {
+    padding: 10px 18px;
+    border-radius: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    margin: 8px 18px 4px 18px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+    z-index: 20;
+}
+
+.bayan-sync-banner.state-custom-prices {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border: 1.5px solid #3b82f6;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+}
+
+.bayan-sync-banner.state-unsynced {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1.5px solid #cbd5e1;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.bayan-sync-banner.state-synced {
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    border: 2px solid #10b981;
+    box-shadow: 0 3px 12px rgba(16, 185, 129, 0.18);
+}
+
+.bayan-sync-arrow {
+    display: inline-block;
+    font-size: 1.65rem;
+    animation: bayanArrowBounce 0.65s infinite alternate ease-in-out;
+}
+
+.bayan-sync-btn-mandatory {
+    background: linear-gradient(135deg, #ea580c, #c2410c);
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 18px;
+    font-weight: 900;
+    font-size: 0.88rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 14px rgba(234, 88, 12, 0.38);
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.bayan-sync-btn-mandatory:hover {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 6px 20px rgba(234, 88, 12, 0.48);
+}
+
+.bayan-shake {
+    animation: bayanShake 0.5s ease-in-out !important;
+}
+
+@keyframes bayanArrowBounce {
+    0% { transform: translateX(0) scale(1); }
+    100% { transform: translateX(-10px) scale(1.28); }
+}
+
+@keyframes bayanGlowPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.99); opacity: 0.88; }
+}
+
+@keyframes bayanShake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-10px); }
+    40%, 80% { transform: translateX(10px); }
 }

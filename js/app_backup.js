@@ -14,77 +14,168 @@ function restoreData(input) {
     const reader = new FileReader();
     reader.onload = async function (e) {
         try {
-            const data = JSON.parse(e.target.result);
-            
-            // تأمين العملية باستخدام المعاملات (Transaction) لحماية البيانات من الضياع
-            const tablesToTransact = [db.products, db.transactions, db.accounts, db.users, db.trash];
-            if (db.treasuryAudit) tablesToTransact.push(db.treasuryAudit);
-            if (db.auditLogs) tablesToTransact.push(db.auditLogs);
-            if (db.settings) tablesToTransact.push(db.settings);
-
-            await db.transaction('rw', tablesToTransact, async () => {
-                // 1. مسح وإعادة كتابة الجداول الأساسية
-                await db.products.clear();
-                await db.transactions.clear();
-                await db.accounts.clear();
-                await db.users.clear();
-                await db.trash.clear();
-                
-                if (data.products && data.products.length > 0) await db.products.bulkPut(data.products);
-                if (data.transactions && data.transactions.length > 0) await db.transactions.bulkPut(data.transactions);
-                if (data.accounts && data.accounts.length > 0) await db.accounts.bulkPut(data.accounts);
-                if (data.users && data.users.length > 0) await db.users.bulkPut(data.users);
-                if (data.trash && data.trash.length > 0) await db.trash.bulkPut(data.trash);
-                
-                // 2. استرجاع سجلات الخزينة والورديات وسجلات التدقيق
-                if (db.treasuryAudit) {
-                    await db.treasuryAudit.clear();
-                    if (data.treasuryAudit && data.treasuryAudit.length > 0) {
-                        await db.treasuryAudit.bulkPut(data.treasuryAudit);
-                    }
+            let data;
+            try {
+                data = JSON.parse(e.target.result);
+            } catch (parseErr) {
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'error',
+                        titleText: '❌ خطأ في قراءة الملف',
+                        msg: 'الملف المختار ليس ملف JSON صالحاً. يرجى التأكد من اختيار ملف نسخة احتياطية سليم.'
+                    });
+                } else {
+                    alert("❌ الملف المختار ليس ملف JSON صالحاً.");
                 }
-                if (db.auditLogs) {
-                    await db.auditLogs.clear();
-                    if (data.auditLogs && data.auditLogs.length > 0) {
-                        await db.auditLogs.bulkPut(data.auditLogs);
-                    }
-                }
-            });
+                if (input) input.value = '';
+                return;
+            }
 
-            // 3. استرجاع الإعدادات
-            if (data.settings) {
-                const existingMain = await db.settings.get('main') || {};
-                await db.settings.put({ ...existingMain, ...data.settings, id: 'main' });
-                setStore('pos_settings', JSON.stringify(data.settings));
+            // 🛑 فحص التحقق من سلامة وصلاحية محتوى النسخة الاحتياطية قبل أي تعديل
+            if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'error',
+                        titleText: '❌ تنسيق غير صالح',
+                        msg: 'هذا الملف لا يحتوي على بيانات نسخة احتياطية صالحة لنظام بَيَان.'
+                    });
+                } else {
+                    alert("❌ هذا الملف لا يحتوي على بيانات نسخة احتياطية صالحة لنظام بَيَان.");
+                }
+                if (input) input.value = '';
+                return;
             }
-            
-            // 4. استرجاع المخازن المتعددة والتصنيفات وإعدادات الباركود
-            if (data.warehouses && data.warehouses.length > 0) {
-                setStore('pos_warehouses', JSON.stringify(data.warehouses));
+
+            const prodCount = Array.isArray(data.products) ? data.products.length : 0;
+            const txCount = Array.isArray(data.transactions) ? data.transactions.length : 0;
+            const accCount = Array.isArray(data.accounts) ? data.accounts.length : 0;
+            const hasSettings = data.settings && typeof data.settings === 'object';
+            const hasUsers = Array.isArray(data.users) && data.users.length > 0;
+
+            if (prodCount === 0 && txCount === 0 && accCount === 0 && !hasSettings && !hasUsers) {
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'error',
+                        titleText: '❌ ملف فارغ أو غير متوافق',
+                        msg: 'الملف المختار لا يحتوي على أي أصناف أو فواتير أو حسابات تابعة لنظام بَيَان.\n\n🛡️ تم إلغاء العملية فوراً لحماية بياناتك الحالية من المسح.'
+                    });
+                } else {
+                    alert("❌ الملف المختار فارغ أو غير صالح لنظام بَيَان. تم إلغاء العملية لحماية بياناتك.");
+                }
+                if (input) input.value = '';
+                return;
             }
-            if (data.inventoryCategories && data.inventoryCategories.length > 0) {
-                setStore('bayan_inventory_categories', JSON.stringify(data.inventoryCategories));
-            }
-            if (data.barcodeLabelSettings && Object.keys(data.barcodeLabelSettings).length > 0) {
-                setStore('bayan_barcode_label_settings', JSON.stringify(data.barcodeLabelSettings));
-            }
-            if (data.discountReasons) setStore('pos_discount_reasons', JSON.stringify(data.discountReasons));
-            if (data.taxReasons) setStore('pos_tax_reasons', JSON.stringify(data.taxReasons));
-            if (data.purchaseDiscountReasons) setStore('pos_p_discount_reasons', JSON.stringify(data.purchaseDiscountReasons));
-            if (data.purchaseTaxReasons) setStore('pos_p_tax_reasons', JSON.stringify(data.purchaseTaxReasons));
+
+            // وظيفة التنفيذ الفعلي بعد تأكيد المستخدم
+            const executeRestore = async () => {
+                const tablesToTransact = [db.products, db.transactions, db.accounts, db.users, db.trash];
+                if (db.treasuryAudit) tablesToTransact.push(db.treasuryAudit);
+                if (db.auditLogs) tablesToTransact.push(db.auditLogs);
+                if (db.settings) tablesToTransact.push(db.settings);
+
+                await db.transaction('rw', tablesToTransact, async () => {
+                    // 1. مسح وإعادة كتابة الجداول الأساسية
+                    await db.products.clear();
+                    await db.transactions.clear();
+                    await db.accounts.clear();
+                    await db.users.clear();
+                    await db.trash.clear();
+                    
+                    if (data.products && data.products.length > 0) await db.products.bulkPut(data.products);
+                    if (data.transactions && data.transactions.length > 0) await db.transactions.bulkPut(data.transactions);
+                    if (data.accounts && data.accounts.length > 0) await db.accounts.bulkPut(data.accounts);
+                    if (data.users && data.users.length > 0) {
+                        // 🔒 فك تشفير رموز الـ PIN المسترجعة بسلاسة مع الحفاظ على التوافقية الكاملة
+                        const restoredUsers = data.users.map(u => {
+                            if (!u) return u;
+                            const copy = { ...u };
+                            if (copy.pin && typeof copy.pin === 'string' && copy.pin.startsWith('ENC:') && typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.deobfuscate === 'function') {
+                                copy.pin = window.BayanSecurity.deobfuscate(copy.pin.substring(4));
+                            }
+                            return copy;
+                        });
+                        await db.users.bulkPut(restoredUsers);
+                    }
+                    if (data.trash && data.trash.length > 0) await db.trash.bulkPut(data.trash);
+                    
+                    // 2. استرجاع سجلات الخزينة والورديات وسجلات التدقيق
+                    if (db.treasuryAudit) {
+                        await db.treasuryAudit.clear();
+                        if (data.treasuryAudit && data.treasuryAudit.length > 0) {
+                            await db.treasuryAudit.bulkPut(data.treasuryAudit);
+                        }
+                    }
+                    if (db.auditLogs) {
+                        await db.auditLogs.clear();
+                        if (data.auditLogs && data.auditLogs.length > 0) {
+                            await db.auditLogs.bulkPut(data.auditLogs);
+                        }
+                    }
+                });
+
+                // 3. استرجاع الإعدادات
+                if (data.settings) {
+                    const existingMain = await db.settings.get('main') || {};
+                    await db.settings.put({ ...existingMain, ...data.settings, id: 'main' });
+                    setStore('pos_settings', JSON.stringify(data.settings));
+                }
+                
+                // 4. استرجاع المخازن المتعددة والتصنيفات وإعدادات الباركود
+                if (data.warehouses && data.warehouses.length > 0) {
+                    setStore('pos_warehouses', JSON.stringify(data.warehouses));
+                }
+                if (data.inventoryCategories && data.inventoryCategories.length > 0) {
+                    setStore('bayan_inventory_categories', JSON.stringify(data.inventoryCategories));
+                }
+                if (data.barcodeLabelSettings && Object.keys(data.barcodeLabelSettings).length > 0) {
+                    setStore('bayan_barcode_label_settings', JSON.stringify(data.barcodeLabelSettings));
+                }
+                if (data.discountReasons) setStore('pos_discount_reasons', JSON.stringify(data.discountReasons));
+                if (data.taxReasons) setStore('pos_tax_reasons', JSON.stringify(data.taxReasons));
+                if (data.purchaseDiscountReasons) setStore('pos_p_discount_reasons', JSON.stringify(data.purchaseDiscountReasons));
+                if (data.purchaseTaxReasons) setStore('pos_p_tax_reasons', JSON.stringify(data.purchaseTaxReasons));
+
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'success',
+                        titleText: '✅ تم استعادة النسخة الاحتياطية بنجاح',
+                        msg: `تمت استعادة كافة البيانات بنجاح!\n• عدد الأصناف: ${prodCount}\n• عدد الفواتير والحركات: ${txCount}\n• عدد الحسابات: ${accCount}\n\nسيتم إعادة تشغيل التطبيق لتطبيق البيانات فوراً.`,
+                        confirmText: 'إعادة التشغيل الآن 🔄',
+                        onConfirm: () => location.reload()
+                    });
+                    setTimeout(() => location.reload(), 2500);
+                } else {
+                    alert("✅ تم استعادة النسخة الاحتياطية بنجاح! سيتم إعادة تحميل الصفحة.");
+                    location.reload();
+                }
+            };
+
+            // نافذة تأكيد قبل الاسترجاع مع كشف محتويات النسخة
+            const summaryHtml = `هل أنت متأكد من رغبتك في استعادة هذه النسخة الاحتياطية؟<br><br>` +
+                `<div style="text-align: right; background: #f8fafc; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 0.95rem; line-height: 1.8;">` +
+                `📦 <b>عدد الأصناف:</b> ${prodCount} صنف<br>` +
+                `🧾 <b>عدد الفواتير والحركات:</b> ${txCount} حركة<br>` +
+                `👥 <b>عدد الحسابات والعملاء:</b> ${accCount} حساب<br>` +
+                `</div><br>` +
+                `<b style="color: #dc2626;">⚠️ تحذير:</b> سيتم استبدال البيانات الحالية بالبيانات المحفوظة في هذا الملف.`;
 
             if (typeof showCustomAlert === 'function') {
                 showCustomAlert({
-                    type: 'success',
-                    titleText: '✅ تم استعادة النسخة الاحتياطية بنجاح',
-                    msg: 'تمت استعادة كافة المنتجات، الفواتير، الحسابات، سجلات الخزينة، والمخازن بنجاح!\nسيتم إعادة تشغيل التطبيق لتطبيق البيانات فوراً.',
-                    confirmText: 'إعادة التشغيل الآن 🔄',
-                    onConfirm: () => location.reload()
+                    type: 'warning',
+                    titleText: '⚠️ تأكيد استعادة النسخة الاحتياطية',
+                    msg: summaryHtml,
+                    showCancel: true,
+                    confirmText: 'نعم، استعد البيانات 🔄',
+                    cancelText: 'إلغاء ❌',
+                    onConfirm: () => executeRestore(),
+                    onCancel: () => { if (input) input.value = ''; }
                 });
-                setTimeout(() => location.reload(), 2500);
             } else {
-                alert("✅ تم استعادة النسخة الاحتياطية بنجاح! سيتم إعادة تحميل الصفحة.");
-                location.reload();
+                if (confirm(`هل أنت متأكد من استعادة النسخة الاحتياطية؟\nالأصناف: ${prodCount}\nالفواتير: ${txCount}\nالحسابات: ${accCount}`)) {
+                    executeRestore();
+                } else {
+                    if (input) input.value = '';
+                }
             }
         } catch (err) {
             console.error("Failed to restore backup:", err);
@@ -172,36 +263,146 @@ window.hideBackupProgressOverlay = function() {
     }
 };
 
-window.openBackupFolder = function() {
+window.openBackupFolder = async function() {
+    console.log("📂 جاري فتح مجلد النسخ الاحتياطية على نظام ويندوز...");
+
+    // 1. استدعاء Main Process عبر IPC في بيئة Electron
+    let ipc = null;
     try {
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
-        const { shell } = require('electron');
-        const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
-        
-        if (!fs.existsSync(defaultPath)) {
-            fs.mkdirSync(defaultPath, { recursive: true });
+        if (typeof window !== 'undefined' && window.require) {
+            ipc = window.require('electron').ipcRenderer;
+        } else if (typeof require !== 'undefined') {
+            ipc = require('electron').ipcRenderer;
         }
-        
-        if (shell && typeof shell.openPath === 'function') {
-            shell.openPath(defaultPath);
-        } else {
-            const { exec } = require('child_process');
-            exec(`explorer "${defaultPath}"`);
-        }
-    } catch(e) {
-        console.log("Error opening backup folder:", e);
+    } catch (e) {}
+
+    if (ipc && typeof ipc.invoke === 'function') {
         try {
-            const os = require('os');
-            const path = require('path');
-            const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
-            const { exec } = require('child_process');
-            exec(`explorer "${defaultPath}"`);
-        } catch(err2) {
-            alert(`📍 مسار مجلد النسخ الاحتياطية هو:\nAppData/Roaming/Bayan POS/backups`);
+            const ok = await ipc.invoke('open-backup-folder');
+            if (ok) {
+                console.log("✅ تم فتح مجلد النسخ بنجاح عبر IPC.");
+                return true;
+            }
+        } catch (ipcErr) {
+            console.warn("⚠️ IPC open-backup-folder warning, trying fallbacks:", ipcErr);
         }
     }
+
+    // 2. استخدام Node.js child_process لتشغيل explorer.exe مباشرة
+    try {
+        const cp = (typeof window !== 'undefined' && window.require) ? window.require('child_process') : (typeof require !== 'undefined' ? require('child_process') : null);
+        const os = (typeof window !== 'undefined' && window.require) ? window.require('os') : (typeof require !== 'undefined' ? require('os') : null);
+        const path = (typeof window !== 'undefined' && window.require) ? window.require('path') : (typeof require !== 'undefined' ? require('path') : null);
+        const fs = (typeof window !== 'undefined' && window.require) ? window.require('fs') : (typeof require !== 'undefined' ? require('fs') : null);
+
+        if (cp && os && path) {
+            const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
+            if (fs && !fs.existsSync(defaultPath)) {
+                fs.mkdirSync(defaultPath, { recursive: true });
+            }
+            cp.exec(`explorer.exe "${defaultPath}"`);
+            console.log("✅ تم فتح المجلد عبر explorer.exe:", defaultPath);
+            return true;
+        }
+    } catch (cpErr) {
+        console.warn("⚠️ Direct child_process fallback warning:", cpErr);
+    }
+
+    // 3. المحاولة عبر electron.shell
+    try {
+        const electron = (typeof window !== 'undefined' && window.require) ? window.require('electron') : (typeof require !== 'undefined' ? require('electron') : null);
+        if (electron && electron.shell && typeof electron.shell.openPath === 'function') {
+            const os = (typeof window !== 'undefined' && window.require) ? window.require('os') : require('os');
+            const path = (typeof window !== 'undefined' && window.require) ? window.require('path') : require('path');
+            const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
+            await electron.shell.openPath(defaultPath);
+            return true;
+        }
+    } catch (shellErr) {}
+
+    // 4. في حالة المتصفح العادي (Browser بدون Electron)
+    if (typeof showCustomAlert === 'function') {
+        showCustomAlert({
+            type: 'info',
+            titleText: '📂 مجلد النسخ الاحتياطية للنظام',
+            cardWidth: '820px',
+            maxWidth: '95vw',
+            cardPadding: '20px 26px',
+            hideIcon: true,
+            msg: `
+                <div style="text-align: right; direction: rtl; font-family: 'Cairo', sans-serif;">
+                    <!-- شريط الهوية ومجال النشاط التجاري (أفقي أنيق) -->
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #1e293b, #0f172a); color: white; padding: 10px 18px; border-radius: 12px; margin-bottom: 14px; border: 1.5px solid #334155; flex-wrap: wrap; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.5rem;">👗👠</span>
+                            <div>
+                                <div style="font-size: 1rem; font-weight: 900; color: #ffffff; line-height: 1.2;">بَيَان POS فاشون (Bayan POS Fashion)</div>
+                                <div style="font-size: 0.76rem; color: #94a3b8; font-weight: 700; margin-top: 2px;">إدارة محلات ونشاط الملابس والأحذية والأزياء والمخازن</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 0.72rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); padding: 3px 10px; border-radius: 20px; font-weight: 800;">بيانات مشفرة ومؤمنة 🛡️</span>
+                        </div>
+                    </div>
+
+                    <!-- شبكة المسارات الأفقية (عمودين متجاورين جنباً إلى جنب) -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                        
+                        <!-- بطاقة 1: تطبيق الديسكتوب (Electron) -->
+                        <div style="background: #f8fafc; padding: 14px; border-radius: 12px; border: 1.5px solid #cbd5e1; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                            <div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                    <div style="font-size: 0.88rem; color: #0f172a; font-weight: 900; display: flex; align-items: center; gap: 6px;">
+                                        <span>💻</span> تطبيق الديسكتوب (Electron):
+                                    </div>
+                                    <span style="font-size: 0.72rem; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 6px; font-weight: 800;">حفظ صامت وتلقائي</span>
+                                </div>
+                                <div style="font-size: 0.78rem; color: #64748b; font-weight: 700; margin-bottom: 8px; line-height: 1.4;">
+                                    المجلد المخصص للنظام (تدوير تلقائي لآخر 100 نسخة):
+                                </div>
+                                <div style="background: #ffffff; padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; direction: ltr; text-align: left; font-family: monospace; font-size: 0.82rem; font-weight: 800; color: #0f172a; word-break: break-all; white-space: normal; line-height: 1.4; margin-bottom: 10px;">
+                                    C:\\Users\\%USERNAME%\\AppData\\Roaming\\Bayan POS\\backups
+                                </div>
+                            </div>
+                            <button type="button" onclick="navigator.clipboard.writeText('C:\\\\Users\\\\' + (window.process ? '' : '') + 'AppData\\\\Roaming\\\\Bayan POS\\\\backups'); if(typeof showToast==='function') showToast('📋 تم نسخ مسار مجلد النظام للحافظة!', 'success');" style="width: 100%; height: 34px; background: #ffffff; color: #1e293b; border: 1.5px solid #cbd5e1; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: 0.2s;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='#ffffff';">
+                                📋 نسخ مسار النظام
+                            </button>
+                        </div>
+
+                        <!-- بطاقة 2: المتصفح (Downloads) -->
+                        <div style="background: #eff6ff; padding: 14px; border-radius: 12px; border: 1.5px solid #bfdbfe; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                            <div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                    <div style="font-size: 0.88rem; color: #1e40af; font-weight: 900; display: flex; align-items: center; gap: 6px;">
+                                        <span>🌐</span> عند العمل عبر المتصفح (Browser):
+                                    </div>
+                                    <span style="font-size: 0.72rem; background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; padding: 2px 8px; border-radius: 6px; font-weight: 800;">تنزيل فوري</span>
+                                </div>
+                                <div style="font-size: 0.78rem; color: #475569; font-weight: 700; margin-bottom: 8px; line-height: 1.4;">
+                                    تُنزل ملفات النسخ فوراً في مجلد التنزيلات بجهازك:
+                                </div>
+                                <div style="background: #ffffff; padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; direction: ltr; text-align: left; font-family: monospace; font-size: 0.82rem; font-weight: 800; color: #0f172a; word-break: break-all; white-space: normal; line-height: 1.4; margin-bottom: 10px;">
+                                    C:\\Users\\%USERNAME%\\Downloads
+                                </div>
+                            </div>
+                            <button type="button" onclick="navigator.clipboard.writeText('C:\\\\Users\\\\' + (window.process ? '' : '') + 'Downloads'); if(typeof showToast==='function') showToast('📋 تم نسخ مسار التنزيلات للحافظة!', 'success');" style="width: 100%; height: 34px; background: #ffffff; color: #1e40af; border: 1.5px solid #bfdbfe; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: 0.2s;" onmouseover="this.style.background='#dbeafe';" onmouseout="this.style.background='#ffffff';">
+                                📋 نسخ مسار التنزيلات
+                            </button>
+                        </div>
+
+                    </div>
+
+                    <div style="text-align: center; color: #64748b; font-size: 0.78rem; font-weight: 700;">
+                        💡 يُنصح بنسخ ملفات النسخ الاحتياطية دورياً إلى فلاش ميموري (USB) لحماية إضافية للبيانات.
+                    </div>
+                </div>
+            `,
+            confirmText: 'إغلاق ✖️'
+        });
+    } else {
+        alert("📂 مكان النسخ الاحتياطية:\nفي المتصفح: مجلد Downloads بجهازك.\nفي تطبيق الديسكتوب: AppData\\Roaming\\Bayan POS\\backups");
+    }
+    return false;
 };
 
 window.executeAutoBackupToFile = async function(silent = false, isManual = false) {
@@ -225,13 +426,23 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         auditLogData = auditLogs;
     }
 
+    // 🔒 تأمين وتشفير رموز الـ PIN للمستخدمين في ملف النسخة الاحتياطية لمنع كشفها
+    const securedUsers = (users || []).map(u => {
+        if (!u) return u;
+        const copy = { ...u };
+        if (copy.pin != null && copy.pin !== '' && typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.obfuscate === 'function') {
+            copy.pin = 'ENC:' + window.BayanSecurity.obfuscate(String(copy.pin));
+        }
+        return copy;
+    });
+
     const data = {
         version: "2.0",
         backupDate: new Date().toISOString(),
         products: productsDB || [],
         transactions: transactions || [],
         settings: JSON.parse(getStore('pos_settings') || '{}'),
-        users: users || [],
+        users: securedUsers,
         accounts: accounts || [],
         trash: trashBin || [],
         treasuryAudit: treasuryData,
@@ -250,65 +461,96 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     let success = false;
     let savedFilePath = '';
     let backupDirDisplay = '';
+    let finalFileName = '';
 
-    // محاولة الحفظ المباشر في مجلد التطبيق الموحد (AppData/Roaming/Bayan POS/backups)
+    // 1. المحاولة الأولى: الحفظ المباشر عبر IPC في بيئة ديسكتوب (Electron)
+    let ipc = null;
     try {
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
-        const { ipcRenderer } = require('electron');
-        
-        let backupDir = '';
-        if (ipcRenderer) {
-            try {
-                backupDir = await ipcRenderer.invoke('get-backup-dir');
-            } catch(e) {}
+        if (typeof window !== 'undefined' && window.require) {
+            ipc = window.require('electron').ipcRenderer;
+        } else if (typeof require !== 'undefined') {
+            ipc = require('electron').ipcRenderer;
         }
-        if (!backupDir) {
-            backupDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
-        }
-        backupDirDisplay = backupDir;
-        if (!fs.existsSync(backupDir)) {
-            fs.mkdirSync(backupDir, { recursive: true });
-        }
-        
-        const pad = (n) => String(n).padStart(2, '0');
-        const d = new Date();
-        const timestamp = `${d.getFullYear()}_${pad(d.getMonth()+1)}_${pad(d.getDate())}__${pad(d.getHours())}_${pad(d.getMinutes())}`;
-        const prefix = isManual ? 'backup_pos_manual_' : 'backup_pos_auto_';
-        const fileName = `${prefix}${timestamp}.json`;
-        savedFilePath = path.join(backupDir, fileName);
-        
-        fs.writeFileSync(savedFilePath, JSON.stringify(data, null, 2), 'utf8');
-        console.log("Backup successfully saved to local path:", savedFilePath);
-        success = true;
+    } catch (e) {}
 
-        // 🧹 إدارة تدوير النسخ الاحتياطية الاحتفاظ بـ 100 نسخة فقط (أو القيمة المخزنة في الإعدادات)
+    if (ipc && typeof ipc.invoke === 'function') {
         try {
-            const settings = JSON.parse(getStore('pos_settings') || '{}');
-            const maxBackups = parseInt(settings.maxBackupFiles) || 100;
-            const { ipcRenderer } = require('electron');
-            if (ipcRenderer) {
-                await ipcRenderer.invoke('rotate-backups', maxBackups);
+            const dataStr = JSON.stringify(data, null, 2);
+            const saveRes = await ipc.invoke('save-backup-data', { isManual, dataStr });
+            if (saveRes && saveRes.success) {
+                savedFilePath = saveRes.filePath;
+                backupDirDisplay = saveRes.backupDir;
+                finalFileName = saveRes.fileName;
+                success = true;
+                console.log("Backup successfully saved via Electron IPC:", savedFilePath);
+
+                // إدارة تدوير النسخ
+                try {
+                    const settings = JSON.parse(getStore('pos_settings') || '{}');
+                    const maxBackups = parseInt(settings.maxBackupFiles) || 100;
+                    await ipc.invoke('rotate-backups', maxBackups);
+                } catch(rotErr) {}
             }
-        } catch(rotErr) {
-            console.warn("Backup rotation failed:", rotErr);
+        } catch (ipcErr) {
+            console.warn("Electron IPC save-backup-data failed, trying node/browser fallback:", ipcErr);
         }
+    }
 
-    } catch (e) {
-        console.log("Fallback to browser-style download backup.", e);
+    // 2. المحاولة الثانية: عبر Node.js fs مباشرة إن كانت متاحة
+    if (!success) {
         try {
-            const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `backup_pos_${isManual ? 'manual' : 'auto'}_${new Date().toLocaleDateString('en-CA')}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            success = true;
-        } catch (downloadErr) {
-            console.error("Browser download backup failed:", downloadErr);
+            const fs = (typeof window !== 'undefined' && window.require) ? window.require('fs') : (typeof require !== 'undefined' ? require('fs') : null);
+            const path = (typeof window !== 'undefined' && window.require) ? window.require('path') : (typeof require !== 'undefined' ? require('path') : null);
+            const os = (typeof window !== 'undefined' && window.require) ? window.require('os') : (typeof require !== 'undefined' ? require('os') : null);
+
+            if (fs && path && os) {
+                let backupDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Bayan POS', 'backups');
+                if (!fs.existsSync(backupDir)) {
+                    fs.mkdirSync(backupDir, { recursive: true });
+                }
+                const pad = (n) => String(n).padStart(2, '0');
+                const d = new Date();
+                const timestamp = `${d.getFullYear()}_${pad(d.getMonth()+1)}_${pad(d.getDate())}__${pad(d.getHours())}_${pad(d.getMinutes())}`;
+                const prefix = isManual ? 'backup_pos_manual_' : 'backup_pos_auto_';
+                finalFileName = `${prefix}${timestamp}.json`;
+                savedFilePath = path.join(backupDir, finalFileName);
+                backupDirDisplay = backupDir;
+
+                fs.writeFileSync(savedFilePath, JSON.stringify(data, null, 2), 'utf8');
+                console.log("Backup successfully saved to local fs path:", savedFilePath);
+                success = true;
+            }
+        } catch (fsErr) {
+            console.warn("Node fs fallback failed:", fsErr);
+        }
+    }
+
+    // 3. المحاولة الثالثة: عبر تنزيل ملف المتصفح (Web Browser Download)
+    if (!success) {
+        const settings = JSON.parse(getStore('pos_settings') || '{}');
+        const canDownloadInBrowser = isManual || (settings.autoBackup === true && !silent);
+
+        if (canDownloadInBrowser) {
+            try {
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const d = new Date();
+                const pad = (n) => String(n).padStart(2, '0');
+                const timestamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                finalFileName = `backup_pos_${isManual ? 'manual' : 'auto'}_${timestamp}.json`;
+                a.download = finalFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                success = true;
+                backupDirDisplay = 'مجلد التنزيلات (Downloads)';
+                savedFilePath = `Downloads/${finalFileName}`;
+                console.log("Backup file downloaded via browser to Downloads folder:", finalFileName);
+            } catch (downloadErr) {
+                console.error("Browser download backup failed:", downloadErr);
+            }
         }
     }
     
@@ -317,26 +559,34 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         window.hideBackupProgressOverlay();
 
         if (success) {
+            const isDownloads = backupDirDisplay.includes('Downloads') || backupDirDisplay.includes('التنزيلات');
             if (typeof showCustomAlert === 'function') {
                 showCustomAlert({
                     type: 'success',
-                    titleText: '✅ تم إنشاء النسخة الاحتياطية بنجاح',
+                    titleText: '✅ تم حفظ النسخة الاحتياطية بنجاح',
                     msg: `
                         <div style="text-align: right; direction: rtl; font-family: 'Cairo', sans-serif;">
-                            <p style="margin-bottom: 12px; font-weight: 800; color: #1e293b;">تم حفظ وتأمين كافة بيانات النظام (المنتجات، الحركات، الخزينة، والمخازن) بأمان.</p>
-                            <div style="background: #f1f5f9; padding: 12px; border-radius: 12px; border: 1px solid #cbd5e1; margin-bottom: 15px;">
-                                <div style="font-size: 0.85rem; color: #64748b; font-weight: 800; margin-bottom: 4px;">📍 مكان الحفظ:</div>
-                                <div style="font-size: 0.9rem; font-weight: 800; color: #0f172a; direction: ltr; text-align: left; font-family: monospace; word-break: break-all;">${backupDirDisplay || 'bayan_backups'}</div>
+                            <p style="margin-bottom: 12px; font-weight: 800; color: #1e293b;">تم تأمين وحفظ كامل بيانات النظام (الأصناف، الفواتير، الحسابات، والخزينة) بنجاح على جهازك.</p>
+                            
+                            <div style="background: ${isDownloads ? '#eff6ff' : '#f1f5f9'}; padding: 12px; border-radius: 12px; border: 1.5px solid ${isDownloads ? '#93c5fd' : '#cbd5e1'}; margin-bottom: 15px;">
+                                <div style="font-size: 0.85rem; color: ${isDownloads ? '#1d4ed8' : '#64748b'}; font-weight: 800; margin-bottom: 4px;">📍 مكان وجود النسخة على جهازك:</div>
+                                <div style="font-size: 0.95rem; font-weight: 900; color: ${isDownloads ? '#1e3a8a' : '#0f172a'}; margin-bottom: 4px;">
+                                    ${isDownloads ? '📁 مجلد التنزيلات (Downloads)' : backupDirDisplay}
+                                </div>
+                                <div style="font-size: 0.8rem; font-weight: 800; color: #475569; direction: ltr; text-align: left; font-family: monospace; word-break: break-all;">
+                                    📄 ${finalFileName || 'backup_pos.json'}
+                                </div>
                             </div>
+
                             <button onclick="window.openBackupFolder()" style="width: 100%; height: 45px; background: #2563eb; color: white; border: none; border-radius: 12px; font-weight: 900; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
-                                📂 فتح مجلد النسخ الاحتياطية
+                                📂 فتح مجلد النسخ الاحتياطية الآن
                             </button>
                         </div>
                     `,
-                    confirmText: 'إغلاق ✖️'
+                    confirmText: 'تم ✖️'
                 });
             } else {
-                alert(`✅ تم إنشاء النسخة الاحتياطية بنجاح في: ${savedFilePath || backupDirDisplay}`);
+                alert(`✅ تم حفظ النسخة الاحتياطية بنجاح في: ${backupDirDisplay}`);
             }
         }
     }
@@ -344,13 +594,16 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     return success;
 };
 
-// فحص النسخ الاحتياطي الدوري في الخلفية
+// فحص وتكرار النسخ الاحتياطي الدوري في الخلفية (كل ساعة، ساعتين، 12، 24)
 window.checkAndRunPeriodicBackup = function() {
     const settings = JSON.parse(getStore('pos_settings') || '{}');
-    if (!settings.autoBackup || !settings.autoBackupInterval || settings.autoBackupInterval === 'close') return;
+    const interval = settings.autoBackupInterval;
     
-    const intervalHours = parseFloat(settings.autoBackupInterval);
-    if (isNaN(intervalHours)) return;
+    // إذا كان الخيار غير محدد أو كان "close" (فقط عند الإغلاق/الخروج)، لا نقوم بنسخ دوري أثناء ساعات العمل
+    if (!interval || interval === 'close') return;
+    
+    const intervalHours = parseFloat(interval);
+    if (isNaN(intervalHours) || intervalHours <= 0) return;
     
     const lastBackup = parseFloat(getStore('pos_last_backup_time') || '0');
     const now = Date.now();
@@ -358,14 +611,14 @@ window.checkAndRunPeriodicBackup = function() {
     const intervalMs = intervalHours * 60 * 60 * 1000;
     
     if (elapsedMs >= intervalMs) {
-        console.log(`Periodic backup triggered: every ${intervalHours} hour(s).`);
+        console.log(`⏰ [AutoBackup] تم استحقاق النسخ الدوري: كل (${intervalHours}) ساعة. (انقضى: ${(elapsedMs/3600000).toFixed(2)} ساعة).`);
         window.executeAutoBackupToFile(true);
     }
 };
 
-// تشغيل الفحص الدوري كل 5 دقائق
-setInterval(window.checkAndRunPeriodicBackup, 5 * 60 * 1000);
-setTimeout(window.checkAndRunPeriodicBackup, 8000); // تشغيل أولي بعد 8 ثواني من الإقلاع
+// تشغيل الفحص الدوري كل دقيقتين بدقة عالية
+setInterval(window.checkAndRunPeriodicBackup, 2 * 60 * 1000);
+setTimeout(window.checkAndRunPeriodicBackup, 6000); // تشغيل أولي بعد 6 ثواني من الإقلاع
 
 // 🔒 دالة فحص وجود بيانات غير محفوظة في كافة التبويبات المفتوحة قبل الخروج
 window.checkUnsavedDataInAllTabs = function() {
@@ -486,9 +739,9 @@ try {
                 return;
             }
 
-            // 2. إذا كانت كافة البيانات محفوظة ولا توجد أصناف معلقة، نقوم بالنسخ الاحتياطي ثم الخروج
+            // 2. إذا كانت كافة البيانات محفوظة ولا توجد أصناف معلقة، نقوم بالنسخ الاحتياطي إذا كان مفعلاً صراحة
             const settings = JSON.parse(getStore('pos_settings') || '{}');
-            if (settings.autoBackup !== false) { // مفعل تلقائياً كخيار أمان أقصى
+            if (settings.autoBackup === true) {
                 await window.executeAutoBackupToFile(false);
             }
 

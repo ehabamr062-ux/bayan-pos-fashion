@@ -11,7 +11,7 @@ async function printInventoryBarcode() {
 
     showCustomAlert({
         type: 'question',
-        titleText: '🏷️ خيارات طباعة الباربود',
+        titleText: '🏷️ خيارات طباعة الباركود',
         msg: 'يرجى اختيار نطاق الطباعة المطلوب:',
         confirmText: 'طباعة كافة الأصناف كلياً',
         cancelText: 'طباعة الأصناف المختارة (✔️) فقط',
@@ -269,14 +269,9 @@ async function executePrinting(modeOrTargets, copies = 1) {
     const labelHeight = parseFloat(bSettings.height) || 25;
     const isSmall = labelWidth <= 42 || labelHeight <= 28;
     
-    // إذا كانت باقي العناصر مخفية، يكبر ارتفاع الباركود لملء الملصق في المنتصف
-    const isMinimal = !bSettings.showShopName && !bSettings.showPrice;
-    let baseH = parseInt(bSettings.barcodeHeight || (isSmall ? 18 : 22), 10);
-    if (isMinimal) {
-        baseH = Math.max(baseH, isSmall ? 20 : 25);
-    }
-    const barcodeH = baseH;
-    const barcodeW = isSmall ? 1.0 : 1.18;
+    // سُمك خطوط الباركود عريض وسريع القراءة مع مسافة أمان لمنع الخروج عن الحواف
+    const barcodeW = isSmall ? 1.25 : 1.35;
+    const barcodeH = parseInt(bSettings.barcodeHeight || (isSmall ? 18 : 22), 10);
 
     // 1. إنشاء عناصر الباركود ورسم الـ SVG محلياً عبر JsBarcode الموجود في النافذة
     let labelsHtml = '';
@@ -290,8 +285,8 @@ async function executePrinting(modeOrTargets, copies = 1) {
     document.body.appendChild(tempContainer);
 
     printableItems.forEach(item => {
-        const priceFormatted = (item.price || 0).toFixed(2) + ' ' + currency;
-        const hasVariantInfo = !!(item.size || item.color);
+        const priceFormatted = (parseFloat(item.price) || 0).toFixed(2);
+        const variantText = [item.color, item.size].filter(Boolean).join(' ');
 
         for (let i = 0; i < item.copies; i++) {
             labelIdx++;
@@ -307,11 +302,11 @@ async function executePrinting(modeOrTargets, copies = 1) {
                         width: barcodeW,
                         height: barcodeH,
                         displayValue: true,
-                        fontSize: isSmall ? 7.5 : 8.5,
+                        fontSize: isSmall ? 7.8 : 8.8,
                         font: "Segoe UI, Arial, sans-serif",
                         fontOptions: "bold",
                         textMargin: 1,
-                        margin: 3 // مسافة أمان بيضاء على اليمين واليسار تمنع أكل الخطوط من الحواف
+                        margin: 2 // مسافة أمان بيضاء على اليمين واليسار تمنع أكل الخطوط من الحواف
                     });
                 } catch(err) {
                     console.warn("Barcode rendering error:", err);
@@ -323,17 +318,15 @@ async function executePrinting(modeOrTargets, copies = 1) {
             labelsHtml += `
                 <div class="barcode-label">
                     ${bSettings.showShopName ? `<div class="shop-title">${shopName}</div>` : ''}
-                    ${hasVariantInfo ? `
-                        <div class="meta-row">
-                            ${item.size ? `<span class="size-badge">${item.size}</span>` : ''}
-                            ${item.color ? `<span class="color-badge">${item.color}</span>` : ''}
-                        </div>
-                    ` : ''}
+                    <div class="divider-line"></div>
+                    ${bSettings.showItemName ? `<div class="item-name" title="${item.name}">${item.name}</div>` : ''}
                     <div class="svg-wrap">
                         ${svgString}
                     </div>
-                    ${bSettings.showItemName ? `<div class="item-name" title="${item.name}">${item.name}</div>` : ''}
-                    ${bSettings.showPrice ? `<div class="price-badge"><span class="price-val">${priceFormatted}</span></div>` : ''}
+                    <div class="bottom-row">
+                        <div class="variant-text">${variantText}</div>
+                        ${bSettings.showPrice ? `<div class="price-val">${priceFormatted}</div>` : ''}
+                    </div>
                 </div>
             `;
         }
@@ -382,13 +375,12 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     width: ${bSettings.width}mm;
                     height: ${bSettings.height}mm;
                     max-height: ${bSettings.height}mm;
-                    padding: 0.5mm 0.8mm;
+                    padding: 0.8mm 1.4mm;
                     margin: 0 auto !important;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    justify-content: center;
-                    gap: 0.8mm;
+                    justify-content: space-between;
                     page-break-after: always;
                     break-after: page;
                     page-break-inside: avoid;
@@ -398,10 +390,10 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     text-align: center;
                 }
                 .shop-title { 
-                    font-size: ${isSmall ? '6.5pt' : '7.8pt'}; 
+                    font-size: ${isSmall ? '6.8pt' : '7.8pt'}; 
                     font-weight: 900; 
                     color: #000000; 
-                    line-height: 1; 
+                    line-height: 1.1; 
                     margin: 0;
                     white-space: nowrap;
                     overflow: hidden;
@@ -410,8 +402,13 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     text-align: center;
                     letter-spacing: 0.2px;
                 }
+                .divider-line {
+                    width: 100%;
+                    border-bottom: 1px solid #000000;
+                    margin: 0.2mm 0;
+                }
                 .item-name { 
-                    font-size: ${isSmall ? '6.8pt' : '8pt'}; 
+                    font-size: ${isSmall ? '7.2pt' : '8.2pt'}; 
                     font-weight: 900; 
                     margin: 0; 
                     white-space: nowrap; 
@@ -422,37 +419,9 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     line-height: 1.1; 
                     text-align: center;
                 }
-                .meta-row { 
-                    display: flex; 
-                    justify-content: center; 
-                    gap: 3px; 
-                    align-items: center; 
-                    width: 100%; 
-                    font-size: ${isSmall ? '6.0pt' : '7.0pt'}; 
-                    font-weight: 900; 
-                    margin: 0;
-                    line-height: 1;
-                    white-space: nowrap;
-                    overflow: hidden;
-                }
-                .size-badge { 
-                    background: #000000; 
-                    color: #ffffff; 
-                    padding: 0.5px 3.5px; 
-                    border-radius: 2.5px; 
-                    font-weight: 900;
-                    font-size: ${isSmall ? '6.0pt' : '7.0pt'};
-                }
-                .color-badge { 
-                    color: #000000; 
-                    font-weight: 800;
-                }
-                .code-badge { 
-                    color: #222222; 
-                    font-weight: 800;
-                }
                 .svg-wrap {
                     width: 100%;
+                    max-width: 95%;
                     display: flex;
                     justify-content: center;
                     align-items: center;
@@ -467,17 +436,31 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     margin: 0 auto !important; 
                     display: block !important; 
                 }
-                .price-badge { 
-                    font-size: ${isSmall ? '8pt' : '9.5pt'}; 
-                    font-weight: 900; 
-                    color: #000000; 
-                    border: 1.2px solid #000000; 
-                    padding: 0.2mm 2.5mm; 
-                    border-radius: 2.5px; 
-                    background: #ffffff; 
-                    line-height: 1; 
-                    margin: 0 auto; 
-                    display: inline-block;
+                .bottom-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    width: 100%;
+                    padding: 0 0.5mm;
+                    margin: 0;
+                    line-height: 1.1;
+                }
+                .variant-text {
+                    font-size: ${isSmall ? '7.5pt' : '8.5pt'};
+                    font-weight: 900;
+                    color: #000000;
+                    text-align: right;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    max-width: 58%;
+                }
+                .price-val {
+                    font-size: ${isSmall ? '8pt' : '9.5pt'};
+                    font-weight: 900;
+                    color: #000000;
+                    text-align: left;
+                    font-family: 'Segoe UI', Arial, sans-serif;
                     white-space: nowrap;
                 }
                 @media print {
@@ -1228,6 +1211,154 @@ window.applyUniformQtyToAllVariants = function() {
     if (typeof showToast === 'function') showToast(`⚡ تم تطبيق كمية (${qty}) على جميع التشكيلات بنجاح`, 'success');
 };
 
+window.hasSyncedVariantPrices = true;
+
+window.checkIfVariantsNeedPriceSync = function() {
+    const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+    if (rows.length === 0) return false;
+    const mainPrice = parseFloat(document.getElementById('newItemPrice')?.value) || 0;
+
+    for (let i = 0; i < rows.length; i++) {
+        const pVal = parseFloat(rows[i].querySelector('.var-price-input')?.value);
+        if (isNaN(pVal) || Math.abs(pVal - mainPrice) > 0.01) return true;
+    }
+    return false;
+};
+
+window.updateVariantPriceSyncUI = function() {
+    const banner = document.getElementById('variantPriceSyncPromptBanner');
+    const tabBadge = document.getElementById('variantsTabSyncBadge');
+    const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+    const mainPrice = parseFloat(document.getElementById('newItemPrice')?.value) || 0;
+    const currentPriceEl = document.getElementById('syncCardCurrentPriceText');
+    if (currentPriceEl) currentPriceEl.innerText = mainPrice.toFixed(2);
+
+    window.hasSyncedVariantPrices = true;
+
+    if (rows.length === 0) {
+        if (banner) banner.classList.add('hidden');
+        if (tabBadge) tabBadge.classList.add('hidden');
+        return;
+    }
+
+    const hasCustomPrices = window.checkIfVariantsNeedPriceSync();
+
+    if (banner) {
+        banner.classList.remove('hidden');
+        if (hasCustomPrices) {
+            banner.className = 'bayan-sync-banner state-custom-prices';
+            const arrowEl = document.getElementById('variantPriceSyncArrow');
+            if (arrowEl) {
+                arrowEl.innerText = '🎨';
+                arrowEl.style.display = 'inline-block';
+            }
+            const titleEl = document.getElementById('variantPriceSyncTitle');
+            if (titleEl) {
+                titleEl.innerHTML = `<span>💡 أسعار مخصصة للمقاسات:</span><span>يمكنك تعميم السعر الأساسي (${mainPrice.toFixed(2)} ج.م) بنقرة واحدة، أو إبقاء كل مقاس بسعره المستقل</span>`;
+                titleEl.style.color = '#1e40af';
+            }
+            const subEl = document.getElementById('variantPriceSyncSub');
+            if (subEl) {
+                subEl.innerHTML = `توجد مقاسات مسجلة بأسعار خاصة ومستقلة — الحفظ متاح دائماً بدون أي قيود`;
+                subEl.style.color = '#3b82f6';
+            }
+            const btn = document.getElementById('btnBannerSyncVariants');
+            if (btn) {
+                btn.className = 'bayan-btn';
+                btn.style.background = 'linear-gradient(135deg, #4f46e5, #0284c7)';
+                btn.style.color = '#ffffff';
+                btn.style.border = 'none';
+                btn.style.borderRadius = '8px';
+                btn.style.padding = '6px 16px';
+                btn.style.fontWeight = '800';
+                btn.style.boxShadow = '0 2px 8px rgba(79, 70, 229, 0.25)';
+                btn.innerHTML = `<span>⚡</span><span>تعميم السعر على الكل (اختياري)</span>`;
+            }
+        } else {
+            banner.className = 'bayan-sync-banner state-synced';
+            const arrowEl = document.getElementById('variantPriceSyncArrow');
+            if (arrowEl) {
+                arrowEl.innerText = '✅';
+                arrowEl.style.display = 'inline-block';
+            }
+            const titleEl = document.getElementById('variantPriceSyncTitle');
+            if (titleEl) {
+                titleEl.innerHTML = `<span>✅ الأسعار موحدة:</span><span>كافة المقاسات (${rows.length}) متطابقة مع سعر الصنف (${mainPrice.toFixed(2)} ج.م)</span>`;
+                titleEl.style.color = '#065f46';
+            }
+            const subEl = document.getElementById('variantPriceSyncSub');
+            if (subEl) {
+                subEl.innerHTML = `جميع المقاسات موحدة بالسعر الأساسي، ويمكنك تغيير سعر أي مقاس من الجدول بحرية`;
+                subEl.style.color = '#047857';
+            }
+            const btn = document.getElementById('btnBannerSyncVariants');
+            if (btn) {
+                btn.className = 'bayan-btn';
+                btn.style.background = '#ffffff';
+                btn.style.color = '#047857';
+                btn.style.border = '1.5px solid #10b981';
+                btn.style.borderRadius = '8px';
+                btn.style.padding = '5px 14px';
+                btn.style.fontWeight = '800';
+                btn.style.boxShadow = 'none';
+                btn.innerHTML = `<span>🔄</span><span>إعادة تعميم السعر</span>`;
+            }
+        }
+    }
+
+    if (tabBadge) {
+        tabBadge.classList.remove('hidden');
+        if (hasCustomPrices) {
+            tabBadge.innerText = '🎨 أسعار مخصصة';
+            tabBadge.style.background = '#4f46e5';
+            tabBadge.style.color = 'white';
+        } else {
+            tabBadge.innerText = '✅ أسعار موحدة';
+            tabBadge.style.background = '#10b981';
+            tabBadge.style.color = 'white';
+        }
+    }
+};
+
+window.highlightVariantSyncPrompt = function() {
+    // لم يعد هناك اهتزاز أو إجبار
+};
+
+// تعميم السعر والجملة والتكلفة من كارت الصنف الرئيسي على كافة المقاسات والألوان
+window.syncCardPriceAndDiscountToVariants = function(showSuccessToast = true) {
+    const mainPrice = parseFloat(document.getElementById('newItemPrice')?.value) || 0;
+    const mainWs = parseFloat(document.getElementById('newItemWholesale')?.value) || 0;
+    const mainCost = parseFloat(document.getElementById('newItemCost')?.value) || 0;
+
+    const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+    if (rows.length === 0) {
+        if (showSuccessToast && typeof showToast === 'function') showToast('⚠️ لا توجد تشكيلات حالياً لتعميم الأسعار عليها!', 'warning');
+        return;
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+        const priceInp = rows[i].querySelector('.var-price-input');
+        const wsInp = rows[i].querySelector('.var-ws-input');
+        const costInp = rows[i].querySelector('.var-cost-input');
+
+        if (priceInp) priceInp.value = mainPrice;
+        if (wsInp) wsInp.value = mainWs;
+        if (costInp) costInp.value = mainCost;
+
+        rows[i].dataset.origPrice = mainPrice;
+        rows[i].dataset.origWs = mainWs;
+        rows[i].dataset.origCost = mainCost;
+    }
+
+    window.hasSyncedVariantPrices = true;
+    if (typeof renderSmartMatrixView === 'function') renderSmartMatrixView();
+    window.updateVariantPriceSyncUI();
+
+    if (showSuccessToast && typeof showToast === 'function') {
+        showToast(`⚡ تم تعميم سعر البيع (${mainPrice.toFixed(2)} ج.م) والتكلفة على كافة المقاسات (${rows.length}) بنجاح!`, 'success');
+    }
+};
+
 // قفل / فتح رصيد الصنف الافتتاحي في تبويب الكميات
 window.toggleMainStockLock = function() {
     window.isMainStockLocked = !window.isMainStockLocked;
@@ -1318,8 +1449,6 @@ function generateAllVariantBarcodes() {
 function printProductVariantHangtags() {
     const rows = document.getElementById('productVariantsTableBody')?.rows || [];
     const productName = document.getElementById('newItemName')?.value || 'موديل ملابس';
-    const shopName = (document.getElementById('shopName') ? document.getElementById('shopName').value : '') || 'بيان فاشون';
-    const currency = typeof getCurrencySymbol === 'function' ? getCurrencySymbol() : 'ج.م';
 
     if (rows.length === 0) {
         return showToast("⚠️ لا توجد مقاسات مسجلة لطباعة تيكتات لها!", "warning");
@@ -1347,117 +1476,58 @@ function printProductVariantHangtags() {
         });
     }
 
-    const bSettings = (typeof getBarcodeLabelSettings === 'function') ? getBarcodeLabelSettings() : { width: 50, height: 35, offsetX: 0, barcodeHeight: 28 };
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-
-    printWindow.document.write(`
-        <html>
-        <head>
-            <title>طباعة تيكتات الملابس - ${productName}</title>
-            <style>
-                @page {
-                    size: ${bSettings.width || 50}mm ${bSettings.height || 35}mm;
-                    margin: 0mm;
-                }
-                * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
-                html, body {
-                    width: ${bSettings.width || 50}mm;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    direction: rtl;
-                    text-align: center;
-                    background: #fff;
-                    color: #000;
-                }
-                .hangtag-label { 
-                    width: ${bSettings.width || 50}mm;
-                    height: ${bSettings.height || 35}mm;
-                    padding: 1.5mm 2mm;
-                    margin: 0 auto;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: space-between;
-                    page-break-after: always;
-                    break-after: page;
-                    page-break-inside: avoid;
-                    break-inside: avoid;
-                    overflow: hidden;
-                    border: 1px dashed #ccc;
-                }
-                .shop-name { font-size: 8pt; font-weight: 900; color: #1e293b; line-height: 1; border-bottom: 1px solid #000; width: 100%; padding-bottom: 1mm; margin-bottom: 0.5mm; }
-                .model-name { font-size: 8.5pt; font-weight: 800; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.1; }
-                .variant-badge-row { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 0 1mm; }
-                .size-badge { font-size: 8pt; font-weight: 900; background: #000; color: #fff; padding: 0.5mm 2.5mm; border-radius: 2px; }
-                .color-badge { font-size: 7.5pt; font-weight: 800; color: #333; }
-                .price-badge { font-size: 9.5pt; font-weight: 900; color: #000; border: 1.5px solid #000; padding: 0.5mm 3.5mm; border-radius: 3px; line-height: 1; }
-                svg { max-width: 95%; height: 26px; margin: 0 auto !important; display: block !important; direction: ltr !important; }
-                @media print {
-                    html, body { width: 100% !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
-                    .hangtag-label { border: none !important; box-shadow: none !important; page-break-after: always !important; break-after: page !important; }
-                }
-            </style>
-        </head>
-        <body>
-            <div id="labelsContainer"></div>
-        </body>
-        </html>
-    `);
-
-    const container = printWindow.document.getElementById('labelsContainer');
-    let svgIndex = 0;
-
-    targets.forEach(t => {
-        for (let c = 0; c < t.copies; c++) {
-            svgIndex++;
-            const label = printWindow.document.createElement('div');
-            label.className = 'hangtag-label';
-            label.innerHTML = `
-                <div class="shop-name">${shopName}</div>
-                <div class="model-name">${t.name}</div>
-                <div class="variant-badge-row">
-                    <span class="size-badge">SIZE: ${t.size}</span>
-                    <span class="color-badge">اللون: ${t.color}</span>
-                </div>
-                <svg id="ht-svg-${svgIndex}"></svg>
-                <div class="price-badge">${t.price.toFixed(2)} ${currency}</div>
-            `;
-            container.appendChild(label);
-
-            if (window.JsBarcode) {
-                try {
-                    window.JsBarcode(label.querySelector('svg'), String(t.barcode), {
-                        format: "CODE128",
-                        width: 1.25,
-                        height: 24,
-                        displayValue: true,
-                        fontSize: 9,
-                        font: "Segoe UI, Arial, sans-serif",
-                        fontOptions: "bold",
-                        textMargin: 1,
-                        margin: 2
-                    });
-                } catch(e) {
-                    console.warn("JsBarcode error:", e);
-                }
-            }
+    if (typeof executePrinting === 'function') {
+        executePrinting(targets, 1);
+        if (typeof showToast === 'function') {
+            showToast(`🖨️ جاري إرسال (${targets.length}) تشكيلة للطباعة بالقالب الموحد...`, "success");
         }
-    });
-
-    setTimeout(() => {
-        printWindow.focus();
-        printWindow.print();
-    }, 400);
-
-    showToast(`🖨️ جاري إرسال (${svgIndex}) تيكت للطباعة...`, "success");
+    } else {
+        if (typeof showToast === 'function') {
+            showToast('⚠️ دالة طباعة الباركود غير متاحة حالياً', 'error');
+        }
+    }
 }
 
 function updateVariantsCountBadge() {
     const count = document.getElementById('productVariantsTableBody')?.rows?.length || 0;
     const badge = document.getElementById('variantsCountBadge');
     if (badge) badge.innerText = count;
+    if (typeof window.updateVariantPriceSyncUI === 'function') {
+        window.updateVariantPriceSyncUI();
+    }
 }
+
+function initVariantPriceSyncListeners() {
+    ['newItemPrice', 'newItemWholesale', 'newItemCost', 'newItemDiscount'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el._hasPriceSyncListener) {
+            el._hasPriceSyncListener = true;
+            el.addEventListener('input', () => {
+                const rows = document.getElementById('productVariantsTableBody')?.rows || [];
+                if (rows.length > 0) {
+                    window.hasSyncedVariantPrices = false;
+                    if (typeof window.updateVariantPriceSyncUI === 'function') {
+                        window.updateVariantPriceSyncUI();
+                    }
+                }
+            });
+        }
+    });
+
+    const vBody = document.getElementById('productVariantsTableBody');
+    if (vBody && !vBody._hasPriceSyncListener) {
+        vBody._hasPriceSyncListener = true;
+        vBody.addEventListener('input', (e) => {
+            if (e.target.classList.contains('var-price-input') || e.target.classList.contains('var-ws-input') || e.target.classList.contains('var-cost-input')) {
+                if (typeof window.updateVariantPriceSyncUI === 'function') {
+                    window.updateVariantPriceSyncUI();
+                }
+            }
+        });
+    }
+}
+setTimeout(initVariantPriceSyncListeners, 500);
+
 
 function initBarcodeScannerHandlers() {
     const bcInput = document.getElementById('newItemBarcode');

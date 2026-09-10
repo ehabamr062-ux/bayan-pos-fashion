@@ -1,12 +1,19 @@
-// دالة لفتح الروابط الخارجية بأمان (خاصة ببيئة Electron)
+// دالة لفتح الروابط الخارجية بأمان (خاصة ببيئة Electron والمتصفح)
 function openExternalUrl(url) {
+    if (!url || typeof url !== 'string') return;
+    const cleanUrl = url.trim();
+    // 🔒 صمام الأمان الفولاذي: حصر الفتح بالبروتوكولات الآمنة ومنع تشغيل أي ملفات أو أوامر تنفيذية
+    if (!/^https?:\/\//i.test(cleanUrl) && !/^mailto:/i.test(cleanUrl) && !/^tel:/i.test(cleanUrl)) {
+        console.warn('⚠️ [Security Shield] Blocked opening untrusted external URL protocol:', cleanUrl);
+        return;
+    }
     // التحقق من وجود بيئة Electron
     if (typeof require !== 'undefined' && typeof require('electron') !== 'undefined') {
         const { shell } = require('electron');
-        shell.openExternal(url);
+        shell.openExternal(cleanUrl);
     } else {
-        // فتح الرابط في نافذة جديدة كحل بديل للمتصفح العادي
-        window.open(url, '_blank');
+        // فتح الرابط في نافذة جديدة للمتصفح العادي مع عزل المرجع لمنع التلاعب (noopener,noreferrer)
+        window.open(cleanUrl, '_blank', 'noopener,noreferrer');
     }
 }
 
@@ -40,11 +47,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '1.0.3';
-window.APP_VERSION = '1.0.3';
+window.appVersion = '1.0.5';
+window.APP_VERSION = '1.0.5';
 
 async function fetchAppVersion() {
-    let version = '1.0.3';
+    let version = '1.0.5';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -58,7 +65,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '1.0.3';
+    if (!version) version = window.appVersion || '1.0.5';
     window.appVersion = version;
     window.APP_VERSION = version;
 
@@ -79,6 +86,10 @@ function syncAppVersionUI(version) {
 
     const changelogBadge = document.getElementById('updateChangelogCurrentVer');
     if (changelogBadge) changelogBadge.innerText = `(v${version})`;
+
+    if (typeof window.updateAutoUpdatesPolicyDOM === 'function' && typeof window.__isAutoUpdatesFrozenNow === 'function') {
+        window.updateAutoUpdatesPolicyDOM(!window.__isAutoUpdatesFrozenNow());
+    }
 }
 
 window.syncAppVersionUI = syncAppVersionUI;
@@ -129,7 +140,7 @@ async function checkSubscriptionStatus() {
 
 // تهيئة قاعدة بيانات IndexedDB بشكل كامل (Dexie)
 const db = new Dexie("BayanDatabase");
-db.version(100).stores({
+db.version(101).stores({
     products: "++id, name, barcode, category",
     transactions: "++id, dateISO, type, partner, invoiceId",
     accounts: "++id, name, type, code",
@@ -139,7 +150,9 @@ db.version(100).stores({
     auditLogs: "++id, timestamp, action",
     backups: "++id, timestamp",
     wallpapers: "name",
-    treasuryAudit: "++id, date, category"
+    treasuryAudit: "++id, date, category",
+    syncQueue: "++id, timestamp, action, type, status",
+    warehouses: "++id, name"
 });
 window.db = db;
 if (typeof window.bayanDB === 'undefined' || !window.bayanDB) {
@@ -291,13 +304,14 @@ async function loadData() {
 
     try {
         // 1. تحميل كافة البيانات من IndexedDB بالتوازي لتسريع بدء التشغيل والتحميل 100%
-        const [pData, tData, aData, uData, trData, logData] = await Promise.all([
+        const [pData, tData, aData, uData, trData, logData, wData] = await Promise.all([
             db.products.toArray(),
             db.transactions.toArray(),
             db.accounts.toArray(),
             db.users.toArray(),
             db.trash.toArray(),
-            db.auditLogs.toArray()
+            db.auditLogs.toArray(),
+            db.warehouses.toArray()
         ]);
 
         productsDB = pData || [];
@@ -306,9 +320,11 @@ async function loadData() {
         users = uData || [];
         trashBin = trData || [];
         auditLogs = logData || [];
+        warehouses = (wData && wData.length > 0) ? wData : [{ id: 1, name: 'المخزن الرئيسي', address: 'المقر الرئيسي' }];
 
-        // تنظيف أي أرصدة سالبة قديمة ومزامنة رصيد الصنف الأساسي مع مجموع تشكيلاته
+        // تنظيف أي أرصدة سالبة قديمة ومزامنة رصيد وأسعار التشكيلات مع الصنف الأساسي
         if (Array.isArray(productsDB)) {
+            let productsToUpdateInDb = [];
             productsDB.forEach(p => {
                 if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
                     p.variants.forEach(v => {
@@ -318,6 +334,8 @@ async function loadData() {
                     });
                     const vSum = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
                     p.stock = vSum;
+
+                    // الحفاظ على أسعار المقاسات المخصصة كما حددها المستخدم تماماً دون تعديل تلقائي
                 }
             });
         }
@@ -330,15 +348,6 @@ async function loadData() {
         auditLogs = [];
     }
 
-    if (getStore('pos_warehouses')) {
-
-        warehouses = JSON.parse(getStore('pos_warehouses'));
-
-    } else {
-
-        warehouses = [{ id: 1, name: 'المخزن الرئيسي', address: 'المقر الرئيسي' }];
-
-    }
     window.warehouses = warehouses;
 
 
@@ -473,20 +482,21 @@ async function loadData() {
 
     updateConnectionStatus();
 
-    // ✅ تطبيق صلاحيات وإعدادات التاريخ فور تحميل البيانات
-    setTimeout(() => {
-        if (typeof applyPermissions === 'function') applyPermissions();
-    }, 300);
+    // ✅ تطبيق صلاحيات وإعدادات التاريخ فور تحميل البيانات فورياً وبدون تأخير لمنع الوميض
+    if (typeof applyPermissions === 'function') applyPermissions();
 
-    // تشغيل النسخ الاحتياطي التلقائي عند التحميل
+    // تشغيل النسخ الاحتياطي التلقائي عند التحميل فقط إذا كان مفعلاً صراحة في الإعدادات
     setTimeout(() => {
-        if (typeof BackupService !== 'undefined') BackupService.createAutoBackup();
-    }, 2000);
+        const settings = JSON.parse(getStore('pos_settings') || '{}');
+        if (settings.autoBackup === true && typeof BackupService !== 'undefined') {
+            BackupService.createAutoBackup();
+        }
+    }, 4000);
 
-    // تشغيل النسخ الاحتياطي التلقائي عند إغلاق البرنامج
+    // تشغيل النسخ الاحتياطي التلقائي عند إغلاق البرنامج فقط إذا كان مفعلاً صراحة في الإعدادات
     window.addEventListener('beforeunload', () => {
-        if (typeof BackupService !== 'undefined') {
-            // استخدام التزامن أو الحفظ المباشر
+        const settings = JSON.parse(getStore('pos_settings') || '{}');
+        if (settings.autoBackup === true && typeof BackupService !== 'undefined') {
             BackupService.createAutoBackup();
         }
     });
@@ -510,7 +520,10 @@ async function saveData() {
     isSavingDbData = true;
 
     try {
-        await db.transaction('rw', [db.products, db.accounts, db.transactions, db.users, db.trash, db.auditLogs, db.settings, db.treasuryAudit], async () => {
+        const tablesToTransact = (db.tables && db.tables.length > 0)
+            ? db.tables
+            : [db.products, db.accounts, db.transactions, db.users, db.trash, db.auditLogs, db.settings, db.treasuryAudit, db.warehouses];
+        await db.transaction('rw', tablesToTransact, async () => {
             // 1. حفظ وتحديث الأصناف
             if (Array.isArray(productsDB)) {
                 if (window.deletedItemIds.products && window.deletedItemIds.products.length > 0) {
@@ -588,6 +601,14 @@ async function saveData() {
             // 7. حفظ الإعدادات
             const settings = JSON.parse(getStore('pos_settings') || '{}');
             await db.settings.put({ id: 'main', ...settings });
+
+            // 8. حفظ المخازن
+            if (Array.isArray(warehouses)) {
+                await db.warehouses.clear();
+                if (warehouses.length > 0) {
+                    await db.warehouses.bulkPut(warehouses);
+                }
+            }
         });
 
         console.log("✅ Data successfully saved atomically to IndexedDB.");
@@ -603,7 +624,6 @@ async function saveData() {
     }
 
     // حفظ الإعدادات السريعة في IndexedDB عبر setStore
-    setStore('pos_warehouses', JSON.stringify(warehouses));
     setStore('pos_discount_reasons', JSON.stringify(discountReasons));
     setStore('pos_tax_reasons', JSON.stringify(taxReasons));
     setStore('pos_p_discount_reasons', JSON.stringify(purchaseDiscountReasons));
@@ -657,7 +677,7 @@ async function wipeAllSystemData() {
 
         ]);
 
-        // مسح البيانات من LocalStorage
+        // مسح الإعدادات من IndexedDB عبر removeStore
 
         const keysToRemove = [
 
@@ -686,3 +706,32 @@ async function wipeAllSystemData() {
 }
 
 window.wipeAllSystemData = wipeAllSystemData;
+
+window.syncAllVariantPricesWithProductBase = async function() {
+    if (typeof productsDB === 'undefined' || !Array.isArray(productsDB)) return 0;
+    let productsToUpdateInDb = [];
+    productsDB.forEach(p => {
+        if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+            const basePrice = parseFloat(p.price) || 0;
+            if (basePrice > 0) {
+                const firstP = parseFloat(p.variants[0].price) || 0;
+                const allSameP = p.variants.every(v => (parseFloat(v.price) || 0) === firstP);
+                if (allSameP && Math.abs(firstP - basePrice) > 0.01) {
+                    p.variants.forEach(v => {
+                        v.price = basePrice;
+                    });
+                    productsToUpdateInDb.push(p);
+                }
+            }
+        }
+    });
+    if (productsToUpdateInDb.length > 0 && typeof db !== 'undefined' && db.products) {
+        try {
+            await db.products.bulkPut(productsToUpdateInDb);
+            console.log(`✅ [Bayan Sync] Synced variant prices for ${productsToUpdateInDb.length} products with base prices.`);
+        } catch(e) {
+            console.warn("Error in syncAllVariantPricesWithProductBase:", e);
+        }
+    }
+    return productsToUpdateInDb.length;
+};

@@ -128,14 +128,13 @@ function printInvoice(invoiceData) {
 
     // توحيد وتطبيع الحقول لتغطية كافة أشكال البيانات القادمة من مختلف شاشات التطبيق
     const invoiceNumber = invoiceData.invoiceNumber || invoiceData.id || '';
-    const invoiceType   = invoiceData.invoiceType   || invoiceData.paymentMethod || 'بيع';
     const date          = invoiceData.date          || '';
     const time          = invoiceData.time          || '';
     const dueDate       = invoiceData.dueDate       || '';
     const cashier       = invoiceData.cashier       || '';
     const customer      = invoiceData.customer      || invoiceData.partnerName || '';
     const warehouse     = invoiceData.warehouse     || (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) || 'المخزن الرئيسي';
-    const terminal      = invoiceData.terminal      || ((window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱'));
+    const terminal      = invoiceData.terminal      || ((window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalDisplayName === 'function') ? window.BayanNetworkHub.getTerminalDisplayName() : 'الجهاز الرئيسي 💻');
     const items         = invoiceData.items         || [];
 
     const totalAmount = parseFloat(invoiceData.totalAmount !== undefined ? invoiceData.totalAmount : (invoiceData.invoiceAmount !== undefined ? invoiceData.invoiceAmount : (invoiceData.total || 0)));
@@ -143,24 +142,47 @@ function printInvoice(invoiceData) {
     const deferred    = parseFloat(invoiceData.deferred !== undefined ? invoiceData.deferred : (totalAmount - paid));
     const prevBalance = parseFloat(invoiceData.prevBalance !== undefined ? invoiceData.prevBalance : 0);
     const currentBalance = parseFloat(invoiceData.currentBalance !== undefined ? invoiceData.currentBalance : (prevBalance + deferred));
-    const docType     = invoiceData.docType     || (invoiceData.type === 'purchase' ? 'purchase' : 'sales');
 
-    // عنوان المستند بحسب النوع
+    // استخراج طريقة الدفع الصريحة ونوع الفاتورة بمرونة لتجنب الخلط
+    const paymentMethod = invoiceData.paymentMethod || invoiceData.method || (['نقدي', 'آجل', 'فيزا', 'شبكة', 'بنكي', 'شيك'].includes(invoiceData.invoiceType) ? invoiceData.invoiceType : 'نقدي');
+    const invoiceType   = invoiceData.invoiceType || paymentMethod || 'بيع';
+
+    // فحص دقيق وشامل لنوع المستند (مبيعات / مشتريات / مرتجعات) من مختلف الإشارات الممكنة
+    const rawType = String(invoiceData.invoiceType || invoiceData.type || invoiceData.docType || invoiceData.docTitle || '').toLowerCase();
+    const isRet = invoiceData.isReturn === true || 
+                  rawType.includes('مرتجع') || 
+                  rawType.includes('return') || 
+                  rawType.includes('ارتجاع') || 
+                  (invoiceData.docType && invoiceData.docType.includes('return'));
+
+    const isPur = invoiceData.isPurchase === true || 
+                  rawType.includes('شراء') || 
+                  rawType.includes('مشتريات') || 
+                  rawType.includes('purchase') || 
+                  invoiceData.docType === 'purchase' || 
+                  invoiceData.docType === 'return_purchase';
+
+    const docType = invoiceData.docType || (isRet ? (isPur ? 'return_purchase' : 'return_sales') : (isPur ? 'purchase' : 'sales'));
+
+    // عناوين المستندات الرسمية
     const docTitles = {
-        sales:     'فاتورة مبيعات',
-        purchase:  'فاتورة شراء',
-        financial: 'سند مالي',
-        inventory: 'تقرير مخزن',
-        general:   'مستند عام'
+        sales:           'فاتورة مبيعات',
+        purchase:        'فاتورة شراء',
+        return_sales:    'مرتجع مبيعات',
+        return_purchase: 'مرتجع مشتريات',
+        financial:       'سند مالي',
+        inventory:       'تقرير مخزن',
+        general:         'مستند عام'
     };
-    let docTitle = docTitles[docType] || `فاتورة ${invoiceType}`;
-    
-    // تخصيص العنوان للمرتجعات بدقة
-    if (invoiceType.includes('مرتجع') || invoiceType.includes('Return') || invoiceType.includes('ارتجاع')) {
-        if (invoiceType.includes('شراء') || invoiceType.includes('purchase')) {
-            docTitle = 'مرتجع مشتريات';
+
+    let docTitle = invoiceData.docTitle;
+    if (!docTitle) {
+        if (isRet) {
+            docTitle = isPur ? 'مرتجع مشتريات' : 'مرتجع مبيعات';
+        } else if (docTitles[docType]) {
+            docTitle = docTitles[docType];
         } else {
-            docTitle = 'مرتجع مبيعات';
+            docTitle = isPur ? 'فاتورة شراء' : 'فاتورة مبيعات';
         }
     }
 
@@ -243,7 +265,7 @@ function printInvoice(invoiceData) {
 
     const d = {
         shopName, shopAddress, shopPhone, footerMsg, socialQrLink, docTitle,
-        invoiceNumber, invoiceType, date, time, dueDate, cashier, customer, warehouse, terminal,
+        invoiceNumber, invoiceType: paymentMethod, date, time, dueDate, cashier, customer, warehouse, terminal,
         totalAmount, paid, deferred, prevBalance, currentBalance, docType,
         itemsRowsFull, itemsRowsCompact, discount, subTotal, tax, taxLabel, globalTax
     };

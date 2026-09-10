@@ -13,6 +13,15 @@ let pairedDevices = []; // [{ deviceId, deviceName, ip, pairedAt, token, status 
 let pendingPairingRequests = []; // [{ id, deviceId, deviceName, ip, requestedAt, pin }]
 let inTransitTransfers = []; // Shared in-memory and persisted pending transfers cache
 
+// 🛡️ جداول الحماية من هجمات التخمين وتتبع أمان رمز الـ PIN
+const pinFailedAttempts = new Map(); // ip -> failed attempts count
+const pinLockouts = new Map(); // ip -> lockout expiry timestamp
+
+function cleanExpiredPairingRequests() {
+    const twoMinAgo = Date.now() - 120000; // صلاحية رمز الـ PIN دقيقتان فقط
+    pendingPairingRequests = pendingPairingRequests.filter(r => new Date(r.requestedAt).getTime() > twoMinAgo);
+}
+
 // مسار حفظ بيانات الأجهزة المقترنة محلياً
 const appDataPath = path.join(os.homedir(), '.bayan_pos');
 const pairedDevicesFile = path.join(appDataPath, 'paired_devices.json');
@@ -25,12 +34,55 @@ try {
     }
     if (fs.existsSync(pairedDevicesFile)) {
         pairedDevices = JSON.parse(fs.readFileSync(pairedDevicesFile, 'utf8') || '[]');
+        ensureDeviceLettering();
     }
     if (fs.existsSync(pendingTransfersFile)) {
         inTransitTransfers = JSON.parse(fs.readFileSync(pendingTransfersFile, 'utf8') || '[]');
     }
 } catch (e) {
     console.warn('[ServerHub] Load cache error:', e.message);
+}
+
+// 🏷️ ضمان وجود حروف أبجدية وترتيب تسلسلي دائم لجميع الأجهزة المقترنة (A, B, C, D...)
+function ensureDeviceLettering() {
+    const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let letterIdx = 0;
+    let order = 1;
+    let changed = false;
+    pairedDevices.forEach(d => {
+        if (d.deviceId === 'DEV-HOST') {
+            if (!d.terminalLetter) { d.terminalLetter = 'MASTER'; changed = true; }
+            if (d.pairingOrder !== 0) { d.pairingOrder = 0; changed = true; }
+            return;
+        }
+        if (!d.terminalLetter) {
+            d.terminalLetter = LETTERS[letterIdx % LETTERS.length];
+            changed = true;
+        }
+        if (!d.pairingOrder) {
+            d.pairingOrder = order;
+            changed = true;
+        }
+        if (!d.deviceName || d.deviceName.startsWith('تابلت') || d.deviceName.startsWith('جهاز فرعي') || d.deviceName === 'جهاز مقترن') {
+            d.deviceName = `كاشير فرعي (${d.terminalLetter}) 📱`;
+            changed = true;
+        }
+        letterIdx++;
+        order++;
+    });
+    if (changed) {
+        savePairedDevices();
+    }
+}
+
+function updatePairedDeviceName(deviceId, newName) {
+    const dev = pairedDevices.find(d => d.deviceId === deviceId);
+    if (dev) {
+        dev.deviceName = (newName || '').trim() || `كاشير فرعي (${dev.terminalLetter || 'A'}) 📱`;
+        savePairedDevices();
+        return true;
+    }
+    return false;
 }
 
 function savePairedDevices() {
@@ -91,8 +143,18 @@ try {
 
 let isSavingMasterDb = false;
 let pendingSaveMasterDb = false;
+let saveMasterDbDebounceTimer = null;
 
 function saveMasterDb() {
+    if (saveMasterDbDebounceTimer) {
+        clearTimeout(saveMasterDbDebounceTimer);
+    }
+    saveMasterDbDebounceTimer = setTimeout(() => {
+        _doSaveMasterDb();
+    }, 250);
+}
+
+function _doSaveMasterDb() {
     if (isSavingMasterDb) {
         pendingSaveMasterDb = true;
         return;
@@ -107,23 +169,117 @@ function saveMasterDb() {
             }
             if (pendingSaveMasterDb) {
                 pendingSaveMasterDb = false;
-                saveMasterDb();
+                _doSaveMasterDb();
             }
         });
     } catch (e) {
         isSavingMasterDb = false;
-        console.error('[ServerHub] Save master db error:', e.message);
+        console.error('[ServerHub] Save master db sync error:', e.message);
     }
 }
 
-function mergeTransactions(existingList = [], incomingList = []) {
-    if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
-    if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
+const DEVICE_LOCAL_SETTINGS_KEYS = new Set([
+    'bayan_terminal_role',
+    'bayan_client_device_id',
+    'bayan_client_device_token',
+    'bayan_client_is_paired',
+    'bayan_local_server_url',
+    'bayan_is_master_terminal',
+    'bayan_hwid',
+    'hwid',
+    'bayan_device_prefix',
+    'bayan_user_name',
+    'bayan_user_warehouse',
+    'pos_session_user',
+    'bayan_install_date',
+    'bayan_paid_start_date',
+    'bayan_sub_transfer_phone',
+    'bayan_purged_trash_ids',
+    'license_info',
+    'bayan_license_info',
+    'bayan_active_license',
+    'bayan_master_license',
+    'bayan_master_hwid',
+    'bayan_machine_id',
+    'bayan_max_seen_timestamp',
+    'bayan_expiry_date'
+]);
+
+function getTrashedTransactionKeys(trashList = []) {
+    const keySet = new Set();
+    const invIdSet = new Set();
+    if (!Array.isArray(trashList)) return { keySet, invIdSet };
+
+    trashList.forEach(t => {
+        if (!t) return;
+        const tp = String(t.type || '').toLowerCase();
+        if (tp.includes('transaction') || tp.includes('invoice') || tp.includes('فاتورة') || tp.includes('حركة') || tp.includes('sale') || tp.includes('purchase')) {
+            const data = t.originalData || t;
+            const items = Array.isArray(data) ? data : (data.items ? data.items : [data]);
+            items.forEach(it => {
+                if (!it) return;
+                if (it.id) {
+                    keySet.add(`id_${it.id}`);
+                    keySet.add(String(it.id));
+                }
+                if (it.invoiceId != null && it.invoiceId !== '') {
+                    invIdSet.add(String(it.invoiceId));
+                    invIdSet.add(Number(it.invoiceId));
+                }
+                const inv = it.invoiceId || '';
+                const prod = it.product || it.productName || '';
+                const s = it.size || it.selectedSize || '';
+                const c = it.color || it.selectedColor || '';
+                const d = it.dateISO || it.date || '';
+                const tm = it.timeISO || it.time || '';
+                const wh = it.warehouse || '';
+                const qty = it.qty || 0;
+                keySet.add(`tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`);
+            });
+        }
+    });
+    return { keySet, invIdSet };
+}
+
+function mergeTransactions(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+    const { keySet: trashedKeys, invIdSet: trashedInvIds } = getTrashedTransactionKeys(trashList);
+
+    const isTrashed = (t) => {
+        if (!t) return true;
+        if (t.id && (trashedKeys.has(`id_${t.id}`) || trashedKeys.has(String(t.id)))) return true;
+        if (t.invoiceId != null && (trashedInvIds.has(String(t.invoiceId)) || trashedInvIds.has(Number(t.invoiceId)))) return true;
+        const inv = t.invoiceId || '';
+        const prod = t.product || t.productName || '';
+        const s = t.size || t.selectedSize || '';
+        const c = t.color || t.selectedColor || '';
+        const d = t.dateISO || t.date || '';
+        const tm = t.timeISO || t.time || '';
+        const wh = t.warehouse || '';
+        const qty = t.qty || 0;
+        const compKey = `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+        return trashedKeys.has(compKey);
+    };
+
+    const cleanExisting = (Array.isArray(existingList) ? existingList : []).filter(t => !isTrashed(t));
+    const cleanIncoming = (Array.isArray(incomingList) ? incomingList : []).filter(t => !isTrashed(t));
+
+    if (cleanExisting.length === 0) return cleanIncoming;
+    if (cleanIncoming.length === 0) return cleanExisting;
+
+    // 1. تحديد كافة أرقام الفواتير الواردة التي تم تعديلها أو إنشاؤها حديثاً
+    const incomingInvoiceKeys = new Set();
+    cleanIncoming.forEach(t => {
+        if (t && t.invoiceId != null && t.invoiceId !== '') {
+            const cleanType = String(t.type || '').includes('مرتجع') ? 'return' : 'normal';
+            incomingInvoiceKeys.add(`${t.invoiceId}_${cleanType}`);
+        }
+    });
 
     const map = new Map();
     const getKey = (t) => {
         if (!t) return '';
-        if (t.id) return `id_${t.id}`;
+        if (t.id && t.invoiceId) return `inv_${t.invoiceId}_id_${t.id}`;
+        if (t.id) return `id_${t.id}_type_${t.type}`;
         const inv = t.invoiceId || '';
         const prod = t.product || t.productName || '';
         const s = t.size || t.selectedSize || '';
@@ -135,12 +291,22 @@ function mergeTransactions(existingList = [], incomingList = []) {
         return `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
     };
 
-    existingList.forEach(t => {
+    // 2. إضافة حركات القائمة السابقة بشرط ألا تكون تنتمي لفاتورة وردت بنسخة أحدث (منع دبلرة البنود المعدلة)
+    cleanExisting.forEach(t => {
+        if (!t) return;
+        if (t.invoiceId != null && t.invoiceId !== '') {
+            const cleanType = String(t.type || '').includes('مرتجع') ? 'return' : 'normal';
+            if (incomingInvoiceKeys.has(`${t.invoiceId}_${cleanType}`)) {
+                // الفاتورة وردت في incomingList، لذا نتجاهل بنودها القديمة ونعتمد الواردة منعاً للتكرار
+                return;
+            }
+        }
         const k = getKey(t);
         if (k) map.set(k, t);
     });
 
-    incomingList.forEach(t => {
+    // 3. إضافة كافة الحركات الواردة
+    cleanIncoming.forEach(t => {
         const k = getKey(t);
         if (!k) return;
         if (!map.has(k)) {
@@ -151,7 +317,7 @@ function mergeTransactions(existingList = [], incomingList = []) {
         }
     });
 
-    return Array.from(map.values());
+    return Array.from(map.values()).filter(t => !isTrashed(t));
 }
 
 function getTrashedProductKeys(trashList = []) {
@@ -159,20 +325,22 @@ function getTrashedProductKeys(trashList = []) {
     if (!Array.isArray(trashList)) return set;
     trashList.forEach(t => {
         if (!t) return;
-        const d = t.originalData || t;
-        if (d.id) set.add(String(d.id));
-        if (d.barcode) set.add(String(d.barcode).trim());
+        const tp = String(t.type || '').toLowerCase();
+        if (tp.includes('product') || tp.includes('inventory') || tp.includes('صنف') || tp.includes('بضاعة')) {
+            const d = t.originalData || t;
+            const items = Array.isArray(d) ? d : [d];
+            items.forEach(it => {
+                if (!it) return;
+                if (it.id) set.add(String(it.id));
+                if (it.barcode) set.add(String(it.barcode).trim());
+            });
+        }
     });
     return set;
 }
 
 function mergeProducts(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
     const trashedKeys = getTrashedProductKeys(trashList);
-
-    // إذا كان التحديث قادماً من السيرفر الرئيسي الماستر نفسه، فإن قائمته للأصناف هي المرجع الأساسي المعتمد للكتالوج
-    if (isMasterPush && Array.isArray(incomingList)) {
-        return incomingList.filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
-    }
 
     if (!Array.isArray(existingList) || existingList.length === 0) {
         return (Array.isArray(incomingList) ? incomingList : []).filter(p => p && !trashedKeys.has(String(p.id)) && !trashedKeys.has(String(p.barcode || '').trim()));
@@ -197,8 +365,19 @@ function mergeProducts(existingList = [], incomingList = [], trashList = [], isM
             map.set(sKey, p);
         } else {
             const existing = map.get(sKey);
-            const mergedWhStocks = { ...(existing.warehouseStocks || {}), ...(p.warehouseStocks || {}) };
-            
+
+            // دمج أرصدة المخازن لكل مخزن على حدة بدقة
+            const mergedWhStocks = { ...(existing.warehouseStocks || {}) };
+            if (p.warehouseStocks && typeof p.warehouseStocks === 'object') {
+                Object.keys(p.warehouseStocks).forEach(wh => {
+                    const incQty = parseFloat(p.warehouseStocks[wh]);
+                    if (!isNaN(incQty)) {
+                        mergedWhStocks[wh] = incQty;
+                    }
+                });
+            }
+
+            // دمج تشكيلات المقاسات والألوان وتكلفة وأرصدة كل تشكيلة
             let mergedVariants = p.variants || existing.variants;
             if (Array.isArray(existing.variants) && Array.isArray(p.variants)) {
                 const varMap = new Map();
@@ -209,16 +388,40 @@ function mergeProducts(existingList = [], incomingList = [], trashList = [], isM
                         varMap.set(vk, v);
                     } else {
                         const ev = varMap.get(vk);
-                        const vWhStocks = { ...(ev.warehouseStocks || {}), ...(v.warehouseStocks || {}) };
-                        varMap.set(vk, { ...ev, ...v, warehouseStocks: vWhStocks });
+                        const vWhStocks = { ...(ev.warehouseStocks || {}) };
+                        if (v.warehouseStocks && typeof v.warehouseStocks === 'object') {
+                            Object.keys(v.warehouseStocks).forEach(wh => {
+                                const iq = parseFloat(v.warehouseStocks[wh]);
+                                if (!isNaN(iq)) {
+                                    vWhStocks[wh] = iq;
+                                }
+                            });
+                        }
+                        const vTotalStock = Object.keys(vWhStocks).length > 0
+                            ? Object.values(vWhStocks).reduce((sum, q) => sum + (parseFloat(q) || 0), 0)
+                            : (v.stock !== undefined ? v.stock : ev.stock);
+
+                        varMap.set(vk, { 
+                            ...ev, 
+                            ...v, 
+                            warehouseStocks: vWhStocks,
+                            stock: vTotalStock,
+                            cost: v.cost !== undefined ? v.cost : ev.cost
+                        });
                     }
                 });
                 mergedVariants = Array.from(varMap.values());
             }
 
+            // حساب الرصيد الإجمالي للصنف عبر جميع المخازن
+            const totalStock = Object.keys(mergedWhStocks).length > 0
+                ? Object.values(mergedWhStocks).reduce((sum, q) => sum + (parseFloat(q) || 0), 0)
+                : (p.stock !== undefined ? p.stock : existing.stock);
+
             map.set(sKey, {
                 ...existing,
                 ...p,
+                stock: totalStock,
                 warehouseStocks: mergedWhStocks,
                 variants: mergedVariants
             });
@@ -234,10 +437,14 @@ function getTrashedAccountKeys(trashList = []) {
     trashList.forEach(t => {
         if (!t) return;
         const tType = String(t.type || '').toLowerCase();
-        if (tType === 'account' || tType === 'عميل' || tType === 'مورد') {
+        if (tType.includes('account') || tType.includes('عميل') || tType.includes('مورد') || tType.includes('حساب')) {
             const d = t.originalData || t;
-            if (d.id) set.add(String(d.id));
-            if (d.name) set.add(String(d.name).trim());
+            const items = Array.isArray(d) ? d : [d];
+            items.forEach(it => {
+                if (!it) return;
+                if (it.id) set.add(String(it.id));
+                if (it.name) set.add(String(it.name).trim());
+            });
         }
     });
     return set;
@@ -280,12 +487,149 @@ function mergeAccounts(existingList = [], incomingList = [], trashList = [], isM
     return Array.from(map.values()).filter(a => a && !trashedKeys.has(String(a.id)) && !trashedKeys.has(String(a.name || '').trim()));
 }
 
-function mergeTrash(existingList = [], incomingList = []) {
+function mergeTrash(existingList = [], incomingList = [], purgedTrashIds = [], isMasterPush = false) {
+    const purgedSet = new Set((Array.isArray(purgedTrashIds) ? purgedTrashIds : []).map(id => String(id)));
+
+    // إذا كان الماستر يرسل سلة فارغة ومعه purgedTrashIds أو تأكيد مسح الماستر
+    if (isMasterPush && Array.isArray(incomingList)) {
+        return incomingList.filter(it => it && !purgedSet.has(String(it.id)) && !purgedSet.has(`${it.type}_${it.label}_${it.deletedAt}`));
+    }
+
+    const map = new Map();
+    const getKey = (item) => item.id || `${item.type}_${item.label}_${item.deletedAt}`;
+
+    (Array.isArray(existingList) ? existingList : []).forEach(it => {
+        const k = getKey(it);
+        if (k && !purgedSet.has(String(k)) && !purgedSet.has(String(it.id))) {
+            map.set(String(k), it);
+        }
+    });
+
+    (Array.isArray(incomingList) ? incomingList : []).forEach(it => {
+        const k = getKey(it);
+        if (!k || purgedSet.has(String(k)) || purgedSet.has(String(it.id))) return;
+        const sKey = String(k);
+        if (!map.has(sKey)) {
+            map.set(sKey, it);
+        }
+    });
+
+    return Array.from(map.values()).filter(it => it && !purgedSet.has(String(it.id)) && !purgedSet.has(String(getKey(it))));
+}
+
+function getTrashedUserKeys(trashList = []) {
+    const set = new Set();
+    if (!Array.isArray(trashList)) return set;
+    trashList.forEach(t => {
+        if (!t) return;
+        const tp = String(t.type || '').toLowerCase();
+        if (tp.includes('user') || tp.includes('مستخدم')) {
+            const d = t.originalData || t;
+            if (d.id) set.add(String(d.id));
+            if (d.name) set.add(String(d.name).trim());
+            if (d.pin) set.add(String(d.pin).trim());
+        }
+    });
+    return set;
+}
+
+function mergeUsers(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+    const trashedKeys = getTrashedUserKeys(trashList);
+
+    if (isMasterPush && Array.isArray(incomingList) && incomingList.length > 0) {
+        return incomingList.filter(u => u && (u.id === 1 || (!trashedKeys.has(String(u.id)) && !trashedKeys.has(String(u.name || '').trim()))));
+    }
+
+    const map = new Map();
+    const getKey = (u) => u.id ? `id_${u.id}` : (u.name || u.pin);
+
+    (Array.isArray(existingList) ? existingList : []).forEach(u => {
+        if (!u) return;
+        if (u.id !== 1 && (trashedKeys.has(String(u.id)) || trashedKeys.has(String(u.name || '').trim()))) return;
+        const k = getKey(u);
+        if (k) map.set(k, u);
+    });
+
+    (Array.isArray(incomingList) ? incomingList : []).forEach(u => {
+        if (!u) return;
+        if (u.id !== 1 && (trashedKeys.has(String(u.id)) || trashedKeys.has(String(u.name || '').trim()))) return;
+        // صمام أمان حديدي: حماية حساب المدير (ID: 1) من التعديل أو التجميد بواسطة أي جهاز فرعي
+        if (!isMasterPush && (u.id === 1 || u.name === 'المدير' || u.role === 'admin')) {
+            return;
+        }
+        const k = getKey(u);
+        if (!k) return;
+        if (!map.has(k)) {
+            map.set(k, u);
+        } else {
+            const existing = map.get(k);
+            map.set(k, { ...existing, ...u });
+        }
+    });
+
+    const result = Array.from(map.values()).filter(u => u && (u.id === 1 || (!trashedKeys.has(String(u.id)) && !trashedKeys.has(String(u.name || '').trim()))));
+    return result.length > 0 ? result : (existingList || []);
+}
+
+function getTrashedWarehouseKeys(trashList = []) {
+    const set = new Set();
+    if (!Array.isArray(trashList)) return set;
+    trashList.forEach(t => {
+        if (!t) return;
+        const tp = String(t.type || '').toLowerCase();
+        if (tp.includes('warehouse') || tp.includes('مخزن')) {
+            const d = t.originalData || t;
+            const w = d.warehouse || d;
+            if (w.id) set.add(String(w.id));
+            if (w.name) set.add(String(w.name).trim());
+        }
+    });
+    return set;
+}
+
+function mergeWarehouses(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+    const trashedKeys = getTrashedWarehouseKeys(trashList);
+
+    if (isMasterPush && Array.isArray(incomingList) && incomingList.length > 0) {
+        return incomingList.filter(w => w && !trashedKeys.has(String(w.id)) && !trashedKeys.has(String(w.name || '').trim()));
+    }
+
+    const map = new Map();
+    const getKey = (w) => w.name ? String(w.name).trim() : (w.id ? String(w.id) : '');
+
+    (Array.isArray(existingList) ? existingList : []).forEach(w => {
+        if (!w) return;
+        const k = getKey(w);
+        if (k && !trashedKeys.has(k) && !trashedKeys.has(String(w.id))) {
+            map.set(k, w);
+        }
+    });
+
+    (Array.isArray(incomingList) ? incomingList : []).forEach(w => {
+        if (!w) return;
+        const k = getKey(w);
+        if (!k || trashedKeys.has(k) || trashedKeys.has(String(w.id))) return;
+        if (!map.has(k)) {
+            map.set(k, w);
+        } else {
+            const existing = map.get(k);
+            map.set(k, { ...existing, ...w });
+        }
+    });
+
+    const result = Array.from(map.values()).filter(w => w && !trashedKeys.has(String(w.name || '').trim()));
+    if (result.length === 0) {
+        result.push({ id: 1, name: 'المخزن الرئيسي', address: 'المقر الرئيسي' });
+    }
+    return result;
+}
+
+function mergeTreasuryAudit(existingList = [], incomingList = []) {
     if (!Array.isArray(existingList) || existingList.length === 0) return Array.isArray(incomingList) ? incomingList : [];
     if (!Array.isArray(incomingList) || incomingList.length === 0) return existingList;
 
     const map = new Map();
-    const getKey = (item) => item.id || `${item.type}_${item.label}_${item.deletedAt}`;
+    const getKey = (item) => item.id || `${item.date}_${item.category}_${item.amount}_${item.time}`;
 
     existingList.forEach(it => {
         const k = getKey(it);
@@ -295,31 +639,117 @@ function mergeTrash(existingList = [], incomingList = []) {
     incomingList.forEach(it => {
         const k = getKey(it);
         if (!k) return;
-        const sKey = String(k);
-        if (!map.has(sKey)) {
-            map.set(sKey, it);
-        }
+        map.set(String(k), it);
     });
 
     return Array.from(map.values());
 }
 
+function syncInTransitFromTransactions(transactions = []) {
+    if (!Array.isArray(transactions)) return;
+    const resolvedInvIds = new Set();
+    const pendingMap = new Map();
+
+    transactions.forEach(t => {
+        if (!t || !t.type || !String(t.type).includes('تحويل')) return;
+        const invId = String(t.invoiceId || t.id || '');
+        if (!invId) return;
+
+        if (t.transferStatus === 'received' || t.transferStatus === 'rejected') {
+            resolvedInvIds.add(invId);
+        } else if (t.transferStatus === 'pending') {
+            if (!pendingMap.has(invId)) {
+                pendingMap.set(invId, {
+                    id: invId,
+                    invoiceId: invId,
+                    sourceWarehouse: t.sourceWarehouse || 'المخزن الرئيسي',
+                    warehouse: t.warehouse || '',
+                    toWarehouse: t.warehouse || '',
+                    date: t.date || '',
+                    dateISO: t.dateISO || '',
+                    timeISO: t.timeISO || '',
+                    transferStatus: 'pending',
+                    items: [],
+                    itemsCount: 0,
+                    totalValue: 0
+                });
+            }
+            const grp = pendingMap.get(invId);
+            grp.items.push({
+                product: t.product || t.productName,
+                size: t.size || t.selectedSize || '',
+                color: t.color || t.selectedColor || '',
+                qty: parseFloat(t.qty) || 1,
+                unit: t.unit || 'قطعة',
+                price: parseFloat(t.price) || 0
+            });
+            grp.itemsCount = grp.items.length;
+            grp.totalValue += (parseFloat(t.qty) || 1) * (parseFloat(t.price) || 0);
+        }
+    });
+
+    let changed = false;
+
+    // 1. إزالة أي تحويلات معلقة تم استلامها أو رفضها
+    const prevCount = inTransitTransfers.length;
+    inTransitTransfers = inTransitTransfers.filter(t => {
+        const id = String(t.id || t.invoiceId || '');
+        return !resolvedInvIds.has(id);
+    });
+    if (inTransitTransfers.length !== prevCount) changed = true;
+
+    // 2. تحديث أو إضافة التحويلات المعلقة
+    pendingMap.forEach((tr, invId) => {
+        const existingIdx = inTransitTransfers.findIndex(x => String(x.id || x.invoiceId || '') === invId);
+        if (existingIdx >= 0) {
+            inTransitTransfers[existingIdx] = { ...inTransitTransfers[existingIdx], ...tr };
+        } else {
+            inTransitTransfers.push(tr);
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        savePendingTransfers();
+    }
+}
+
 function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
     if (db && typeof db === 'object') {
-        const mergedTrash = mergeTrash(masterDbData.trash || [], db.trash || []);
         const isMaster = (isMasterServer === true || sourceDeviceId === 'DEV-HOST' || db.isMasterServer);
+        const purgedTrashIds = Array.isArray(db.purgedTrashIds) ? db.purgedTrashIds : [];
+        const mergedTrash = mergeTrash(masterDbData.trash || [], db.trash || [], purgedTrashIds, isMaster);
+
+        // تصفية الإعدادات لحجب أي مفاتيح محلية خاصة بالجهاز (Device Local Blacklist)
+        const cleanIncomingSettings = {};
+        if (db.settings && typeof db.settings === 'object') {
+            Object.keys(db.settings).forEach(k => {
+                if (!DEVICE_LOCAL_SETTINGS_KEYS.has(k)) {
+                    cleanIncomingSettings[k] = db.settings[k];
+                }
+            });
+            // مشاركة ترخيص وكود جهاز الماستر: إذا كان التحديث قادماً من الماستر المعتمد حصرياً، يُحفظ في إعدادات السيرفر ليتم سحبه للتابلت
+            if (isMaster && db.settings.bayan_master_license) {
+                cleanIncomingSettings['bayan_master_license'] = db.settings.bayan_master_license;
+            }
+            if (isMaster && db.settings.bayan_master_hwid) {
+                cleanIncomingSettings['bayan_master_hwid'] = db.settings.bayan_master_hwid;
+            }
+        }
+
         masterDbData = {
             trash: mergedTrash,
             products: mergeProducts(masterDbData.products || [], db.products || [], mergedTrash, isMaster),
             accounts: mergeAccounts(masterDbData.accounts || [], db.accounts || [], mergedTrash, isMaster),
-            transactions: mergeTransactions(masterDbData.transactions || [], db.transactions || []),
-            users: Array.isArray(db.users) && db.users.length > 0 ? db.users : (masterDbData.users || []),
-            warehouses: Array.isArray(db.warehouses) && db.warehouses.length > 0 ? db.warehouses : (masterDbData.warehouses || []),
-            treasuryAudit: Array.isArray(db.treasuryAudit) ? db.treasuryAudit : (masterDbData.treasuryAudit || []),
-            settings: db.settings && typeof db.settings === 'object' ? { ...masterDbData.settings, ...db.settings } : (masterDbData.settings || {}),
+            transactions: mergeTransactions(masterDbData.transactions || [], db.transactions || [], mergedTrash, isMaster),
+            users: mergeUsers(masterDbData.users || [], db.users || [], mergedTrash, isMaster),
+            warehouses: mergeWarehouses(masterDbData.warehouses || [], db.warehouses || [], mergedTrash, isMaster),
+            treasuryAudit: mergeTreasuryAudit(masterDbData.treasuryAudit || [], db.treasuryAudit || []),
+            settings: { ...masterDbData.settings, ...cleanIncomingSettings },
             lastUpdated: new Date().toISOString()
         };
         saveMasterDb();
+        syncInTransitFromTransactions(masterDbData.transactions);
     }
     return masterDbData;
 }
@@ -346,8 +776,26 @@ function startServer(appRootDir, onNotification) {
     }
 
     serverInstance = http.createServer((req, res) => {
-        // تمكين CORS لجميع الأجهزة والطلبات
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        const clientIp = req.socket.remoteAddress ? req.socket.remoteAddress.replace('::ffff:', '') : 'Unknown';
+        const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const pathname = decodeURIComponent(parsedUrl.pathname);
+        const origin = req.headers.origin;
+
+        // التحقق من أن مصدر الطلب محلي وموثوق (Localhost, Private IPs, or Official Demo)
+        const isTrustedOrigin = !origin || 
+            origin === 'null' || 
+            /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) ||
+            /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/i.test(origin) ||
+            origin === 'https://ehabamr062-ux.github.io';
+
+        // ضبط رؤوس CORS بحسب المصدر الموثوق
+        if (origin) {
+            if (isTrustedOrigin) {
+                res.setHeader('Access-Control-Allow-Origin', origin);
+            }
+        } else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Device-Id, X-Device-Token');
 
@@ -357,17 +805,45 @@ function startServer(appRootDir, onNotification) {
             return;
         }
 
-        const clientIp = req.socket.remoteAddress ? req.socket.remoteAddress.replace('::ffff:', '') : 'Unknown';
-        const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-        const pathname = decodeURIComponent(parsedUrl.pathname);
+        // 🛡️ صمام الأمان: حظر أي طلب API خارجي قادم من موقع إنترنت غير موثوق لمنع هجمات CSRF وسحب البيانات
+        if (pathname.startsWith('/api/') && origin && !isTrustedOrigin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: '403 Forbidden: تم حظر الوصول من نطاق ويب غير مصرح به' }));
+            return;
+        }
+
+        // دالة التحقق من مصادقة الأجهزة المتصلة عبر الشبكة المحلية
+        function isAuthorizedDevice(req, clientIp) {
+            const isLocal = (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost') && isTrustedOrigin;
+            if (isLocal) return true;
+            const token = req.headers['x-device-token'] || (parsedUrl ? parsedUrl.searchParams.get('token') : null);
+            const deviceId = req.headers['x-device-id'] || (parsedUrl ? parsedUrl.searchParams.get('deviceId') : null);
+            if (!token) return false;
+            return pairedDevices.some(d => d.token === token && (!deviceId || d.deviceId === deviceId) && d.status === 'active');
+        }
 
         // =========================================================================
         // 📡 1. API Endpoints
         // =========================================================================
         if (pathname.startsWith('/api/')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             let body = '';
-            req.on('data', chunk => { body += chunk; });
+            let bodyTooLarge = false;
+
+            req.on('data', chunk => {
+                if (bodyTooLarge) return;
+                body += chunk;
+                // صمام أمان لحماية الرامات والسيرفر من هجمات الإغراق (Max 50MB)
+                if (body.length > 50 * 1024 * 1024) {
+                    bodyTooLarge = true;
+                    res.writeHead(413, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, message: '413 Payload Too Large: حجم البيانات المرسلة كبير جداً' }));
+                    req.destroy();
+                }
+            });
+
             req.on('end', () => {
+                if (bodyTooLarge) return;
                 let jsonBody = {};
                 try { if (body) jsonBody = JSON.parse(body); } catch (e) {}
 
@@ -388,6 +864,11 @@ function startServer(appRootDir, onNotification) {
 
                 // س. مزامنة البيانات الكاملة: سحب البيانات للجهاز الفرعي / التابلت (Pull All Data)
                 if (pathname === '/api/sync/pull' && req.method === 'GET') {
+                    if (!isAuthorizedDevice(req, clientIp)) {
+                        res.writeHead(401, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: 'غير مصرح: يجب إقران الجهاز أولاً واعتماده من الجهاز الرئيسي' }));
+                        return;
+                    }
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
                         success: true,
@@ -399,11 +880,23 @@ function startServer(appRootDir, onNotification) {
 
                 // ص. مزامنة البيانات الكاملة: إرسال تحديثات التابلت للسيرفر الرئيسي (Push Data)
                 if (pathname === '/api/sync/push' && req.method === 'POST') {
+                    if (!isAuthorizedDevice(req, clientIp)) {
+                        res.writeHead(401, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: 'غير مصرح: يجب إقران الجهاز أولاً واعتماده من الجهاز الرئيسي' }));
+                        return;
+                    }
                     const { db, sourceDeviceId, isMasterServer } = jsonBody;
+
+                    // 🛡️ صمام أمان حاسم: حظر انتحال صفة الجهاز الرئيسي (Master Spoofing Protection)
+                    // لا يُعامل أي جهاز كماستر إلا إذا كان الاتصال قادماً حصرياً من الجهاز المحلي (Localhost)
+                    const isLocalHost = (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost');
+                    const trustedIsMaster = isLocalHost && (isMasterServer === true || sourceDeviceId === 'DEV-HOST');
+                    const trustedDeviceId = trustedIsMaster ? 'DEV-HOST' : (sourceDeviceId === 'DEV-HOST' ? 'DEV-CLIENT' : (sourceDeviceId || 'DEV-CLIENT'));
+
                     if (db) {
-                        updateMasterDbData(db, sourceDeviceId, isMasterServer);
+                        updateMasterDbData(db, trustedDeviceId, trustedIsMaster);
                         if (typeof onNotification === 'function') {
-                            onNotification('sync-data-pushed', { db, sourceDeviceId, clientIp });
+                            onNotification('sync-data-pushed', { db: masterDbData, sourceDeviceId: trustedDeviceId, clientIp });
                         }
                     }
                     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -426,8 +919,14 @@ function startServer(appRootDir, onNotification) {
                     return;
                 }
 
-                // ق2. فتح منفذ السيرفر في جدار حماية ويندوز تلقائياً (Fix Firewall)
+                // ق2. فتح منفذ السيرفر في جدار حماية ويندوز تلقائياً (Fix Firewall) - مقصور على الماستر محلياً
                 if (pathname === '/api/fix-firewall' && req.method === 'POST') {
+                    const isLocal = (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost') && isTrustedOrigin;
+                    if (!isLocal) {
+                        res.writeHead(403, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: 'ممنوع: لا يمكن تنفيذ هذا الإجراء إلا من الجهاز الرئيسي محلياً عبر نطاق موثوق' }));
+                        return;
+                    }
                     const { exec } = require('child_process');
                     const cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList \'/c netsh advfirewall firewall delete rule name=\\\"Bayan POS Local Server\\\" & netsh advfirewall firewall add rule name=\\\"Bayan POS Local Server\\\" dir=in action=allow protocol=TCP localport=4545 profile=any\' -Verb RunAs"';
                     exec(cmd, (err) => {
@@ -454,11 +953,34 @@ function startServer(appRootDir, onNotification) {
                     // تحقق إذا كان الجهاز هو نفسه اللاب توب الماستر (Localhost / Local IP)
                     const isLocalHost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost';
 
-                    // تحقق إذا كان الجهاز مقترناً بالفعل مسبقاً (عبر المعرف أو التوكن)
-                    const existing = pairedDevices.find(d => d.deviceId === deviceId || (deviceToken && d.token === deviceToken));
-                    if (existing || isLocalHost) {
-                        const token = existing ? existing.token : crypto.randomBytes(24).toString('hex');
-                        if (isLocalHost && !existing) {
+                    // تحقق إذا كان الجهاز مقترناً بالفعل مسبقاً عبر التوكن فقط (صمام أمان: لا يُسلّم التوكن بمجرد إرسال deviceId)
+                    const existing = (deviceToken && typeof deviceToken === 'string') 
+                        ? pairedDevices.find(d => d.token === deviceToken && (!deviceId || d.deviceId === deviceId) && d.status === 'active') 
+                        : null;
+
+                    if (existing) {
+                        if (!existing.terminalLetter) {
+                            ensureDeviceLettering();
+                        }
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ 
+                            success: true, 
+                            isPaired: true, 
+                            token: existing.token, 
+                            terminalLetter: existing.terminalLetter || 'A',
+                            deviceName: existing.deviceName || `كاشير فرعي (${existing.terminalLetter || 'A'}) 📱`,
+                            pairingOrder: existing.pairingOrder || 1,
+                            masterHwid: masterDbData.settings?.bayan_master_hwid || '',
+                            masterLicense: masterDbData.settings?.bayan_master_license || null,
+                            message: 'الجهاز مقترن ومصرح له بشكل دائم' 
+                        }));
+                        return;
+                    }
+
+                    if (isLocalHost) {
+                        let localMaster = pairedDevices.find(d => (deviceToken && d.token === deviceToken) || d.deviceId === deviceId);
+                        const token = localMaster ? localMaster.token : crypto.randomBytes(24).toString('hex');
+                        if (!localMaster) {
                             pairedDevices.push({
                                 deviceId,
                                 deviceName: 'الجهاز الرئيسي (Master)',
@@ -470,12 +992,45 @@ function startServer(appRootDir, onNotification) {
                             savePairedDevices();
                         }
                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: true, isPaired: true, token, message: 'الجهاز مقترن ومصرح له بشكل دائم' }));
+                        res.end(JSON.stringify({ 
+                            success: true, 
+                            isPaired: true, 
+                            token, 
+                            masterHwid: masterDbData.settings?.bayan_master_hwid || '',
+                            masterLicense: masterDbData.settings?.bayan_master_license || null,
+                            message: 'الجهاز مقترن ومصرح له بشكل دائم' 
+                        }));
                         return;
                     }
 
-                    // توليد رمز PIN من 4 أرقام
-                    const pin = Math.floor(1000 + Math.random() * 9000).toString();
+                    // التحقق من الحظر المؤقت بسبب المحاولات الخاطئة
+                    const lockUntil = pinLockouts.get(clientIp);
+                    if (lockUntil && Date.now() < lockUntil) {
+                        const remMin = Math.ceil((lockUntil - Date.now()) / 60000);
+                        res.writeHead(429, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ 
+                            success: false, 
+                            message: `تم حظر هذا الجهاز مؤقتاً بسبب تكرار إدخال رمز خاطئ. يرجى الانتظار ${remMin} دقيقة.` 
+                        }));
+                        return;
+                    }
+
+                    // تنظيف الطلبات القديمة المنتهية الصلاحية
+                    cleanExpiredPairingRequests();
+
+                    // منع إغراق السيرفر بطلبات متعددة من نفس الـ IP
+                    const ipPendingCount = pendingPairingRequests.filter(r => r.ip === clientIp).length;
+                    if (ipPendingCount >= 3) {
+                        res.writeHead(429, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ 
+                            success: false, 
+                            message: 'توجد طلبات إقران معلقة بالفعل قيد الانتظار لهذا الجهاز. يرجى إدخال الرمز المعروض على شاشة الماستر.' 
+                        }));
+                        return;
+                    }
+
+                    // توليد رمز PIN عشوائي ومحمي تشفيرياً من 4 أرقام
+                    const pin = crypto.randomInt(1000, 10000).toString();
                     const reqId = 'REQ-' + Date.now();
                     
                     // إزالة أي طلبات سابقة لنفس الجهاز
@@ -491,10 +1046,15 @@ function startServer(appRootDir, onNotification) {
                     };
                     pendingPairingRequests.push(pairReq);
 
+                    // الحفاظ على حجم القائمة لمنع استهلاك الذاكرة
+                    if (pendingPairingRequests.length > 15) {
+                        pendingPairingRequests.shift();
+                    }
+
                     // طباعة رمز الـ PIN بوضوح في شاشة السيرفر
                     console.log(`\n===============================================================`);
                     console.log(`📱 [طلب إقران جهاز جديد]: ${pairReq.deviceName} (${pairReq.ip})`);
-                    console.log(`🔑 [رمز الـ PIN للإقران]: ===>  ${pairReq.pin}  <=== (أو الرمز العام: 1111)`);
+                    console.log(`🔑 [رمز الـ PIN للإقران]: ===>  ${pairReq.pin}  <===`);
                     console.log(`===============================================================\n`);
 
                     // إرسال تنبيه فوري للشاشة الرئيسية على الكمبيوتر
@@ -507,17 +1067,23 @@ function startServer(appRootDir, onNotification) {
                         success: true,
                         isPaired: false,
                         requiresPin: true,
-                        pinHint: pairReq.pin,
-                        message: 'يرجى إدخال رمز الإقران المعروض على شاشة الجهاز الرئيسي (أو 1111)'
+                        message: 'يرجى إدخال رمز الإقران المعروض على شاشة الجهاز الرئيسي'
                     }));
                     return;
                 }
 
                 // س2. جلب طلبات الإقران المعلقة للجهاز الرئيسي (Polling for Web Masters)
                 if (pathname === '/api/pair-requests/pending' && req.method === 'GET') {
+                    // 🛡️ صمام أمان حاسم: منع أي جهاز عبر الشبكة من قراءة رموز الـ PIN المعلقة
+                    const isLocal = (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost');
+                    if (!isLocal) {
+                        res.writeHead(403, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: '403 Forbidden: لا يمكن الاطلاع على طلبات الإقران إلا من الجهاز الرئيسي محلياً' }));
+                        return;
+                    }
+
                     // تنظيف الطلبات القديمة التي مر عليها أكثر من دقيقتين تلقائياً
-                    const twoMinAgo = Date.now() - 120000;
-                    pendingPairingRequests = pendingPairingRequests.filter(r => new Date(r.requestedAt).getTime() > twoMinAgo);
+                    cleanExpiredPairingRequests();
 
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
@@ -540,22 +1106,94 @@ function startServer(appRootDir, onNotification) {
                 if (pathname === '/api/pair-verify' && req.method === 'POST') {
                     const { deviceId, pin, deviceName } = jsonBody;
                     const cleanPin = String(pin || '').trim();
-                    const pending = pendingPairingRequests.find(r => r.deviceId === deviceId && r.pin === cleanPin);
 
-                    // السماح بالرمز الخاص بالجهاز أو الرمز الرئيسي العام (1111)
-                    const isMasterPin = cleanPin === '1111' || cleanPin === '0000';
-
-                    if (!pending && !isMasterPin) {
-                        res.writeHead(401, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: false, message: 'رمز الإقران (PIN) غير صحيح' }));
+                    // التحقق من الحظر المؤقت للـ IP
+                    const lockUntil = pinLockouts.get(clientIp);
+                    if (lockUntil && Date.now() < lockUntil) {
+                        const remMin = Math.ceil((lockUntil - Date.now()) / 60000);
+                        res.writeHead(429, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ 
+                            success: false, 
+                            message: `تم حظر هذا الجهاز مؤقتاً بسبب تكرار إدخال رمز خاطئ 5 مرات. متبقي ${remMin} دقيقة لفك الحظر.` 
+                        }));
                         return;
                     }
 
-                    // توليد توكن أمان فريد للجهاز
-                    const token = crypto.randomBytes(24).toString('hex');
+                    // تنظيف الطلبات المنتهية
+                    cleanExpiredPairingRequests();
+
+                    if (!deviceId || !cleanPin || !/^\d{4}$/.test(cleanPin)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: 'رمز الإقران يجب أن يتكون من 4 أرقام عددية صحيحة' }));
+                        return;
+                    }
+
+                    const pending = pendingPairingRequests.find(r => r.deviceId === deviceId);
+
+                    // التحقق الصارم من وجود الطلب وصلاحيته الزمنية
+                    if (!pending) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ 
+                            success: false, 
+                            message: 'لا يوجد طلب إقران نشط لهذا الجهاز أو انتهت صلاحية الرمز (مدتها دقيقتان). يرجى إعادة طلب الإقران.' 
+                        }));
+                        return;
+                    }
+
+                    // مقارنة مشفرة وآمنة زمنياً لمنع هجمات التوقيت Side-Channel Timing Attacks
+                    const isPinValid = (pending.pin.length === cleanPin.length) && 
+                        crypto.timingSafeEqual(Buffer.from(pending.pin), Buffer.from(cleanPin));
+
+                    if (!isPinValid) {
+                        const attempts = (pinFailedAttempts.get(clientIp) || 0) + 1;
+                        if (attempts >= 5) {
+                            pinLockouts.set(clientIp, Date.now() + 5 * 60 * 1000); // حظر 5 دقائق
+                            pinFailedAttempts.delete(clientIp);
+                            // إلغاء الطلب فوراً بعد استنفاذ المحاولات
+                            pendingPairingRequests = pendingPairingRequests.filter(r => r.deviceId !== deviceId);
+                            res.writeHead(429, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ 
+                                success: false, 
+                                message: '429 Too Many Attempts: تم تجميد وحظر المحاولات لمدة 5 دقائق بعد 5 محاولات خاطئة لمنع التخمين.' 
+                            }));
+                            return;
+                        }
+                        pinFailedAttempts.set(clientIp, attempts);
+                        res.writeHead(401, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ 
+                            success: false, 
+                            message: `رمز الإقران غير صحيح (متبقي ${5 - attempts} محاولات قبل الحظر المؤقت)` 
+                        }));
+                        return;
+                    }
+
+                    // نجاح التحقق: تفريغ عداد المحاولات الفاشلة والحظر
+                    pinFailedAttempts.delete(clientIp);
+                    pinLockouts.delete(clientIp);
+
+                    // احتساب الحرف الأبجدي التالي للأجهزة الفرعية (A, B, C, D...)
+                    const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                    const otherClients = pairedDevices.filter(d => d.deviceId !== deviceId && d.deviceId !== 'DEV-HOST');
+                    const usedLetters = otherClients.map(d => d.terminalLetter).filter(Boolean);
+                    let assignedLetter = 'A';
+                    for (let i = 0; i < LETTERS.length; i++) {
+                        if (!usedLetters.includes(LETTERS[i])) {
+                            assignedLetter = LETTERS[i];
+                            break;
+                        }
+                    }
+                    const pairingOrder = otherClients.length + 1;
+                    const defaultDeviceName = `كاشير فرعي (${assignedLetter}) 📱`;
+
+                    // توليد توكن أمان فريد قوي للجهاز
+                    const token = crypto.randomBytes(32).toString('hex');
                     const newPaired = {
                         deviceId,
-                        deviceName: deviceName || (pending ? pending.deviceName : `جهاز مقترن (${clientIp})`),
+                        deviceName: (deviceName && !deviceName.startsWith('تابلت') && !deviceName.startsWith('جهاز فرعي'))
+                            ? `${deviceName} (${assignedLetter}) 📱`
+                            : defaultDeviceName,
+                        terminalLetter: assignedLetter,
+                        pairingOrder: pairingOrder,
                         ip: clientIp,
                         token,
                         pairedAt: new Date().toISOString(),
@@ -569,7 +1207,7 @@ function startServer(appRootDir, onNotification) {
                     // إزالة الطلب من قائمة الانتظار
                     pendingPairingRequests = pendingPairingRequests.filter(r => r.deviceId !== deviceId);
 
-                    console.log(`✅ [تم إقران الجهاز بنجاح]: ${newPaired.deviceName} (${newPaired.ip})`);
+                    console.log(`✅ [تم إقران الجهاز بنجاح]: ${newPaired.deviceName} (الرمز: ${assignedLetter}) [ترتيب: ${pairingOrder}] (${newPaired.ip})`);
 
                     if (typeof onNotification === 'function') {
                         onNotification('device-paired-success', newPaired);
@@ -579,8 +1217,36 @@ function startServer(appRootDir, onNotification) {
                     res.end(JSON.stringify({
                         success: true,
                         token,
+                        terminalLetter: assignedLetter,
+                        deviceName: newPaired.deviceName,
+                        pairingOrder: pairingOrder,
+                        masterHwid: masterDbData.settings?.bayan_master_hwid || '',
+                        masterLicense: masterDbData.settings?.bayan_master_license || null,
                         message: 'تم إقران الجهاز واعتماده بنجاح'
                     }));
+                    return;
+                }
+
+                // ج2. تعديل اسم وقسم الجهاز المقترن (Update Paired Device Name) - متاح للماستر
+                if (pathname === '/api/paired-device/update-name' && req.method === 'POST') {
+                    const isLocal = (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost');
+                    if (!isLocal) {
+                        res.writeHead(403, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: 'ممنوع: تعديل أسماء الأجهزة متاح للماستر فقط' }));
+                        return;
+                    }
+                    const { deviceId, newName } = jsonBody;
+                    const ok = updatePairedDeviceName(deviceId, newName);
+                    res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: !!ok, message: ok ? 'تم تحديث اسم الجهاز بنجاح' : 'الجهاز غير موجود' }));
+                    return;
+                }
+
+                // ج3. جلب قائمة الأجهزة المقترنة (Get Paired Devices)
+                if (pathname === '/api/paired-devices' && req.method === 'GET') {
+                    ensureDeviceLettering();
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, devices: pairedDevices }));
                     return;
                 }
 
@@ -618,26 +1284,78 @@ function startServer(appRootDir, onNotification) {
                 // و. تأكيد واستلام إذن التحويل (Accept Transfer)
                 if (pathname === '/api/transfers/accept' && req.method === 'POST') {
                     const { transferId, receiverName, notes } = jsonBody;
-                    const transfer = inTransitTransfers.find(t => t.id === transferId);
+                    let transfer = inTransitTransfers.find(t => String(t.id) === String(transferId) || String(t.invoiceId) === String(transferId));
 
-                    if (!transfer) {
-                        res.writeHead(404, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: false, message: 'إذن التحويل غير موجود أو تم استلامه مسبقاً' }));
-                        return;
+                    if (transfer) {
+                        transfer.transferStatus = 'received';
+                        transfer.receivedBy = receiverName || 'أمين مخزن الفرع';
+                        transfer.receivedAt = new Date().toISOString();
+                        transfer.receiverNotes = notes || '';
+                        savePendingTransfers();
                     }
 
-                    transfer.transferStatus = 'received';
-                    transfer.receivedBy = receiverName || 'أمين مخزن الفرع';
-                    transfer.receivedAt = new Date().toISOString();
-                    transfer.receiverNotes = notes || '';
-                    savePendingTransfers();
+                    // تحديث الحالة في masterDbData.transactions لضمان المزامنة التامة لكافة الأجهزة
+                    let txUpdated = false;
+                    if (Array.isArray(masterDbData.transactions)) {
+                        masterDbData.transactions.forEach(t => {
+                            if (String(t.invoiceId) === String(transferId) || String(t.id) === String(transferId)) {
+                                t.transferStatus = 'received';
+                                t.receivedBy = receiverName || 'أمين مخزن الفرع';
+                                t.receivedAt = new Date().toLocaleString('ar-EG');
+                                txUpdated = true;
+                            }
+                        });
+                        if (txUpdated) {
+                            masterDbData.lastUpdated = new Date().toISOString();
+                            saveMasterDb();
+                        }
+                    }
 
                     if (typeof onNotification === 'function') {
-                        onNotification('transfer-accepted', transfer);
+                        onNotification('transfer-accepted', transfer || { id: transferId, transferStatus: 'received' });
                     }
 
                     res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, transfer, message: 'تم تأكيد الاستلام بنجاح' }));
+                    res.end(JSON.stringify({ success: true, transfer: transfer || { id: transferId, transferStatus: 'received' }, message: 'تم تأكيد الاستلام بنجاح' }));
+                    return;
+                }
+
+                // ز. رفض إذن التحويل (Reject Transfer)
+                if (pathname === '/api/transfers/reject' && req.method === 'POST') {
+                    const { transferId, rejectorName, notes } = jsonBody;
+                    let transfer = inTransitTransfers.find(t => String(t.id) === String(transferId) || String(t.invoiceId) === String(transferId));
+
+                    if (transfer) {
+                        transfer.transferStatus = 'rejected';
+                        transfer.rejectedBy = rejectorName || 'أمين مخزن الفرع';
+                        transfer.rejectedAt = new Date().toISOString();
+                        transfer.rejectorNotes = notes || '';
+                        savePendingTransfers();
+                    }
+
+                    // تحديث الحالة في masterDbData.transactions لضمان المزامنة التامة لكافة الأجهزة
+                    let txUpdated = false;
+                    if (Array.isArray(masterDbData.transactions)) {
+                        masterDbData.transactions.forEach(t => {
+                            if (String(t.invoiceId) === String(transferId) || String(t.id) === String(transferId)) {
+                                t.transferStatus = 'rejected';
+                                t.rejectedBy = rejectorName || 'أمين مخزن الفرع';
+                                t.rejectedAt = new Date().toLocaleString('ar-EG');
+                                txUpdated = true;
+                            }
+                        });
+                        if (txUpdated) {
+                            masterDbData.lastUpdated = new Date().toISOString();
+                            saveMasterDb();
+                        }
+                    }
+
+                    if (typeof onNotification === 'function') {
+                        onNotification('transfer-rejected', transfer || { id: transferId, transferStatus: 'rejected' });
+                    }
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, transfer: transfer || { id: transferId, transferStatus: 'rejected' }, message: 'تم رفض إذن التحويل بنجاح' }));
                     return;
                 }
 
@@ -652,22 +1370,47 @@ function startServer(appRootDir, onNotification) {
         // 📁 2. Static File Serving (HTML, CSS, JS, Images)
         // =========================================================================
         let safePath = pathname === '/' ? '/index.html' : pathname;
-        // منع Directory Traversal
-        safePath = path.normalize(safePath).replace(/^(\.\.[\/\\])+/, '');
-        const filePath = path.join(appRootDir, safePath);
+        // منع التسلل للمجلدات وحماية الملفات الحساسة (Path Traversal Protection)
+        const normalizedRoot = path.resolve(appRootDir);
+        const cleanRelPath = path.normalize(safePath).replace(/^(\.\.[\/\\])+/, '').replace(/^[\/\\]+/, '');
+        const resolvedPath = path.resolve(normalizedRoot, cleanRelPath);
 
-        fs.stat(filePath, (err, stats) => {
+        // صمام الأمان الفولاذي: التأكد بنسبة 100% أن الملف المطلوب يقع حصرياً داخل مجلد التطبيق
+        if (!resolvedPath.startsWith(normalizedRoot + path.sep) && resolvedPath !== normalizedRoot && resolvedPath !== path.join(normalizedRoot, 'index.html')) {
+            res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('403 Forbidden - محاولة وصول غير مصرح بها خارج مجلد النظام');
+            return;
+        }
+
+        // حظر الوصول المباشر للملفات الحساسة الخاصة بالباك إند وقواعد البيانات
+        const forbiddenFiles = new Set(['.env', 'package.json', 'package-lock.json', '.git', 'server_hub.js', 'main.js', 'master_sync_db.json', 'paired_devices.json']);
+        const baseFileName = path.basename(resolvedPath).toLowerCase();
+        if (forbiddenFiles.has(baseFileName) || baseFileName.startsWith('.')) {
+            res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('403 Forbidden - ملف نظام محمي');
+            return;
+        }
+
+        fs.stat(resolvedPath, (err, stats) => {
             if (err || !stats.isFile()) {
                 res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end('404 Not Found - ملف غير موجود');
                 return;
             }
 
-            const ext = path.extname(filePath).toLowerCase();
+            const ext = path.extname(resolvedPath).toLowerCase();
             const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+            const headers = { 'Content-Type': contentType };
 
-            res.writeHead(200, { 'Content-Type': contentType });
-            const stream = fs.createReadStream(filePath);
+            // تحسين سرعة المتصفح والتابلت: كاش للملفات الثابتة والصور، وعدم تخزين HTML الرئيسي
+            if (ext === '.html') {
+                headers['Cache-Control'] = 'no-cache';
+            } else if (['.js', '.css', '.woff', '.woff2', '.ttf', '.png', '.jpg', '.jpeg', '.svg', '.ico'].includes(ext)) {
+                headers['Cache-Control'] = 'public, max-age=86400';
+            }
+
+            res.writeHead(200, headers);
+            const stream = fs.createReadStream(resolvedPath);
             stream.pipe(res);
         });
     });
@@ -742,6 +1485,7 @@ module.exports = {
     SERVER_PORT,
     getPairedDevicesList,
     removePairedDevice,
+    updatePairedDeviceName,
     getPendingPairingRequests,
     approvePairingRequest,
     getInTransitTransfersList,

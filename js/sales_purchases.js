@@ -1207,13 +1207,8 @@ function updatePurchaseItem(idx, field, val, shouldReRender = true) {
 
     purchaseCart[idx][field] = numericVal;
 
-    // تحديث الصنف في قاعدة البيانات والذاكرة لو كان التغيير في أي من الأسعار (شراء، قطاعي، جملة)
-
-    if (shouldReRender && (field === 'salePrice' || field === 'wholesalePrice' || field === 'price')) {
-
-        updateProductPricesInDB(purchaseCart[idx]);
-
-    }
+    // تم إيقاف التحديث المباشر لقاعدة البيانات قبل الحفظ لحماية البيانات في حال إلغاء أو حذف الفاتورة المسودة
+    // تحديث الأسعار وقاعدة البيانات يتم رسمياً فقط عند الضغط على "حفظ الفاتورة" داخل savePurchase
 
     if (!shouldReRender) {
 
@@ -1592,6 +1587,34 @@ async function savePurchase(force = false, accountChecked = false) {
 
         const ratio = subTotal > 0 ? (finalTotalVal / subTotal) : 1;
 
+        // 🛑 فحص أمان لتفادي تكرار إدخال نفس فاتورة الشراء بالخطأ لنفس المورد اليوم
+        if (!isEditMode && !force) {
+            const cleanStr = (s) => (s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+            const duplicateInv = transactions.find(t => 
+                t.type && t.type.includes('شراء') && !t.type.includes('مرتجع') &&
+                cleanStr(t.partner) === cleanStr(finalPartner) &&
+                t.dateISO === safeDateISO &&
+                Math.abs((parseFloat(t.paidAmount) || parseFloat(t.total) || 0) - finalTotalVal) < 0.01 &&
+                t.isInvoiceHead
+            );
+            if (duplicateInv) {
+                saveBtns.forEach(b => { b.disabled = false; b.style.pointerEvents = 'auto'; b.style.opacity = '1'; });
+                window.isSavingTransaction = false;
+                showCustomAlert({
+                    type: 'warning',
+                    titleText: '⚠️ اشتباه في تكرار فاتورة الشراء',
+                    msg: `توجد فاتورة شراء مسجلة اليوم برقم #${duplicateInv.invoiceId} لنفس المورد (<b>${finalPartner}</b>) وبنفس الإجمالي (<b>${finalTotalVal.toFixed(2)} ج.م</b>).<br><br>هل أنت متأكد من حفظ فاتورة شراء أخرى مطابقة؟`,
+                    showCancel: true,
+                    confirmText: 'نعم، حفظ كفاتورة جديدة',
+                    cancelText: 'إلغاء التكرار',
+                    onConfirm: () => {
+                        savePurchase(true, true);
+                    }
+                });
+                return false;
+            }
+        }
+
         const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
 
         const isCash = typeof selectedMethod === 'string' && (selectedMethod.includes('نقدي') || selectedMethod.includes('نقدية') || selectedMethod.includes('كاش'));
@@ -1616,40 +1639,43 @@ async function savePurchase(force = false, accountChecked = false) {
             const p = (window.productsDB || []).find(x => x.id === item.id || x.name === item.name);
             const factor = item.unitFactor || 1;
             const itemUnitPriceBase = item.price / factor;
+            // 🌟 احتساب التكلفة الفعلية الصافية للوحدة بعد توزيع خصومات الفاتورة الإجمالية والمصاريف (ratio)
+            const effectiveUnitPriceBase = itemUnitPriceBase * ratio;
             const oldStock = p ? (parseFloat(p.stock) || 0) : 0;
-            const oldCost = p ? (parseFloat(p.cost) || 0) : itemUnitPriceBase;
+            const oldCost = p ? (parseFloat(p.cost) || 0) : effectiveUnitPriceBase;
 
             if (p) {
                 const baseQty = item.qty * factor;
                 const totalOldValue = oldStock * oldCost;
-                const totalAddedValue = baseQty * itemUnitPriceBase;
+                const totalAddedValue = baseQty * effectiveUnitPriceBase;
                 const finalStockCount = oldStock + baseQty;
 
                 if (oldStock > 0) {
                     p.cost = (totalOldValue + totalAddedValue) / finalStockCount;
                 } else if (oldCost > 0) {
                     // إذا كان الرصيد صفر ولكن هناك تكلفة مسجلة مسبقاً
-                    p.cost = (oldCost + itemUnitPriceBase) / 2;
+                    p.cost = (oldCost + effectiveUnitPriceBase) / 2;
                 } else {
-                    p.cost = itemUnitPriceBase;
+                    p.cost = effectiveUnitPriceBase;
                 }
+                p.avgBuyPrice = p.cost;
 
                 // 3. تحديث الرصيد المخزني النهائي ورصيد المخزن المحدد
                 p.stock = finalStockCount;
                 if (!p.warehouseStocks) p.warehouseStocks = {};
                 p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + baseQty;
 
-                // 3.5 تحديث رصيد وسعر التشكيلة المحددة (المقاس واللون) في مصفوفة الصنف
+                // 3.5 تحديث رصيد وسعر التشكيلة المحددة (المقاس واللون) في مصفوفة الصنف بدقة
                 if (p.variants && Array.isArray(p.variants)) {
                     const sSize = String(item.selectedSize || item.size || '').trim();
                     const sColor = String(item.selectedColor || item.color || '').trim();
                     if (sSize || sColor) {
+                        const cleanV = (s) => String(s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                        const cSize = cleanV(sSize);
+                        const cColor = cleanV(sColor);
                         const matchedVar = p.variants.find(v => 
-                            (String(v.size || '').trim() === sSize) && 
-                            (String(v.color || '').trim() === sColor)
-                        ) || p.variants.find(v => 
-                            (!sSize || String(v.size || '').trim() === sSize) && 
-                            (!sColor || String(v.color || '').trim() === sColor)
+                            (!cSize || cleanV(v.size) === cSize) && 
+                            (!cColor || cleanV(v.color) === cColor)
                         );
                         if (matchedVar) {
                             const oldVarStock = (parseFloat(matchedVar.stock) || 0);
@@ -1659,15 +1685,15 @@ async function savePurchase(force = false, accountChecked = false) {
                             if (parseFloat(item.salePrice) > 0) {
                                 matchedVar.price = parseFloat(item.salePrice);
                             }
-                            // 🌟 تحديث تكلفة المقاس المحدد (Variant Cost) بدقة
-                            if (itemUnitPriceBase > 0) {
+                            // 🌟 تحديث تكلفة المقاس المحدد (Variant Cost) بدقة بالصافي بعد الخصم
+                            if (effectiveUnitPriceBase > 0) {
                                 const oldVarCost = (matchedVar.cost !== undefined && !isNaN(parseFloat(matchedVar.cost)) && parseFloat(matchedVar.cost) > 0)
                                     ? parseFloat(matchedVar.cost)
-                                    : (parseFloat(p.cost) || itemUnitPriceBase);
+                                    : (parseFloat(p.cost) || effectiveUnitPriceBase);
                                 if (oldVarStock > 0) {
-                                    matchedVar.cost = parseFloat((((oldVarStock * oldVarCost) + (baseQty * itemUnitPriceBase)) / (oldVarStock + baseQty)).toFixed(2));
+                                    matchedVar.cost = parseFloat((((oldVarStock * oldVarCost) + (baseQty * effectiveUnitPriceBase)) / (oldVarStock + baseQty)).toFixed(2));
                                 } else {
-                                    matchedVar.cost = parseFloat(itemUnitPriceBase.toFixed(2));
+                                    matchedVar.cost = parseFloat(effectiveUnitPriceBase.toFixed(2));
                                 }
                             }
                         }
@@ -1676,6 +1702,18 @@ async function savePurchase(force = false, accountChecked = false) {
                         p.variants.forEach(v => {
                             v.price = parseFloat(item.salePrice);
                         });
+                    }
+
+                    // 🌟 ضمان تطابق رصيد الصنف العام مع مجموع مقاساته بدقة تامة
+                    if (p.variants.length > 0) {
+                        p.stock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                        if (!p.warehouseStocks) p.warehouseStocks = {};
+                        p.warehouseStocks[activeWH] = p.variants.reduce((sum, v) => {
+                            const vWh = (v.warehouseStocks && v.warehouseStocks[activeWH] !== undefined)
+                                ? parseFloat(v.warehouseStocks[activeWH])
+                                : (activeWH === 'المخزن الرئيسي' ? (parseFloat(v.stock) || 0) : 0);
+                            return sum + vWh;
+                        }, 0);
                     }
                 }
 
@@ -1774,7 +1812,7 @@ async function savePurchase(force = false, accountChecked = false) {
                 qty: item.qty,
 
                 price: item.price,
-                cost: itemUnitPriceBase,
+                cost: effectiveUnitPriceBase,
                 previousCost: oldCost,
                 previousStock: oldStock,
                 unitFactor: factor,
@@ -1801,7 +1839,10 @@ async function savePurchase(force = false, accountChecked = false) {
                 invoiceTaxType: (idx === 0) ? (document.getElementById('purchaseTaxType')?.value || 'val') : 'val',
 
                 warehouse: activeWH,
-                terminal: (window.BayanNetworkHub && window.BayanNetworkHub.isMasterServer) ? 'الجهاز الرئيسي 💻' : (((typeof getStore === 'function' ? getStore('bayan_device_name') : null)) || 'جهاز فرعي 📱'),
+                terminal: (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalDisplayName === 'function') ? window.BayanNetworkHub.getTerminalDisplayName() : 'الجهاز الرئيسي 💻',
+                terminalLetter: (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function') ? window.BayanNetworkHub.getTerminalLetter() : 'MASTER',
+                terminalOrder: (window.BayanNetworkHub && typeof window.BayanNetworkHub.getPairingOrder === 'function') ? window.BayanNetworkHub.getPairingOrder() : 0,
+                terminalId: (window.BayanNetworkHub && window.BayanNetworkHub.deviceId) || '',
 
                 editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل بواسطة: ${(typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'مجهول'})` : '-'
 
@@ -1916,6 +1957,9 @@ async function savePurchase(force = false, accountChecked = false) {
 function resetPurchase() {
 
     purchaseCart = [];
+
+    if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+    window.accountBalancesCache = {};
 
     // إنهاء وضع التعديل إذا كان نشطاً
 

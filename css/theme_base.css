@@ -1,10 +1,19 @@
 
 .hidden { display: none !important; }
 
-/* 🔓 تفعيل خاصية التحديد والنسخ الحر في كامل البرنامج أثناء التطوير */
-* {
+/* 🔒 منع التحديد بالماوس في كامل واجهة البرنامج لتجربة تطبيق سطح مكتب وكاشير احترافية */
+*, *::before, *::after {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+}
+
+input, textarea, [contenteditable="true"] {
     user-select: text !important;
     -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
 }
 
 /* ==========================================================================
@@ -821,26 +830,28 @@
             font-weight: 900;
         }
 
-        /* الصفوف الوسطى */
+        /* الصفوف الوسطى - تمتد لتملأ عرض الصف كاملاً */
         .dm-mid-grid {
             display: flex;
-            gap: 12px;
-            justify-content: center;
+            gap: 15px;
+            justify-content: space-between;
             width: 100%;
-            flex-wrap: wrap;
+            align-items: stretch;
+            box-sizing: border-box;
         }
 
         .dm-mid-group {
             display: flex;
             gap: 10px;
+            align-items: stretch;
+            min-width: 0;
             flex: 1;
-            justify-content: center;
-            min-width: 300px;
         }
 
         .dm-mid-tile {
-            flex: 1;
-            min-width: 80px;
+            flex: 1 1 0;
+            width: 100%;
+            min-width: 0;
             height: 95px;
             background: #0b314b;
             border-radius: 15px;
@@ -880,15 +891,40 @@
             text-align: center;
         }
 
-        /* الشبكة الكبيرة السفلية */
+        /* الشبكة الكبيرة السفلية - تصميم 9 أعمدة مطابق للصورة الأصلية تماماً */
         .dm-main-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            grid-auto-rows: minmax(120px, auto);
+            grid-template-columns: repeat(9, 1fr);
             gap: 10px;
             width: 100%;
             margin-top: 10px;
+            box-sizing: border-box;
         }
+
+        .dm-main-grid .dm-action-tile {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            height: 120px;
+            box-sizing: border-box;
+        }
+
+        /* تثبيت كروت الشبكة السفلية في مواقعها الأصلية المحددة بدقة لمنع الترحيل أو القفز عند إخفاء الأقسام */
+        .dm-main-grid .dm-sec-receipt          { grid-row: 1; grid-column: 1; }
+        .dm-main-grid .dm-sec-sales            { grid-row: 1; grid-column: 2; }
+        .dm-main-grid .dm-sec-disbursement     { grid-row: 1; grid-column: 3; }
+        .dm-main-grid .dm-sec-sales-return     { grid-row: 1; grid-column: 4; }
+        .dm-main-grid .dm-sec-purchase-return  { grid-row: 1; grid-column: 5; }
+        .dm-main-grid .dm-sec-purchase         { grid-row: 1; grid-column: 6; }
+        .dm-main-grid .dm-sec-adjustment       { grid-row: 1; grid-column: 7; }
+        .dm-main-grid .dm-sec-history          { grid-row: 1; grid-column: 8; }
+        .dm-main-grid .dm-sec-warehouse-report { grid-row: 1; grid-column: 9; }
+
+        .dm-main-grid .dm-sec-statement        { grid-row: 2; grid-column: 1; }
+        .dm-main-grid .dm-sec-shortcuts        { grid-row: 2; grid-column: 2; }
+        .dm-main-grid .dm-sec-transfer         { grid-row: 2; grid-column: 3; }
+        .dm-main-grid .dm-sec-calculator       { grid-row: 2; grid-column: 4; }
+        .dm-main-grid .dm-sec-treasury         { grid-row: 2; grid-column: 5; }
 
         .dm-action-tile {
             border-radius: 15px;
@@ -1053,9 +1089,12 @@
         /* تيل فاتح تسوية */
 
         /* تعديلات شاشة الموبايل */
-        @media (max-width: 800px) {
+        @media (max-width: 1024px) {
             .dm-main-grid {
-                grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            }
+            .dm-main-grid .dm-action-tile {
+                min-width: 90px;
             }
 
             .dm-header {
@@ -1808,6 +1847,42 @@ body.has-wallpaper .login-overlay {
     -webkit-backdrop-filter: none;
 }
 
+/* سهم ومؤشر النسخ الاحتياطي الطارئ بشاشة الدخول */
+.login-backup-arrow {
+    display: inline-block;
+    font-size: 0.78rem;
+    color: #38bdf8;
+    animation: loginBackupPulse 1.8s infinite ease-in-out;
+}
+
+@keyframes loginBackupPulse {
+    0%, 100% {
+        transform: translateY(0);
+        opacity: 0.85;
+    }
+    50% {
+        transform: translateY(3px);
+        opacity: 1;
+        filter: drop-shadow(0 0 5px #38bdf8);
+    }
+}
+
+.login-backup-updating {
+    border-color: #eab308 !important;
+    box-shadow: 0 0 25px rgba(234, 179, 8, 0.4) !important;
+    background: rgba(30, 27, 75, 0.9) !important;
+}
+
+.login-backup-updating .login-backup-arrow {
+    color: #facc15 !important;
+    animation: loginBackupAttention 0.8s infinite alternate ease-in-out !important;
+}
+
+@keyframes loginBackupAttention {
+    0% { transform: scale(1) translateY(0); opacity: 0.85; }
+    100% { transform: scale(1.2) translateY(3px); opacity: 1; }
+}
+
 .login-container {
     position: relative;
     width: 100%;
@@ -2177,16 +2252,18 @@ body.dark-mode .moon-icon {
 /* === Extracted from index.html === */
 /* ======================================================== */
 
-/* 🔓 تمكين التحديد والنسخ الحر بالماوس و Ctrl+C */
-        html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6, p, blockquote, pre, a, abbr, acronym, address, big, cite, code, del, dfn, em, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup, tt, var, b, u, i, center, dl, dt, dd, ol, ul, li, fieldset, form, label, legend, table, caption, tbody, tfoot, thead, tr, th, td, article, aside, canvas, details, embed, figure, figcaption, footer, header, hgroup, menu, nav, output, ruby, section, summary, time, mark, audio, video, input, textarea, button, select {
+/* 🔒 منع التحديد بالماوس في كامل البرنامج */
+        html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6, p, blockquote, pre, a, abbr, acronym, address, big, cite, code, del, dfn, em, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup, tt, var, b, u, i, center, dl, dt, dd, ol, ul, li, fieldset, form, label, legend, table, caption, tbody, tfoot, thead, tr, th, td, article, aside, canvas, details, embed, figure, figcaption, footer, header, hgroup, menu, nav, output, ruby, section, summary, time, mark, audio, video, button, select {
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+        }
+        input, textarea, [contenteditable="true"] {
             user-select: text !important;
             -webkit-user-select: text !important;
             -moz-user-select: text !important;
             -ms-user-select: text !important;
-        }
-        * {
-            user-select: text !important;
-            -webkit-user-select: text !important;
         }
         /* 🙈 إخفاء وتعتيم المبالغ في تقرير الحركة اليومية للحفاظ على السرية والخصوصية الكاملة */
         body.daily-amounts-hidden #daily-report-section #dailyTotalVal,
@@ -2199,10 +2276,11 @@ body.dark-mode .moon-icon {
         body.daily-amounts-hidden #daily-report-section #opsSummaryBody td:nth-child(5),
         body.daily-amounts-hidden #daily-report-section #treasurySummaryBody td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #profitSummaryBody td:nth-child(2) {
-            filter: blur(9px) !important;
+            color: transparent !important;
+            text-shadow: 0 0 10px rgba(100, 116, 139, 0.85) !important;
             user-select: none !important;
             letter-spacing: 2px !important;
-            transition: filter 0.3s ease;
+            transition: all 0.2s ease;
             opacity: 0.7;
         }
 
@@ -2212,7 +2290,8 @@ body.dark-mode .moon-icon {
         body.daily-amounts-hidden #daily-report-section #treasurySummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #profitSummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #dailyTotalSalesReceipts:hover #dailyTotalVal {
-            filter: blur(0px) !important;
+            color: inherit !important;
+            text-shadow: none !important;
             opacity: 1 !important;
         }
 
@@ -2335,25 +2414,21 @@ body.dark-mode .moon-icon {
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%) scale(0.9);
-            width: 350px;
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(20px);
+            width: 360px;
+            background: #0f172a;
             border-radius: 30px;
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6);
+            border: 2px solid #334155;
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1);
             z-index: 30000;
-            padding: 25px;
+            padding: 22px;
             visibility: hidden;
             opacity: 0;
             transition: opacity 0.2s, transform 0.2s;
-            /* استثناء الموقع من الترانزيشن */
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 16px;
             direction: ltr;
             user-select: none;
-            /* منع تحديد النصوص */
-            /* منع تحديد النصوص */
             max-height: 90vh;
             overflow-y: auto;
         }
@@ -2364,12 +2439,12 @@ body.dark-mode .moon-icon {
         }
 
         .calc-modal::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.2);
+            background: #334155;
             border-radius: 10px;
         }
 
         .calc-modal::-webkit-scrollbar-track {
-            background: transparent;
+            background: #0f172a;
         }
 
         .calc-modal.visible {
@@ -2391,6 +2466,7 @@ body.dark-mode .moon-icon {
             box-sizing: border-box !important;
             align-items: center !important;
             justify-content: center !important;
+            background: #0b0f19 !important;
         }
 
         .calc-modal.maximized #calcDisplay,
@@ -2401,15 +2477,16 @@ body.dark-mode .moon-icon {
         }
 
         .calc-display {
-            background: rgba(255, 255, 255, 0.05);
+            background: #020617;
             border-radius: 20px;
-            padding: 20px;
+            padding: 18px 20px;
             text-align: right;
-            min-height: 100px;
+            min-height: 105px;
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 2px solid #1e293b;
+            box-shadow: inset 0 4px 15px rgba(0, 0, 0, 0.8);
         }
 
         #calc-prev {
@@ -2423,13 +2500,14 @@ body.dark-mode .moon-icon {
         }
 
         #calc-current {
-            color: white;
-            font-size: 2.2rem;
+            color: #ffffff;
+            font-size: 2.3rem;
             font-weight: 900;
             overflow-x: auto;
             overflow-y: hidden;
             white-space: nowrap;
             padding-bottom: 5px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
         }
 
         /* شريط التمرير المخصص للآلة الحاسبة */
@@ -2446,7 +2524,7 @@ body.dark-mode .moon-icon {
 
         #calc-current::-webkit-scrollbar-track,
         #calc-prev::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.1);
+            background: #020617;
         }
 
         .calc-grid {
@@ -2456,43 +2534,74 @@ body.dark-mode .moon-icon {
         }
 
         .calc-btn {
-            height: 60px;
+            height: 62px;
             border-radius: 18px;
-            border: none;
-            font-size: 1.3rem;
-            font-weight: 900;
+            border: 1px solid #334155;
+            font-size: 1.45rem;
+            font-weight: 800;
             cursor: pointer;
-            transition: 0.2s;
-            color: white;
-            background: rgba(255, 255, 255, 0.05);
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            color: #f8fafc;
+            background: #1e293b;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35);
         }
 
         .calc-btn:hover {
-            transform: translateY(-3px);
-            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+            background: #2d3d54;
+            border-color: #475569;
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+            color: #ffffff;
         }
 
         .calc-btn:active {
             transform: scale(0.95);
+            background: #1e293b;
         }
 
         .calc-btn.op {
-            color: #0ea5e9;
-            background: rgba(14, 165, 233, 0.1);
+            color: #38bdf8;
+            background: #0c4a6e;
+            border: 1px solid #0284c7;
+            font-weight: 900;
+        }
+
+        .calc-btn.op:hover {
+            background: #0284c7;
+            color: #ffffff;
+            border-color: #38bdf8;
+            box-shadow: 0 6px 16px rgba(2, 132, 199, 0.45);
         }
 
         .calc-btn.eq {
-            background: #0ea5e9;
-            color: white;
-            box-shadow: 0 10px 20px rgba(14, 165, 233, 0.3);
+            background: linear-gradient(135deg, #0284c7, #0369a1);
+            color: #ffffff;
+            box-shadow: 0 6px 18px rgba(2, 132, 199, 0.45);
+            border: 1px solid #38bdf8;
+            font-weight: 900;
+        }
+
+        .calc-btn.eq:hover {
+            background: linear-gradient(135deg, #0369a1, #0ea5e9);
+            box-shadow: 0 8px 22px rgba(14, 165, 233, 0.55);
+            transform: translateY(-2px);
         }
 
         .calc-btn.ac {
-            color: #f43f5e;
-            background: rgba(244, 63, 94, 0.1);
+            color: #ffffff;
+            background: #9f1239;
+            border: 1px solid #e11d48;
+            font-weight: 900;
+        }
+
+        .calc-btn.ac:hover {
+            background: #be123c;
+            color: #ffffff;
+            box-shadow: 0 6px 16px rgba(225, 29, 72, 0.45);
+            transform: translateY(-2px);
         }
 
         .calc-history {
@@ -2635,11 +2744,9 @@ body.dark-mode .moon-icon {
 
         /* 💎 تصميم نتائج البحث الفاخرة (Luxury Results) */
         .luxury-results {
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.8);
+            background: #0f172a;
+            border: 1.5px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
             overflow-y: auto;
             z-index: 999999 !important;
             padding: 8px;
@@ -2664,17 +2771,15 @@ body.dark-mode .moon-icon {
             background: linear-gradient(135deg, #d4af37, #92400e);
             border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
-            width: 45px;
-            height: 45px;
+            width: 42px;
+            height: 42px;
             color: white;
-            font-size: 1.8rem;
+            font-size: 1.6rem;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(212, 175, 55, 0.3);
-            backdrop-filter: blur(10px);
+            transition: transform 0.2s ease;
         }
 
         .premium-close-btn:hover {
@@ -2687,33 +2792,6 @@ body.dark-mode .moon-icon {
             transform: scale(0.9);
         }
 
-        /* --- AI Chat Scrollbar (Dark Green) --- */
-        #aiChatMessages::-webkit-scrollbar,
-        #aiAssistantFullChatLogs::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        #aiChatMessages::-webkit-scrollbar-track,
-        #aiAssistantFullChatLogs::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.05);
-            border-radius: 10px;
-        }
-
-        #aiChatMessages::-webkit-scrollbar-thumb,
-        #aiAssistantFullChatLogs::-webkit-scrollbar-thumb {
-            background: #166534;
-            /* Dark Emerald Green */
-            border-radius: 10px;
-            transition: background 0.3s ease;
-        }
-
-        #aiChatMessages::-webkit-scrollbar-thumb:hover,
-        #aiAssistantFullChatLogs::-webkit-scrollbar-thumb:hover {
-            background: #14532d;
-            /* Deeper Green on hover */
-        }
-
         /* ================= 💎 تصميم وتطوير قسم البضاعة والجرد الفاخر (Ultra-Premium Inventory Theme) ================= */
         #inventory-section {
             background: #f8fafc !important;
@@ -2721,11 +2799,9 @@ body.dark-mode .moon-icon {
         }
 
         #inventory-section .inv-sidebar {
-            background: linear-gradient(180deg, #1e1b4b 0%, #3b0764 50%, #2e1065 100%) !important;
-            border: 1px solid rgba(192, 132, 252, 0.3) !important;
-            border-radius: 24px !important;
-            box-shadow: 0 15px 35px rgba(46, 16, 101, 0.35) !important;
-            backdrop-filter: blur(20px) !important;
+            background: #1e1b4b !important;
+            border: 1.5px solid rgba(192, 132, 252, 0.3) !important;
+            border-radius: 18px !important;
         }
 
         /* 🎨 ألوان فاخرة ومتميزة لكل مربعات الجانب */
@@ -2935,7 +3011,6 @@ body.dark-mode .moon-icon {
         #inventory-section table.invoice-table tbody tr:hover {
             background-color: #065f46 !important;
             color: #ffffff !important;
-            box-shadow: 0 4px 12px rgba(6, 78, 59, 0.15) !important;
         }
 
         #accounts-section table.invoice-table tbody tr {
@@ -2946,7 +3021,6 @@ body.dark-mode .moon-icon {
         #accounts-section table.invoice-table tbody tr.acc-selected-row {
             background-color: #065f46 !important; /* أخضر غامق تقيل وواضح جداً */
             color: #ffffff !important;
-            box-shadow: 0 4px 15px rgba(6, 95, 70, 0.45) !important;
         }
 
         #accounts-section table.invoice-table tbody tr:hover td,
@@ -3065,16 +3139,12 @@ body.dark-mode .moon-icon {
                 }
 
                 @keyframes premiumFloat {
-
                     0%,
                     100% {
                         transform: translateY(0);
-                        filter: drop-shadow(0 5px 10px rgba(14, 165, 233, 0.3));
                     }
-
                     50% {
                         transform: translateY(-6px);
-                        filter: drop-shadow(0 15px 25px rgba(14, 165, 233, 0.9));
                     }
                 }
 
@@ -3225,13 +3295,11 @@ details>summary {
             flex-direction: column;
             align-items: center;
             gap: 5px;
-            background: rgba(0, 0, 0, 0.45);
+            background: #0f172a;
             padding: 8px 5px;
-            border-radius: 18px;
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
-            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 12px;
+            border: 1.5px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.15s ease;
             max-height: 72vh;
             overflow-y: auto;
             scrollbar-width: none;
@@ -3245,28 +3313,23 @@ details>summary {
             bottom: 20px;
             right: 20px;
             z-index: 100000;
-            background: rgba(15, 23, 42, 0.6);
-            padding: 15px 25px;
-            border-radius: 24px;
-            backdrop-filter: blur(25px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5);
+            background: #0f172a;
+            padding: 12px 20px;
+            border-radius: 14px;
+            border: 1.5px solid rgba(255, 255, 255, 0.2);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 5px;
-            transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: transform 0.15s ease;
             min-width: 180px;
             text-align: center;
         }
 
         .quick-wp-bar:hover,
         .quick-info-widget:hover {
-            transform: translateY(-5px) scale(1.02);
-            background: rgba(15, 23, 42, 0.8);
-            border-color: rgba(255, 255, 255, 0.3);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            border-color: rgba(255, 255, 255, 0.4);
         }
 
         .wp-swatch {

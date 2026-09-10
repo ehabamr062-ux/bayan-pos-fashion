@@ -19,9 +19,23 @@
         const debouncedHandleSupplierSearch = debounce((val) => { if (typeof handleSupplierSearch === 'function') handleSupplierSearch(val); }, 300);
         const debouncedHandlePurchaseSearch = debounce((val) => { if (typeof handlePurchaseSearch === 'function') handlePurchaseSearch(val); }, 300);
 
+        window.debouncedHandleSearch = debouncedHandleSearch;
+        window.debouncedHandleReturnSearch = debouncedHandleReturnSearch;
+        window.debouncedHandleCustomerSearch = debouncedHandleCustomerSearch;
+        window.debouncedRenderInventoryTable = debouncedRenderInventoryTable;
+        window.debouncedHandlePriceAdjSearch = debouncedHandlePriceAdjSearch;
+        window.debouncedHandleSupplierSearch = debouncedHandleSupplierSearch;
+        window.debouncedHandlePurchaseSearch = debouncedHandlePurchaseSearch;
+
 
 
         async function getUniqueHWID() {
+            // للأجهزة والتابلت المقترنة، نعتمد كود ترخيص الجهاز الرئيسي (الماستر) لتوحيد السيريال والاشتراك
+            if (typeof BayanNetworkHub !== 'undefined' && !BayanNetworkHub.isMasterServer) {
+                const masterHwid = getStore('bayan_master_hwid');
+                if (masterHwid) return masterHwid;
+            }
+
             let hwid = getStore('bayan_hwid');
             if (hwid) return hwid;
 
@@ -51,24 +65,29 @@
         }
         window.getUniqueHWID = getUniqueHWID;
 
-        // دالة نسخ كود الجهاز للحافظة
+        // دالة نسخ كود الجهاز الموحد للحافظة
         function copyHwid() {
-            const hwid = document.getElementById('displayHwid')?.innerText;
-            if(!hwid || hwid.includes('جاري')) return;
+            let hwid = document.getElementById('displayMachineId')?.innerText || document.getElementById('displayHwid')?.innerText;
+            if (!hwid || hwid.includes('جاري') || hwid.includes('---')) {
+                hwid = getStore('bayan_master_hwid') || getStore('bayan_hwid');
+            }
+            if(!hwid) return;
             navigator.clipboard.writeText(hwid).then(() => {
-                showToast("✅ تم نسخ كود الجهاز (HWID) بنجاح");
+                showToast("✅ تم نسخ كود ترخيص الجهاز (HWID) الموحد بنجاح");
             });
         }
 
         // فتح رابط خارجي بأمان عبر IPC (Electron) أو متصفح عادي
-        function openExternalUrl(url) {
-            try {
-                if (window.require) {
-                    const { ipcRenderer } = window.require('electron');
-                    if (ipcRenderer) { ipcRenderer.invoke('open-url', url); return; }
-                }
-            } catch(e) {}
-            window.open(url, '_blank');
+        if (typeof window.openExternalUrl !== 'function') {
+            window.openExternalUrl = function(url) {
+                try {
+                    if (window.require) {
+                        const { ipcRenderer } = window.require('electron');
+                        if (ipcRenderer) { ipcRenderer.invoke('open-url', url); return; }
+                    }
+                } catch(e) {}
+                window.open(url, '_blank');
+            };
         }
 
         // تحديث واجهة الاشتراك في النافذة (Modal) بناءً على طلب المستخدم
@@ -161,7 +180,12 @@
             const list = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
             const isTablet = (typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer);
             const savedPrefix = (typeof getStore === 'function') ? getStore('bayan_device_prefix') : null;
-            const devPrefix = (savedPrefix !== null && savedPrefix !== undefined) ? savedPrefix : (isTablet ? 'T-' : '');
+            let devPrefix = (savedPrefix !== null && savedPrefix !== undefined && savedPrefix !== '') ? savedPrefix : '';
+            if (!devPrefix && isTablet) {
+                const dId = (window.BayanNetworkHub && window.BayanNetworkHub.deviceId) ? String(window.BayanNetworkHub.deviceId) : '';
+                const shortCode = dId ? dId.replace(/^DEV-/i, '').substring(0, 3).toUpperCase() : '';
+                devPrefix = shortCode ? `T${shortCode}-` : 'T-';
+            }
 
             const maxId = list.reduce((max, t) => {
                 if (!typeKeyword || (t.type && t.type.includes(typeKeyword))) {
@@ -335,61 +359,194 @@
             return false;
         };
 
-        function updateNotifications() {
+        // ============================================================
+        //  منظومة تنبيهات النظام وسجل الاستلام الموحد (Notifications & Receipt Log)
+        // ============================================================
+
+        // سجل الاستلام الموحد والمؤرشف مع بيانات التدقيق (المستخدم، المخزن، التوقيت)
+        window.bayanReceiptLog = [];
+        try {
+            const rawLog = (typeof getStore === 'function') ? getStore('bayan_receipt_log') : null;
+            window.bayanReceiptLog = rawLog ? JSON.parse(rawLog) : [];
+        } catch(e) { window.bayanReceiptLog = []; }
+
+        // تهيئة قوائم المعرفات المستلمة
+        function syncAcknowledgedLookupSets() {
             try {
-                const raw = (typeof getStore === 'function') ? getStore('acknowledged_low_stock') : null;
-                window.acknowledgedLowStock = raw ? JSON.parse(raw) : [];
+                const raw1 = (typeof getStore === 'function') ? getStore('acknowledged_low_stock') : null;
+                window.acknowledgedLowStock = raw1 ? JSON.parse(raw1).map(String) : [];
             } catch(e) { window.acknowledgedLowStock = []; }
             try {
-                const raw = (typeof getStore === 'function') ? getStore('acknowledged_expiry') : null;
-                window.acknowledgedExpiry = raw ? JSON.parse(raw) : [];
+                const raw2 = (typeof getStore === 'function') ? getStore('acknowledged_expiry') : null;
+                window.acknowledgedExpiry = raw2 ? JSON.parse(raw2).map(String) : [];
             } catch(e) { window.acknowledgedExpiry = []; }
             try {
-                const raw = (typeof getStore === 'function') ? getStore('acknowledged_debt') : null;
-                window.acknowledgedDebt = raw ? JSON.parse(raw) : [];
+                const raw3 = (typeof getStore === 'function') ? getStore('acknowledged_debt') : null;
+                window.acknowledgedDebt = raw3 ? JSON.parse(raw3).map(String) : [];
             } catch(e) { window.acknowledgedDebt = []; }
             try {
-                const raw = (typeof getStore === 'function') ? getStore('acknowledged_delayed') : null;
-                window.acknowledgedDelayed = raw ? JSON.parse(raw) : [];
+                const raw4 = (typeof getStore === 'function') ? getStore('acknowledged_delayed') : null;
+                window.acknowledgedDelayed = raw4 ? JSON.parse(raw4).map(String) : [];
             } catch(e) { window.acknowledgedDelayed = []; }
+            try {
+                const raw5 = (typeof getStore === 'function') ? getStore('acknowledged_transfers') : null;
+                window.acknowledgedTransfers = raw5 ? JSON.parse(raw5).map(String) : [];
+            } catch(e) { window.acknowledgedTransfers = []; }
+            try {
+                const raw6 = (typeof getStore === 'function') ? getStore('acknowledged_cloud') : null;
+                window.acknowledgedCloud = raw6 ? JSON.parse(raw6).map(String) : [];
+            } catch(e) { window.acknowledgedCloud = []; }
+        }
+        syncAcknowledgedLookupSets();
 
+        // استرجاع وتوثيق أي تنبيهات سابقة تم تأكيدها قبل تفعيل السجل الموحد
+        function backfillLegacyReceiptLog() {
+            if (!Array.isArray(window.bayanReceiptLog)) window.bayanReceiptLog = [];
+            const existingKeys = new Set(window.bayanReceiptLog.map(x => `${x.type}_${x.targetId}`));
+            let changed = false;
+
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                (window.acknowledgedLowStock || []).forEach(id => {
+                    const key = `low-stock_${id}`;
+                    if (!existingKeys.has(key)) {
+                        const p = productsDB.find(prod => String(prod.id) === String(id));
+                        if (p) {
+                            window.bayanReceiptLog.push({
+                                logId: 'REC-LEGACY-' + id,
+                                type: 'low-stock',
+                                typeLabel: 'نواقص بضاعة',
+                                targetId: String(id),
+                                name: p.name,
+                                details: `الرصيد: ${p.stock} (الحد: ${p.minStock || 5})`,
+                                user: 'المدير',
+                                warehouse: 'المخزن الرئيسي',
+                                date: 'سابق',
+                                time: '-',
+                                timestamp: Date.now()
+                            });
+                            existingKeys.add(key);
+                            changed = true;
+                        }
+                    }
+                });
+
+                (window.acknowledgedExpiry || []).forEach(id => {
+                    const key = `expiry_${id}`;
+                    if (!existingKeys.has(key)) {
+                        const p = productsDB.find(prod => String(prod.id) === String(id));
+                        if (p) {
+                            window.bayanReceiptLog.push({
+                                logId: 'REC-LEGACY-EXP-' + id,
+                                type: 'expiry',
+                                typeLabel: 'صلاحية قريبة/منتهية',
+                                targetId: String(id),
+                                name: p.name,
+                                details: `تاريخ الانتهاء: ${p.expiry || '-'}`,
+                                user: 'المدير',
+                                warehouse: 'المخزن الرئيسي',
+                                date: 'سابق',
+                                time: '-',
+                                timestamp: Date.now()
+                            });
+                            existingKeys.add(key);
+                            changed = true;
+                        }
+                    }
+                });
+            }
+
+            if (typeof accounts !== 'undefined' && Array.isArray(accounts)) {
+                (window.acknowledgedDebt || []).forEach(id => {
+                    const key = `debt_${id}`;
+                    if (!existingKeys.has(key)) {
+                        const a = accounts.find(acc => String(acc.id) === String(id));
+                        if (a) {
+                            const bal = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
+                            window.bayanReceiptLog.push({
+                                logId: 'REC-LEGACY-DEBT-' + id,
+                                type: 'debt',
+                                typeLabel: 'مديونية عميل',
+                                targetId: String(id),
+                                name: a.name,
+                                details: `المبلغ المستحق: ${bal.toFixed(2)} ج.م`,
+                                user: 'المدير',
+                                warehouse: 'المخزن الرئيسي',
+                                date: 'سابق',
+                                time: '-',
+                                timestamp: Date.now()
+                            });
+                            existingKeys.add(key);
+                            changed = true;
+                        }
+                    }
+                });
+            }
+
+            if (changed && typeof setStore === 'function') {
+                setStore('bayan_receipt_log', JSON.stringify(window.bayanReceiptLog));
+            }
+        }
+
+        // الدالة الموحدة لحساب إحصائيات التنبيهات النشطة والمستلمة (المصدر الوحيد للحقيقة)
+        window.getSystemNotificationsStats = function() {
+            syncAcknowledgedLookupSets();
+            backfillLegacyReceiptLog();
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
-            const lowStockItems = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => (parseFloat(p.stock) || 0) <= (parseFloat(p.minStock) || 5) && !window.acknowledgedLowStock.includes(p.id));
+            // 1. النواقص النشطة
+            const allLowStock = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+                ? productsDB.filter(p => (parseFloat(p.stock) || 0) <= (parseFloat(p.minStock) || 5))
+                : [];
+            const activeLowStock = allLowStock.filter(p => !window.acknowledgedLowStock.includes(String(p.id)));
+            const archivedLowStock = allLowStock.filter(p => window.acknowledgedLowStock.includes(String(p.id)));
 
-            const expiringItems = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => {
-                if (!p.expiry) return false;
-                const exp = new Date(p.expiry);
-                if (isNaN(exp.getTime())) return false;
-                exp.setHours(0, 0, 0, 0);
-                const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
-                return diffDays <= 30 && !window.acknowledgedExpiry.includes(p.id);
-            });
+            // 2. تواريخ الصلاحية النشطة
+            const allExpiring = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+                ? productsDB.filter(p => {
+                    if (!p.expiry) return false;
+                    const exp = new Date(p.expiry);
+                    if (isNaN(exp.getTime())) return false;
+                    exp.setHours(0, 0, 0, 0);
+                    const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
+                    return diffDays <= 30;
+                })
+                : [];
+            const activeExpiring = allExpiring.filter(p => !window.acknowledgedExpiry.includes(String(p.id)));
+            const archivedExpiring = allExpiring.filter(p => window.acknowledgedExpiry.includes(String(p.id)));
 
-            const debtAccounts = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
-                const debit = parseFloat(a.debit) || 0;
-                const credit = parseFloat(a.credit) || 0;
-                const balance = debit - credit;
-                const isRemindActive = (a.remind === true || a.remind === 'true');
-                return (a.type === 'client' || a.type === 'mixed') && balance > 0 && isRemindActive && !window.acknowledgedDebt.includes(a.id);
-            });
+            // 3. ديون العملاء النشطة (محمية بالصلاحيات)
+            const canViewAccounts = (typeof currentUser !== 'undefined' && currentUser && (currentUser.role === 'admin' || (typeof hasPermission === 'function' && hasPermission('accounts_view'))));
+            const allDebtAccounts = (canViewAccounts && typeof accounts !== 'undefined' && Array.isArray(accounts))
+                ? accounts.filter(a => {
+                    const debit = parseFloat(a.debit) || 0;
+                    const credit = parseFloat(a.credit) || 0;
+                    const balance = debit - credit;
+                    const isRemindActive = (a.remind === true || a.remind === 'true');
+                    return (a.type === 'client' || a.type === 'mixed') && balance > 0 && isRemindActive;
+                })
+                : [];
+            const activeDebt = allDebtAccounts.filter(a => !window.acknowledgedDebt.includes(String(a.id)));
+            const archivedDebt = allDebtAccounts.filter(a => window.acknowledgedDebt.includes(String(a.id)));
 
-            const delayedAccounts = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
-                const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
-                if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
-                const isRemindActive = (a.remind === true || a.remind === 'true');
-                if (!isRemindActive) return false;
-                if (window.acknowledgedDelayed.includes(a.id)) return false;
+            // 4. الحسابات المتأخرة النشطة (محمية بالصلاحيات)
+            const allDelayed = (canViewAccounts && typeof accounts !== 'undefined' && Array.isArray(accounts))
+                ? accounts.filter(a => {
+                    const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
+                    if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
+                    const isRemindActive = (a.remind === true || a.remind === 'true');
+                    if (!isRemindActive) return false;
+                    const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
+                    if (!lastTrans) return true;
+                    const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
+                    const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
+                    return diffDays > 30;
+                })
+                : [];
+            const activeDelayed = allDelayed.filter(a => !window.acknowledgedDelayed.includes(String(a.id)));
+            const archivedDelayed = allDelayed.filter(a => window.acknowledgedDelayed.includes(String(a.id)));
 
-                const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
-                if (!lastTrans) return true;
-                const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
-                const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
-                return diffDays > 30;
-            });
-
-            // أذونات التحويل المخزني المعلقة الواردة لهذا المخزن
+            // 5. التحويلات الواردة المعلقة
             const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
             const allPendingTransfers = (typeof transactions !== 'undefined' && Array.isArray(transactions))
                 ? transactions.filter(t => t.type && t.type.includes('تحويل') && t.transferStatus === 'pending' && (t.warehouse === activeWH || t.toWarehouse === activeWH))
@@ -397,184 +554,249 @@
             const pendingTransferInvoices = {};
             allPendingTransfers.forEach(t => {
                 const invId = t.invoiceId || 'TR-UNKNOWN';
-                pendingTransferInvoices[invId] = true;
+                if (!pendingTransferInvoices[invId]) {
+                    pendingTransferInvoices[invId] = {
+                        id: invId,
+                        date: t.date,
+                        sourceWarehouse: t.sourceWarehouse,
+                        warehouse: t.warehouse,
+                        user: t.user || '-',
+                        notes: t.notes || '',
+                        items: []
+                    };
+                }
+                pendingTransferInvoices[invId].items.push(t);
             });
-            const activeTransfersCount = Object.keys(pendingTransferInvoices).length;
+            const pendingTransfersList = Object.values(pendingTransferInvoices);
+            const activeTransfers = pendingTransfersList.filter(tr => !window.acknowledgedTransfers.includes(String(tr.id)));
 
-            const total = lowStockItems.length + expiringItems.length + debtAccounts.length + delayedAccounts.length + activeTransfersCount;
+            // 6. الإشعارات السحابية النشطة غير المستلمة
+            const cloudHistory = (window.cloudAnnouncementsHistory && Array.isArray(window.cloudAnnouncementsHistory))
+                ? window.cloudAnnouncementsHistory
+                : [];
+            const activeCloud = cloudHistory.filter(c => c.active && !window.acknowledgedCloud.includes(String(c.id)));
+
+            // الحسابات المجمعة
+            const activeProductsTotal = activeLowStock.length + activeExpiring.length;
+            const activeAccountsTotal = activeDebt.length + activeDelayed.length;
+            const activeTransfersCount = activeTransfers.length;
+            const activeCloudCount = activeCloud.length;
+
+            const totalActiveCount = activeProductsTotal + activeAccountsTotal + activeTransfersCount + activeCloudCount;
+            const totalReceiptCount = window.bayanReceiptLog.length;
+
+            return {
+                allLowStock, activeLowStock, archivedLowStock,
+                allExpiring, activeExpiring, archivedExpiring,
+                allDebtAccounts, activeDebt, archivedDebt,
+                allDelayed, activeDelayed, archivedDelayed,
+                pendingTransfersList, activeTransfers, activeTransfersCount,
+                cloudHistory, activeCloud, activeCloudCount,
+                activeProductsTotal, activeAccountsTotal,
+                totalActiveCount, totalReceiptCount,
+                activeWH, canViewAccounts
+            };
+        };
+
+        function updateNotifications() {
+            const stats = window.getSystemNotificationsStats ? window.getSystemNotificationsStats() : null;
+            const total = stats ? stats.totalActiveCount : 0;
             const badge = document.getElementById('bellBadge') || document.getElementById('notificationsBadge');
             if (badge) {
                 badge.innerText = total > 99 ? '99+' : total;
                 badge.style.display = total > 0 ? 'flex' : 'none';
             }
+            return stats;
         }
+        window.updateNotifications = updateNotifications;
 
-        window.acknowledgeNotification = function(type, id, returnTab = 'products') {
+        // تسجيل استلام تنبيه موحد مع توثيق (المستخدم، المخزن، الوقت والتاريخ)
+        window.acknowledgeNotification = function(type, id, meta = {}, returnTab = null, silent = false) {
+            if (!id) return;
+            const targetIdStr = String(id);
+            syncAcknowledgedLookupSets();
+
+            let typeLabel = 'تنبيه';
             if (type === 'low-stock') {
-                if (!window.acknowledgedLowStock.includes(id)) window.acknowledgedLowStock.push(id);
-                const str = JSON.stringify(window.acknowledgedLowStock);
-                setStore('acknowledged_low_stock', str);
-            } else if (type === 'expiry') {
-                if (!window.acknowledgedExpiry.includes(id)) window.acknowledgedExpiry.push(id);
-                const str = JSON.stringify(window.acknowledgedExpiry);
-                setStore('acknowledged_expiry', str);
-            } else if (type === 'debt') {
-                if (!window.acknowledgedDebt.includes(id)) window.acknowledgedDebt.push(id);
-                const str = JSON.stringify(window.acknowledgedDebt);
-                setStore('acknowledged_debt', str);
-            } else if (type === 'delayed') {
-                if (!window.acknowledgedDelayed.includes(id)) window.acknowledgedDelayed.push(id);
-                const str = JSON.stringify(window.acknowledgedDelayed);
-                setStore('acknowledged_delayed', str);
-            }
-            updateNotifications();
-            if (typeof showNotificationsModal === 'function') {
-                showNotificationsModal(returnTab);
-            }
-            showToast("✅ تم وضع علامة استلام على التنبيه");
-        };
-
-        window.acknowledgeAllNotifications = function(activeTab = 'all') {
-            if (activeTab === 'products' || activeTab === 'all') {
-                const prods = (typeof productsDB !== 'undefined' ? productsDB : []);
-                prods.forEach(p => {
-                    if (!window.acknowledgedLowStock.includes(p.id)) window.acknowledgedLowStock.push(p.id);
-                    if (!window.acknowledgedExpiry.includes(p.id)) window.acknowledgedExpiry.push(p.id);
-                });
+                typeLabel = 'نواقص بضاعة';
+                if (!window.acknowledgedLowStock.includes(targetIdStr)) window.acknowledgedLowStock.push(targetIdStr);
                 setStore('acknowledged_low_stock', JSON.stringify(window.acknowledgedLowStock));
+            } else if (type === 'expiry') {
+                typeLabel = 'صلاحية قريبة/منتهية';
+                if (!window.acknowledgedExpiry.includes(targetIdStr)) window.acknowledgedExpiry.push(targetIdStr);
                 setStore('acknowledged_expiry', JSON.stringify(window.acknowledgedExpiry));
-            }
-            if (activeTab === 'accounts' || activeTab === 'all') {
-                const accs = (typeof accounts !== 'undefined' ? accounts : []);
-                accs.forEach(a => {
-                    if (!window.acknowledgedDebt.includes(a.id)) window.acknowledgedDebt.push(a.id);
-                    if (!window.acknowledgedDelayed.includes(a.id)) window.acknowledgedDelayed.push(a.id);
-                });
+            } else if (type === 'debt') {
+                typeLabel = 'مديونية عميل';
+                if (!window.acknowledgedDebt.includes(targetIdStr)) window.acknowledgedDebt.push(targetIdStr);
                 setStore('acknowledged_debt', JSON.stringify(window.acknowledgedDebt));
+            } else if (type === 'delayed') {
+                typeLabel = 'متأخر عن السداد';
+                if (!window.acknowledgedDelayed.includes(targetIdStr)) window.acknowledgedDelayed.push(targetIdStr);
                 setStore('acknowledged_delayed', JSON.stringify(window.acknowledgedDelayed));
+            } else if (type === 'transfer') {
+                typeLabel = 'إذن تحويل وارد';
+                if (!window.acknowledgedTransfers.includes(targetIdStr)) window.acknowledgedTransfers.push(targetIdStr);
+                setStore('acknowledged_transfers', JSON.stringify(window.acknowledgedTransfers));
+            } else if (type === 'cloud') {
+                typeLabel = 'إشعار سحابي';
+                if (!window.acknowledgedCloud.includes(targetIdStr)) window.acknowledgedCloud.push(targetIdStr);
+                setStore('acknowledged_cloud', JSON.stringify(window.acknowledgedCloud));
             }
-            updateNotifications();
-            if (typeof showNotificationsModal === 'function') {
-                showNotificationsModal(activeTab === 'all' ? 'products' : activeTab);
+
+            // استخراج بيانات المستخدم والمخزن الحاليين للتوثيق
+            const curUser = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) ? currentUser.name : (getStore('bayan_user_name') || 'المدير');
+            const curWarehouse = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : (getStore('bayan_user_warehouse') || 'المخزن الرئيسي')).trim();
+            const now = new Date();
+
+            // إضافة قيد رسمي في سجل الاستلام
+            const logEntry = {
+                logId: 'REC-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+                type: type,
+                typeLabel: meta.typeLabel || typeLabel,
+                targetId: targetIdStr,
+                name: meta.name || 'بيان غير محدد',
+                details: meta.details || '-',
+                user: curUser,
+                warehouse: curWarehouse,
+                date: now.toLocaleDateString('ar-EG'),
+                time: now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+                timestamp: now.getTime()
+            };
+
+            // إزالة أي قيد مكرر لنفس العنصر قبل الإضافة
+            window.bayanReceiptLog = (window.bayanReceiptLog || []).filter(item => !(item.type === type && item.targetId === targetIdStr));
+            window.bayanReceiptLog.unshift(logEntry);
+            if (window.bayanReceiptLog.length > 300) window.bayanReceiptLog = window.bayanReceiptLog.slice(0, 300);
+            setStore('bayan_receipt_log', JSON.stringify(window.bayanReceiptLog));
+
+            if (!silent) {
+                updateNotifications();
+                if (typeof showNotificationsModal === 'function') {
+                    showNotificationsModal(returnTab || (type === 'low-stock' || type === 'expiry' ? 'products' : (type === 'debt' || type === 'delayed' ? 'accounts' : (type === 'transfer' ? 'transfers' : 'cloud'))));
+                }
+                showToast(`✅ تم استلام [${logEntry.name}] وتوثيقه في سجل الاستلام بنجاح`);
             }
-            showToast("✅ تم وضع علامة مقروء على كافة التنبيهات وتصفير العداد بنجاح!", "success");
         };
 
-        window.unacknowledgeNotification = function(type, id) {
+        // استعادة التنبيه من سجل الاستلام إلى التنبيهات النشطة
+        window.unacknowledgeNotification = function(type, id, logId = null) {
+            if (!id) return;
+            const targetIdStr = String(id);
+            syncAcknowledgedLookupSets();
+
             if (type === 'low-stock') {
-                window.acknowledgedLowStock = window.acknowledgedLowStock.filter(x => x !== id);
-                const str = JSON.stringify(window.acknowledgedLowStock);
-                setStore('acknowledged_low_stock', str);
+                window.acknowledgedLowStock = window.acknowledgedLowStock.filter(x => x !== targetIdStr);
+                setStore('acknowledged_low_stock', JSON.stringify(window.acknowledgedLowStock));
             } else if (type === 'expiry') {
-                window.acknowledgedExpiry = window.acknowledgedExpiry.filter(x => x !== id);
-                const str = JSON.stringify(window.acknowledgedExpiry);
-                setStore('acknowledged_expiry', str);
+                window.acknowledgedExpiry = window.acknowledgedExpiry.filter(x => x !== targetIdStr);
+                setStore('acknowledged_expiry', JSON.stringify(window.acknowledgedExpiry));
             } else if (type === 'debt') {
-                window.acknowledgedDebt = window.acknowledgedDebt.filter(x => x !== id);
-                const str = JSON.stringify(window.acknowledgedDebt);
-                setStore('acknowledged_debt', str);
+                window.acknowledgedDebt = window.acknowledgedDebt.filter(x => x !== targetIdStr);
+                setStore('acknowledged_debt', JSON.stringify(window.acknowledgedDebt));
             } else if (type === 'delayed') {
-                window.acknowledgedDelayed = window.acknowledgedDelayed.filter(x => x !== id);
-                const str = JSON.stringify(window.acknowledgedDelayed);
-                setStore('acknowledged_delayed', str);
+                window.acknowledgedDelayed = window.acknowledgedDelayed.filter(x => x !== targetIdStr);
+                setStore('acknowledged_delayed', JSON.stringify(window.acknowledgedDelayed));
+            } else if (type === 'transfer') {
+                window.acknowledgedTransfers = window.acknowledgedTransfers.filter(x => x !== targetIdStr);
+                setStore('acknowledged_transfers', JSON.stringify(window.acknowledgedTransfers));
+            } else if (type === 'cloud') {
+                window.acknowledgedCloud = window.acknowledgedCloud.filter(x => x !== targetIdStr);
+                setStore('acknowledged_cloud', JSON.stringify(window.acknowledgedCloud));
             }
+
+            // حذف أو إزالة القيد من سجل الاستلام
+            if (logId) {
+                window.bayanReceiptLog = (window.bayanReceiptLog || []).filter(x => x.logId !== logId);
+            } else {
+                window.bayanReceiptLog = (window.bayanReceiptLog || []).filter(x => !(x.type === type && x.targetId === targetIdStr));
+            }
+            setStore('bayan_receipt_log', JSON.stringify(window.bayanReceiptLog));
+
             updateNotifications();
             if (typeof showNotificationsModal === 'function') {
                 showNotificationsModal('archived');
             }
-            showToast("🔄 تم استعادة التنبيه للنشط");
+            showToast("🔄 تم استعادة التنبيه إلى القائمة النشطة بنجاح!");
         };
 
+        // استلام وتأكيد كافة تنبيهات البضاعة والصلاحيات دفعة واحدة
         window.acknowledgeAllProductsNotifications = function() {
-            const allLowStock = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => (parseFloat(p.stock) || 0) <= (parseFloat(p.minStock) || 5));
-            allLowStock.forEach(p => {
-                if (!window.acknowledgedLowStock.includes(p.id)) window.acknowledgedLowStock.push(p.id);
+            const stats = window.getSystemNotificationsStats();
+            if (!stats) return;
+            const items = [...stats.activeLowStock.map(p => ({ type: 'low-stock', id: p.id, name: p.name, details: `الرصيد: ${p.stock} (الحد: ${p.minStock || 5})` })), ...stats.activeExpiring.map(p => ({ type: 'expiry', id: p.id, name: p.name, details: `تاريخ الانتهاء: ${p.expiry}` }))];
+            if (items.length === 0) return showToast("ℹ️ لا توجد تنبيهات بضاعة بانتظار الاستلام.");
+            items.forEach(it => {
+                window.acknowledgeNotification(it.type, it.id, { name: it.name, details: it.details }, 'products', true);
             });
-            const str = JSON.stringify(window.acknowledgedLowStock);
-            setStore('acknowledged_low_stock', str);
-
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const allExpiring = (typeof productsDB !== 'undefined' ? productsDB : []).filter(p => {
-                if (!p.expiry) return false;
-                const exp = new Date(p.expiry);
-                if (isNaN(exp.getTime())) return false;
-                exp.setHours(0, 0, 0, 0);
-                const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
-                return diffDays <= 30;
-            });
-            allExpiring.forEach(p => {
-                if (!window.acknowledgedExpiry.includes(p.id)) window.acknowledgedExpiry.push(p.id);
-            });
-            const expStr = JSON.stringify(window.acknowledgedExpiry);
-            setStore('acknowledged_expiry', expStr);
-
             updateNotifications();
             if (typeof showNotificationsModal === 'function') {
                 showNotificationsModal('products');
             }
-            showToast("✅ تم تأكيد استلام كافة تنبيهات البضاعة والصلاحية!", "success");
+            showToast("✅ تم تأكيد استلام كافة تنبيهات البضاعة وتوثيقها في سجل الاستلام بنجاح!", "success");
         };
 
+        // استلام وتأكيد كافة تنبيهات الحسابات دفعة واحدة
         window.acknowledgeAllAccountsNotifications = function() {
-            const today = new Date();
-            const allDebtAccounts = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
-                const debit = parseFloat(a.debit) || 0;
-                const credit = parseFloat(a.credit) || 0;
-                const balance = debit - credit;
-                const isRemindActive = (a.remind === true || a.remind === 'true');
-                return (a.type === 'client' || a.type === 'mixed') && balance > 0 && isRemindActive;
+            const stats = window.getSystemNotificationsStats();
+            if (!stats) return;
+            const items = [...stats.activeDebt.map(a => ({ type: 'debt', id: a.id, name: a.name, details: `المبلغ المستحق: ${((parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0)).toFixed(2)} ج.م` })), ...stats.activeDelayed.map(a => ({ type: 'delayed', id: a.id, name: a.name, details: 'متأخر عن السداد' }))];
+            if (items.length === 0) return showToast("ℹ️ لا توجد تنبيهات حسابات بانتظار الاستلام.");
+            items.forEach(it => {
+                window.acknowledgeNotification(it.type, it.id, { name: it.name, details: it.details }, 'accounts', true);
             });
-            const allDelayed = (typeof accounts !== 'undefined' ? accounts : []).filter(a => {
-                const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
-                if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
-                const isRemindActive = (a.remind === true || a.remind === 'true');
-                if (!isRemindActive) return false;
-                const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
-                if (!lastTrans) return true;
-                const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
-                const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
-                return diffDays > 30;
-            });
-
-            allDebtAccounts.forEach(a => {
-                if (!window.acknowledgedDebt.includes(a.id)) window.acknowledgedDebt.push(a.id);
-            });
-            allDelayed.forEach(a => {
-                if (!window.acknowledgedDelayed.includes(a.id)) window.acknowledgedDelayed.push(a.id);
-            });
-
-            const debtStr = JSON.stringify(window.acknowledgedDebt);
-            const delayedStr = JSON.stringify(window.acknowledgedDelayed);
-            setStore('acknowledged_debt', debtStr);
-            setStore('acknowledged_delayed', delayedStr);
-
             updateNotifications();
             if (typeof showNotificationsModal === 'function') {
                 showNotificationsModal('accounts');
             }
-            showToast("✅ تم تأكيد استلام جميع تنبيهات الحسابات!", "success");
+            showToast("✅ تم تأكيد استلام جميع تنبيهات الحسابات وتوثيقها في سجل الاستلام بنجاح!", "success");
         };
 
-        window.acknowledgeAllNotifications = function() {
-            window.acknowledgeAllProductsNotifications();
-            window.acknowledgeAllAccountsNotifications();
-        };
-
-        window.resetAcknowledgedNotifications = function() {
-            window.acknowledgedLowStock = [];
-            window.acknowledgedExpiry = [];
-            window.acknowledgedDebt = [];
-            window.acknowledgedDelayed = [];
-            removeStore('acknowledged_low_stock');
-            removeStore('acknowledged_expiry');
-            removeStore('acknowledged_debt');
-            removeStore('acknowledged_delayed');
-            updateNotifications();
-            if (typeof showNotificationsModal === 'function') {
-                showNotificationsModal('archived');
+        // استلام وتأكيد الكل عبر التبويب المحدد
+        window.acknowledgeAllNotifications = function(activeTab = 'all') {
+            if (activeTab === 'products') window.acknowledgeAllProductsNotifications();
+            else if (activeTab === 'accounts') window.acknowledgeAllAccountsNotifications();
+            else {
+                window.acknowledgeAllProductsNotifications();
+                window.acknowledgeAllAccountsNotifications();
             }
-            showToast("🔄 تم تصفير الأرشيف واستعادة كافة التنبيهات للقوائم النشطة");
+        };
+
+        // مسح سجل الاستلام أو تصفيره
+        window.clearReceiptLog = function() {
+            if (!window.bayanReceiptLog || window.bayanReceiptLog.length === 0) return;
+            if (confirm("هل أنت متأكد من مسح بيانات سجل الاستلام المؤرشفة نهائياً؟\n(لن يؤثر ذلك على التنبيهات النشطة)")) {
+                window.bayanReceiptLog = [];
+                setStore('bayan_receipt_log', JSON.stringify([]));
+                if (typeof showNotificationsModal === 'function') {
+                    showNotificationsModal('archived');
+                }
+                showToast("🗑️ تم مسح سجل الاستلام بنجاح.");
+            }
+        };
+
+        // استعادة كافة التنبيهات من سجل الاستلام للنشط
+        window.resetAcknowledgedNotifications = function() {
+            if (confirm("هل أنت متأكد من استعادة كافة التنبيهات المستلمة والمؤرشفة إلى القوائم النشطة وتصفير السجل؟")) {
+                window.acknowledgedLowStock = [];
+                window.acknowledgedExpiry = [];
+                window.acknowledgedDebt = [];
+                window.acknowledgedDelayed = [];
+                window.acknowledgedTransfers = [];
+                window.acknowledgedCloud = [];
+                window.bayanReceiptLog = [];
+                removeStore('acknowledged_low_stock');
+                removeStore('acknowledged_expiry');
+                removeStore('acknowledged_debt');
+                removeStore('acknowledged_delayed');
+                removeStore('acknowledged_transfers');
+                removeStore('acknowledged_cloud');
+                removeStore('bayan_receipt_log');
+                updateNotifications();
+                if (typeof showNotificationsModal === 'function') {
+                    showNotificationsModal('archived');
+                }
+                showToast("🔄 تم تصفير سجل الاستلام واستعادة كافة التنبيهات للقوائم النشطة");
+            }
         };
 
         function getTransactionDateTime(dateId, timeId) {
@@ -1162,6 +1384,7 @@
         }
 
         function openNewItemModal(product = null) {
+            if (typeof checkPermission === 'function' && !checkPermission('stock_add')) return;
             document.getElementById('newItemModal').classList.remove('hidden');
             const nameEl = document.getElementById('newItemName');
             const preview = document.getElementById('productImagePreview');
@@ -1224,12 +1447,15 @@
                 if (mInp) mInp.dataset.origStock = "0";
                 addProductUnitRow('قطعة');
                 if (typeof renderProductWarehouseStocksTable === 'function') renderProductWarehouseStocksTable(null);
+                window.hasSyncedVariantPrices = false;
+                if (typeof window.updateVariantPriceSyncUI === 'function') window.updateVariantPriceSyncUI();
             }
 
             document.getElementById('newItemBarcode').focus();
             switchBayanTab('general', document.querySelector('.bayan-tab'));
             updateAllUnitSelects();
             if (typeof updateProductNavCounter === 'function') updateProductNavCounter();
+            if (typeof window.updateVariantPriceSyncUI === 'function') window.updateVariantPriceSyncUI();
         }
 
         // --- فلترة محتويات السلة في المبيعات والمشتريات ---
@@ -1326,14 +1552,6 @@
         };
 
         let activeAlertTimeout = null;
-        window.closeCustomAlert = function() {
-            const modal = document.getElementById('alertModal');
-            if (modal) modal.classList.add('hidden');
-            if (activeAlertTimeout) {
-                clearTimeout(activeAlertTimeout);
-                activeAlertTimeout = null;
-            }
-        };
 
         function showCustomAlert(options = {}) {
             if (activeAlertTimeout) {
@@ -1369,9 +1587,23 @@
             cancelBtn.style.color = '#555';
             cancelBtn.style.background = '#edf0f2';
 
+            const card = modal.querySelector('.alert-card');
+            if (card) {
+                card.style.width = options.cardWidth || options.width || '400px';
+                card.style.maxWidth = options.maxWidth || '92%';
+                card.style.padding = options.cardPadding || '35px 30px';
+            }
+
+            if (options.hideIcon) {
+                icon.style.display = 'none';
+            } else {
+                icon.style.display = 'block';
+                if (options.icon) icon.innerText = options.icon;
+            }
+
             // ضبط الأيقونة والألوان بناءً على النوع
             if (type === 'error') {
-                icon.innerText = '🚫';
+                if (!options.icon) icon.innerText = '🚫';
                 title.style.color = '#c0392b';
                 confirmBtn.style.setProperty('background', '#c0392b', 'important');
                 confirmBtn.style.setProperty('color', '#ffffff', 'important');
@@ -1380,17 +1612,17 @@
                     cancelBtn.style.setProperty('color', '#ffffff', 'important');
                 }
             } else if (type === 'success') {
-                icon.innerText = '✅';
+                if (!options.icon) icon.innerText = '✅';
                 title.style.color = '#1e8449';
                 confirmBtn.style.setProperty('background', '#1e8449', 'important');
                 confirmBtn.style.setProperty('color', '#ffffff', 'important');
             } else if (type === 'info') {
-                icon.innerText = '👤';
+                if (!options.icon) icon.innerText = '👤';
                 title.style.color = '#2980b9';
                 confirmBtn.style.setProperty('background', '#2980b9', 'important');
                 confirmBtn.style.setProperty('color', '#ffffff', 'important');
             } else if (type === 'question') {
-                icon.innerText = '❓';
+                if (!options.icon) icon.innerText = '❓';
                 title.style.color = '#8e44ad'; // Purple
                 confirmBtn.style.setProperty('background', '#27ae60', 'important'); // Green
                 confirmBtn.style.setProperty('color', '#ffffff', 'important');
@@ -1398,13 +1630,22 @@
                 cancelBtn.style.setProperty('background', '#2980b9', 'important'); // Blue
                 cancelBtn.style.setProperty('color', '#ffffff', 'important');
             } else {
-                icon.innerText = '⚠️';
+                if (!options.icon) icon.innerText = '⚠️';
                 title.style.color = '#f39c12';
                 confirmBtn.style.setProperty('background', '#1e8449', 'important');
                 confirmBtn.style.setProperty('color', '#ffffff', 'important');
             }
 
             cancelBtn.classList.toggle('hidden', !showCancel);
+
+            const resetModalCardStyle = () => {
+                if (card) {
+                    card.style.width = '400px';
+                    card.style.maxWidth = '90%';
+                    card.style.padding = '35px 30px';
+                }
+                if (icon) icon.style.display = 'block';
+            };
 
             confirmBtn.onclick = async () => {
                 if (activeAlertTimeout) {
@@ -1413,6 +1654,7 @@
                 }
                 modal.classList.add('hidden');
                 modal.style.display = 'none';
+                resetModalCardStyle();
                 try {
                     await onConfirm();
                 } catch(err) {
@@ -1426,6 +1668,7 @@
                 }
                 modal.classList.add('hidden');
                 modal.style.display = 'none';
+                resetModalCardStyle();
                 try {
                     await onCancel();
                 } catch(err) {
@@ -1433,7 +1676,7 @@
                 }
             };
 
-            modal.style.zIndex = '2147483647';
+            modal.style.setProperty('z-index', '2147483647', 'important');
             modal.style.display = 'flex';
             modal.classList.remove('hidden');
 
@@ -1454,6 +1697,14 @@
             if (modal) {
                 modal.classList.add('hidden');
                 modal.style.display = 'none';
+                const card = modal.querySelector('.alert-card');
+                if (card) {
+                    card.style.width = '400px';
+                    card.style.maxWidth = '90%';
+                    card.style.padding = '35px 30px';
+                }
+                const icon = document.getElementById('alertIcon');
+                if (icon) icon.style.display = 'block';
             }
         }
         window.closeCustomAlert = closeCustomAlert;
@@ -1505,12 +1756,6 @@
             // Handle all setting tab button classes & set active highlight
             document.querySelectorAll('.settings-tab-btn, .settings-tab-btn-premium, .premium-tab-btn').forEach(b => b.classList.remove('active'));
 
-
-
-
-
-
-
             if (btn) {
                 btn.classList.add('active');
             } else {
@@ -1520,28 +1765,112 @@
                 if (targetBtn) targetBtn.classList.add('active');
             }
 
-
-
+            if (tabName === 'updates' && typeof window.initAutoUpdatesPolicyUI === 'function') {
+                window.initAutoUpdatesPolicyUI();
+            }
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         // ================= استعلام الأصناف والمنتجات السريع =================
+        let currentSectionInquiryProduct = null;
+        let selectedSectionInquiryWarehouse = 'all'; // 'all' أو اسم المخزن المحدد
+        let selectedSectionInquirySize = 'all';
+        let selectedSectionInquiryColor = 'all';
+
+        /**
+         * تحديد المخزن لعرض أرصدته بالجدول التفصيلي أدناه
+         */
+        window.setSectionInquirySelectedWarehouse = function(whName) {
+            if (selectedSectionInquiryWarehouse === whName) {
+                selectedSectionInquiryWarehouse = 'all';
+            } else {
+                selectedSectionInquiryWarehouse = whName;
+            }
+            window.selectedSectionInquiryWarehouse = selectedSectionInquiryWarehouse;
+            if (currentSectionInquiryProduct) {
+                renderSectionInquiryWarehousesTable();
+                renderSectionInquiryVariantsTable();
+            }
+        };
+
+        /**
+         * فلترة التشكيلات حسب المقاس واللون في قسم الاستعلام
+         */
+        window.setSectionInquiryVariantFilter = function(type, val) {
+            if (type === 'reset') {
+                selectedSectionInquirySize = 'all';
+                selectedSectionInquiryColor = 'all';
+            } else if (type === 'size') {
+                selectedSectionInquirySize = val;
+            } else if (type === 'color') {
+                selectedSectionInquiryColor = val;
+            }
+            window.selectedSectionInquirySize = selectedSectionInquirySize;
+            window.selectedSectionInquiryColor = selectedSectionInquiryColor;
+            if (currentSectionInquiryProduct) {
+                renderSectionInquiryWarehousesTable();
+                renderSectionInquiryVariantsTable();
+            }
+        };
+
+
+
+        window.clearInquirySearch = function() {
+            const inp = document.getElementById('inquirySearchInput');
+            if (inp) {
+                inp.value = '';
+                inp.focus();
+            }
+            const clearBtn = document.getElementById('inquiryClearBtn');
+            if (clearBtn) clearBtn.style.display = 'none';
+            handleInquirySearch('');
+        };
+
+        window.handleInquirySearchKeyDown = function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const inp = document.getElementById('inquirySearchInput');
+                const query = (inp ? inp.value : '').trim();
+                if (!query) return;
+
+                const allProducts = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB : (window.productsDB || []);
+                const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                const rawQuery = query.toLowerCase();
+                const q = cleanAr(query);
+
+                let matchedVariant = null;
+
+                // 1. فحص التطابق التام مع باركود أو كود أو كود ميزان
+                let target = allProducts.find(p => {
+                    if (p.barcode && (cleanAr(p.barcode) === q || String(p.barcode).trim().toLowerCase() === rawQuery)) return true;
+                    if (p.code && (cleanAr(p.code) === q || String(p.code).trim().toLowerCase() === rawQuery)) return true;
+                    if (p.scalePlu && (String(p.scalePlu).trim() === rawQuery || cleanAr(p.scalePlu) === q)) return true;
+                    if (p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || String(u.unitBarcode).trim().toLowerCase() === rawQuery))) return true;
+                    if (p.variants && p.variants.length > 0) {
+                        const vMatch = p.variants.find(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQuery));
+                        if (vMatch) {
+                            matchedVariant = vMatch;
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                // 2. إذا لم يكن هناك تطابق تام، نأخذ أول عنصر يظهر في القائمة المصفاة
+                if (!target) {
+                    const firstItem = document.querySelector('#inquiryProductList .inquiry-product-item');
+                    if (firstItem && firstItem.id) {
+                        const pid = Number(firstItem.id.replace('inquiry-item-', ''));
+                        if (pid) target = allProducts.find(p => p.id === pid);
+                    }
+                }
+
+                if (target) {
+                    selectProductForInquiry(target.id, matchedVariant);
+                    if (inp) inp.select(); // تحديد النص ليكون السكانر جاهز للمسحة التالية فوراً
+                }
+            }
+        };
+
         function handleInquirySearch(query) {
             const rawQuery = (query || '').trim().toLowerCase();
             const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
@@ -1549,36 +1878,54 @@
             const productListEl = document.getElementById('inquiryProductList');
             if (!productListEl) return;
 
+            const clearBtn = document.getElementById('inquiryClearBtn');
+            if (clearBtn) clearBtn.style.display = rawQuery ? 'inline-flex' : 'none';
+
+            const allProducts = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB : (window.productsDB || []);
+
             if (!q) {
-                renderInquiryProductList(productsDB);
+                renderInquiryProductList(allProducts);
                 return;
             }
 
-            const filtered = productsDB.filter(p => {
+            const filtered = allProducts.filter(p => {
                 const nameMatch = p.name && cleanAr(p.name).includes(q);
                 const codeMatch = p.code && (cleanAr(p.code).includes(q) || String(p.code).toLowerCase().includes(rawQuery));
+                const scalePluMatch = p.scalePlu && (String(p.scalePlu).trim() === rawQuery || cleanAr(p.scalePlu) === q);
+                const sysCodeMatch = (p.sysCode && String(p.sysCode).toLowerCase().includes(rawQuery)) || (String(p.id) === rawQuery);
                 const barcodeMatch = p.barcode && (cleanAr(p.barcode) === q || String(p.barcode).toLowerCase() === rawQuery);
                 const barcodeInclude = p.barcode && (cleanAr(p.barcode).includes(q) || String(p.barcode).toLowerCase().includes(rawQuery));
                 const unitBarcodeMatch = p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || String(u.unitBarcode).toLowerCase() === rawQuery));
-                const unitBarcodeInclude = p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode).includes(q) || String(u.unitBarcode).toLowerCase().includes(rawQuery)));
+                const unitBarcodeInclude = p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode).includes(q) || String(u.unitBarcode).toLowerCase() === rawQuery));
                 const variantBarcodeMatch = p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQuery));
-                const variantBarcodeInclude = p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode).includes(q) || String(v.barcode).trim().toLowerCase().includes(rawQuery)));
+                const variantBarcodeInclude = p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode).includes(q) || String(v.barcode).trim().toLowerCase() === rawQuery));
 
-                return nameMatch || codeMatch || barcodeMatch || barcodeInclude || unitBarcodeMatch || unitBarcodeInclude || variantBarcodeMatch || variantBarcodeInclude;
+                return nameMatch || codeMatch || scalePluMatch || sysCodeMatch || barcodeMatch || barcodeInclude || unitBarcodeMatch || unitBarcodeInclude || variantBarcodeMatch || variantBarcodeInclude;
             });
 
             renderInquiryProductList(filtered);
 
             // اختيار تلقائي للصنف إذا كان هناك تطابق تام للباركود (شامل باركود المقاسات والألوان)
-            const exactMatch = filtered.find(p => 
-                (p.barcode && (cleanAr(p.barcode) === q || p.barcode.toLowerCase() === rawQuery)) || 
-                (p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || u.unitBarcode.toLowerCase() === rawQuery))) ||
-                (p.variants && p.variants.some(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQuery)))
-            );
+            let matchedVariant = null;
+            const exactMatch = filtered.find(p => {
+                if (p.barcode && (cleanAr(p.barcode) === q || p.barcode.toLowerCase() === rawQuery)) return true;
+                if (p.units && p.units.some(u => u.unitBarcode && (cleanAr(u.unitBarcode) === q || u.unitBarcode.toLowerCase() === rawQuery))) return true;
+                if (p.variants && p.variants.length > 0) {
+                    const vMatch = p.variants.find(v => v.barcode && (cleanAr(v.barcode) === q || String(v.barcode).trim().toLowerCase() === rawQuery));
+                    if (vMatch) {
+                        matchedVariant = vMatch;
+                        return true;
+                    }
+                }
+                return false;
+            });
+
             if (exactMatch) {
-                selectProductForInquiry(exactMatch.id);
+                selectProductForInquiry(exactMatch.id, matchedVariant);
             }
         }
+        window.handleInquirySearch = handleInquirySearch;
+        window.selectProductForInquiry = selectProductForInquiry;
 
         function renderInquiryProductList(products) {
             const productListEl = document.getElementById('inquiryProductList');
@@ -1600,9 +1947,24 @@
             `).join('');
         }
 
-        function selectProductForInquiry(productId) {
-            const product = productsDB.find(p => p.id === productId);
+        function selectProductForInquiry(productId, targetVariant = null) {
+            const allProducts = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB : (window.productsDB || []);
+            const product = allProducts.find(p => p.id === productId || p.id == productId);
             if (!product) return;
+
+            currentSectionInquiryProduct = product;
+            window.currentSectionInquiryProduct = product;
+            selectedSectionInquiryWarehouse = 'all';
+            window.selectedSectionInquiryWarehouse = 'all';
+
+            // إذا تم تمرير تشكيلة مستهدفة من مسح الباركود
+            if (targetVariant) {
+                selectedSectionInquirySize = (targetVariant.size && String(targetVariant.size).trim()) ? String(targetVariant.size).trim() : 'all';
+                selectedSectionInquiryColor = (targetVariant.color && String(targetVariant.color).trim()) ? String(targetVariant.color).trim() : 'all';
+            } else {
+                selectedSectionInquirySize = 'all';
+                selectedSectionInquiryColor = 'all';
+            }
 
             // تمييز العنصر النشط في القائمة
             document.querySelectorAll('.inquiry-product-item').forEach(el => el.classList.remove('active'));
@@ -1687,165 +2049,418 @@
                 barcodeValEl.textContent = "لا يوجد باركود";
             }
 
-            // توزيع المخزون
-            const stockTableBody = document.getElementById('inquiryWarehouseStockTableBody');
-            let totalStock = 0;
-
-            if (window.warehouses && window.warehouses.length > 0) {
-                stockTableBody.innerHTML = window.warehouses.map(w => {
-                    const qty = typeof getWarehouseStock === 'function' ? getWarehouseStock(product.name, w.name) : 0;
-                    totalStock += qty;
-
-                    let statusBadge = '';
-                    if (qty <= 0) {
-                        statusBadge = '<span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">نفذت الكمية</span>';
-                    } else if (qty <= (product.minStock || 5)) {
-                        statusBadge = '<span style="background: #fef3c7; color: #d97706; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">مخزون منخفض</span>';
-                    } else {
-                        statusBadge = '<span style="background: #dcfce7; color: #22c55e; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">متوفر</span>';
-                    }
-
-                    return `
+            // جدول الوحدات
+            const unitsTableBody = document.getElementById('inquiryUnitsTableBody');
+            if (unitsTableBody) {
+                if (product.units && product.units.length > 0) {
+                    unitsTableBody.innerHTML = product.units.map(u => `
                         <tr>
-                            <td style="padding: 10px; font-weight: bold;">${w.name} ${window.currentUser && window.currentUser.warehouseName === w.name ? '<span style="color: #10b981; font-size: 0.75rem;">(المخزن النشط حالياً)</span>' : ''}</td>
-                            <td style="padding: 10px; text-align: center; font-weight: 900; font-size: 1rem; color: #1e293b;">${qty}</td>
-                            <td style="padding: 10px; text-align: center;">${statusBadge}</td>
+                            <td style="padding: 10px; font-weight: bold;">${u.unitName}</td>
+                            <td style="padding: 10px; text-align: center; font-weight: 800;">${u.factor || 1}</td>
+                            <td style="padding: 10px; text-align: center; font-weight: 900; color: #1e3a8a;">${parseFloat(u.price || 0).toFixed(2)} ج.م</td>
+                            <td style="padding: 10px; text-align: center; font-family: monospace; color: #475569;">${u.unitBarcode || '---'}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    unitsTableBody.innerHTML = `
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: #94a3b8; padding: 15px;">لا توجد وحدات إضافية لهذا الصنف</td>
                         </tr>
                     `;
-                }).join('');
-            } else {
-                stockTableBody.innerHTML = `
-                    <tr>
-                        <td style="padding: 10px; font-weight: bold;">المخزن الرئيسي</td>
-                        <td style="padding: 10px; text-align: center; font-weight: 900; font-size: 1rem; color: #1e293b;">${product.stock || 0}</td>
-                        <td style="padding: 10px; text-align: center;">
-                            ${(product.stock || 0) <= 0 ? '<span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">نفذت الكمية</span>' : '<span style="background: #dcfce7; color: #22c55e; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">متوفر</span>'}
-                        </td>
-                    </tr>
-                `;
-                totalStock = product.stock || 0;
+                }
             }
 
-            document.getElementById('inquiryTotalStockBadge').textContent = `الإجمالي: ${totalStock}`;
+            // بناء جدول المخازن التفاعلي وجدول التشكيلات
+            renderSectionInquiryWarehousesTable();
+            renderSectionInquiryVariantsTable();
+        }
 
-            // جدول تشكيلات المقاسات والألوان (Variants Matrix)
+        /**
+         * بناء جدول المخازن التفاعلي مع عمود التحديد والفرز التنازلي
+         */
+        function renderSectionInquiryWarehousesTable() {
+            const p = currentSectionInquiryProduct;
+            if (!p) return;
+
+            const stockTableBody = document.getElementById('inquiryWarehouseStockTableBody');
+            if (!stockTableBody) return;
+
+            // استخراج قائمة المخازن الشاملة
+            let whList = [];
+            if (window.warehouses && Array.isArray(window.warehouses) && window.warehouses.length > 0) {
+                whList = window.warehouses.map(w => w.name);
+            } else if (typeof getStore === 'function' && getStore('pos_warehouses')) {
+                try {
+                    const storedWh = JSON.parse(getStore('pos_warehouses'));
+                    if (Array.isArray(storedWh)) whList = storedWh.map(w => w.name);
+                } catch(e) {}
+            }
+            if (whList.length === 0) {
+                if (p.warehouseStocks) Object.keys(p.warehouseStocks).forEach(k => { if (!whList.includes(k)) whList.push(k); });
+                if (p.variants && p.variants.length > 0) {
+                    p.variants.forEach(v => {
+                        if (v.warehouseStocks) Object.keys(v.warehouseStocks).forEach(k => { if (!whList.includes(k)) whList.push(k); });
+                    });
+                }
+            }
+            if (!whList.includes('المخزن الرئيسي')) whList.unshift('المخزن الرئيسي');
+
+            // فحص التشكيلات مع فلتر المقاس واللون
+            const variants = (p.variants && Array.isArray(p.variants) && p.variants.length > 0) ? p.variants : [];
+            const hasVariants = variants.length > 0;
+            let matchedVars = variants;
+            if (hasVariants) {
+                matchedVars = variants.filter(v => 
+                    (selectedSectionInquirySize === 'all' || String(v.size || '').trim() === selectedSectionInquirySize) &&
+                    (selectedSectionInquiryColor === 'all' || String(v.color || '').trim() === selectedSectionInquiryColor)
+                );
+            }
+
+            // تجميع أرصدة كل مخزن
+            let whRowsData = [];
+            let grandTotalStock = 0;
+
+            whList.forEach(whName => {
+                let availQty = 0;
+                if (hasVariants) {
+                    matchedVars.forEach(v => {
+                        let st = 0;
+                        if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[whName] !== undefined) {
+                            st = parseFloat(v.warehouseStocks[whName]) || 0;
+                        } else if (whName === 'المخزن الرئيسي') {
+                            st = parseFloat(v.stock) || 0;
+                        }
+                        availQty += st;
+                    });
+                } else {
+                    if (typeof getWarehouseStock === 'function') {
+                        availQty = getWarehouseStock(p.name, whName);
+                    } else if (p.warehouseStocks && p.warehouseStocks[whName] !== undefined) {
+                        availQty = parseFloat(p.warehouseStocks[whName]) || 0;
+                    } else if (whName === 'المخزن الرئيسي') {
+                        availQty = parseFloat(p.stock) || 0;
+                    }
+                }
+
+                grandTotalStock += availQty;
+                whRowsData.push({
+                    warehouse: whName,
+                    qty: availQty
+                });
+            });
+
+            // 🌟 الترتيب التنازلي: المخزن صاحب أعلى رصيد يظهر في البداية
+            whRowsData.sort((a, b) => b.qty - a.qty);
+
+            // تحديث شارة الإجمالي الكلي
+            const totalBadge = document.getElementById('inquiryTotalStockBadge');
+            if (totalBadge) {
+                totalBadge.textContent = `الإجمالي: ${grandTotalStock.toFixed(2).replace(/\.00$/, '')} ${p.unit || 'قطعة'}`;
+            }
+
+            // تحديث زر الإجراءات (عرض كل المخازن)
+            const actionsEl = document.getElementById('inquiryWarehouseActions');
+            if (actionsEl) {
+                if (selectedSectionInquiryWarehouse !== 'all') {
+                    actionsEl.innerHTML = `
+                        <button onclick="window.setSectionInquirySelectedWarehouse('all')"
+                            style="background: #e0f2fe; color: #0369a1; border: 1.5px solid #bae6fd; padding: 4px 12px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: 0.2s;"
+                            title="إلغاء التحديد والرجوع لعرض كل المخازن">
+                            <span>↺</span> عرض كل المخازن
+                        </button>
+                    `;
+                } else {
+                    actionsEl.innerHTML = `
+                        <span style="font-size: 0.8rem; color: #64748b; font-weight: 700;">💡 حدد أي مخزن للتركيز على تشكيلته بالأسفل</span>
+                    `;
+                }
+            }
+
+            // رسم أسطر جدول المخازن مع عمود التحديد
+            stockTableBody.innerHTML = whRowsData.map((row, idx) => {
+                const isSelected = selectedSectionInquiryWarehouse === row.warehouse;
+                const safeWh = String(row.warehouse || '').replace(/'/g, "\\'");
+                const hasPositiveStock = row.qty > 0;
+                const isLow = row.qty > 0 && row.qty <= (p.minStock || 5);
+                
+                let statusBadge = '';
+                if (!hasPositiveStock) {
+                    statusBadge = '<span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 800;">نفذت الكمية</span>';
+                } else if (isLow) {
+                    statusBadge = '<span style="background: #fef3c7; color: #d97706; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 800;">مخزون منخفض</span>';
+                } else {
+                    statusBadge = '<span style="background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 800;">متوفر</span>';
+                }
+
+                const isUserActiveWh = window.currentUser && window.currentUser.warehouseName === row.warehouse;
+
+                return `
+                    <tr onclick="window.setSectionInquirySelectedWarehouse('${safeWh}')"
+                        title="انقر لتحديد (${row.warehouse}) وعرض تفاصيل تشكيلته بالأسفل"
+                        style="border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: all 0.15s; ${isSelected ? 'background: #ecfdf5; outline: 2px solid #10b981;' : (idx % 2 === 1 ? 'background: #fafafa;' : 'background: #ffffff;')}"
+                        onmouseover="if(!${isSelected}) this.style.background='#f0fdf4';"
+                        onmouseout="if(!${isSelected}) this.style.background='${idx % 2 === 1 ? '#fafafa' : '#ffffff'}';">
+                        <td style="padding: 8px 6px; text-align: center;" onclick="event.stopPropagation(); window.setSectionInquirySelectedWarehouse('${safeWh}');">
+                            <input type="radio" name="sectionInquiryWarehouseRadio" value="${safeWh}" 
+                                ${isSelected ? 'checked' : ''} 
+                                style="cursor: pointer; width: 17px; height: 17px; accent-color: #059669; vertical-align: middle;">
+                        </td>
+                        <td style="padding: 10px 10px; font-weight: 800; color: #64748b; text-align: center;">${idx + 1}</td>
+                        <td style="padding: 10px 14px; font-weight: 900; color: ${isSelected ? '#065f46' : '#1e293b'}; text-align: right;">
+                            🏢 ${row.warehouse} 
+                            ${isSelected ? '<span style="color: #047857; font-size: 0.76rem; font-weight: 900; background: #dcfce7; border: 1px solid #86efac; padding: 1px 7px; border-radius: 6px; margin-right: 6px;">✓ محدد</span>' : ''}
+                            ${isUserActiveWh ? '<span style="color: #0284c7; font-size: 0.74rem; font-weight: 800; margin-right: 4px;">(مخزنك الحالي)</span>' : ''}
+                        </td>
+                        <td style="padding: 10px 12px; text-align: center; font-weight: 900; font-size: 1rem; color: #1e293b;">
+                            <span style="background: ${hasPositiveStock ? '#ecfdf5' : '#f8fafc'}; color: ${hasPositiveStock ? '#047857' : '#94a3b8'}; border: 1.5px solid ${hasPositiveStock ? '#a7f3d0' : '#e2e8f0'}; padding: 3px 14px; border-radius: 8px; display: inline-block; min-width: 60px;">
+                                ${row.qty.toFixed(2).replace(/\.00$/, '')} ${p.unit || 'قطعة'}
+                            </span>
+                        </td>
+                        <td style="padding: 10px 12px; text-align: center;">${statusBadge}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        /**
+         * بناء جدول التشكيلات التفاعلي مع شريط الفلاتر وعمود المخزن المختار
+         */
+        function renderSectionInquiryVariantsTable() {
+            const p = currentSectionInquiryProduct;
+            if (!p) return;
+
             const variantsContainer = document.getElementById('inquiryVariantsContainer');
             const variantsTableHead = document.getElementById('inquiryVariantsTableHead');
             const variantsTableBody = document.getElementById('inquiryVariantsTableBody');
             const variantsCountBadge = document.getElementById('inquiryVariantsCountBadge');
-            
-            if (variantsContainer && variantsTableBody) {
-                const variants = (product.variants && Array.isArray(product.variants) && product.variants.length > 0) ? product.variants : [];
-                if (variants.length > 0) {
-                    variantsContainer.style.display = 'block';
-                    if (variantsCountBadge) variantsCountBadge.textContent = `${variants.length} تشكيلة`;
-                    
-                    let allWarehouses = (window.warehouses && window.warehouses.length > 0) ? window.warehouses.map(w => w.name) : [];
-                    if (allWarehouses.length === 0 && typeof warehouses !== 'undefined' && Array.isArray(warehouses) && warehouses.length > 0) {
-                        allWarehouses = warehouses.map(w => w.name);
-                    } else if (allWarehouses.length === 0 && typeof getStore === 'function' && getStore('pos_warehouses')) {
-                        try {
-                            const parsedWh = JSON.parse(getStore('pos_warehouses'));
-                            if (Array.isArray(parsedWh)) allWarehouses = parsedWh.map(w => w.name);
-                        } catch(e) {}
-                    }
-                    if (!allWarehouses.includes('المخزن الرئيسي')) allWarehouses.unshift('المخزن الرئيسي');
+            const selectedWhBadge = document.getElementById('inquirySelectedWhBadge');
+            const filterBar = document.getElementById('inquiryVariantsFilterBar');
 
-                    const mainStoreName = 'المخزن الرئيسي';
-                    const branches = allWarehouses.filter(w => w !== mainStoreName);
-                    
-                    if (variantsTableHead) {
-                        let thHtml = `
-                            <tr>
-                                <th style="width: 35px; padding: 8px 4px;">#</th>
-                                <th style="padding: 8px;">المقاس</th>
-                                <th style="padding: 8px;">اللون</th>
-                                <th style="padding: 8px; background: rgba(255,255,255,0.1); border-right: 1px solid rgba(255,255,255,0.2);">${mainStoreName}</th>
-                        `;
-                        branches.forEach(b => {
-                            thHtml += `<th style="padding: 8px; background: rgba(255,255,255,0.05);">${b}</th>`;
-                        });
-                        thHtml += `
-                                <th style="padding: 8px; background: rgba(255,255,255,0.15); border-left: 1px solid rgba(255,255,255,0.2);">إجمالي الفروع</th>
-                                <th style="padding: 8px; background: #166534;">الرصيد الكلي</th>
-                                <th style="padding: 8px;">سعر القطاعي</th>
-                                ${allowInquiryCost ? '<th style="padding: 8px;">سعر الجملة</th>' : ''}
-                                <th style="padding: 8px;">الباركود الفريد</th>
-                            </tr>
-                        `;
-                        variantsTableHead.innerHTML = thHtml;
-                    }
-                    
-                    variantsTableBody.innerHTML = variants.map((v, idx) => {
-                        const vRetail = parseFloat(v.price !== undefined ? v.price : product.price) || 0;
-                        const vWs = parseFloat(v.wholesale !== undefined ? v.wholesale : product.wholesale) || 0;
-                        
-                        let mainStock = 0;
-                        let branchesStockTotal = 0;
-                        let totalStock = 0;
-                        
-                        let branchesCells = '';
-                        
-                        if (v.warehouseStocks && typeof v.warehouseStocks === 'object') {
-                            mainStock = parseFloat(v.warehouseStocks[mainStoreName]) || 0;
-                            totalStock = mainStock;
-                            
-                            branches.forEach(b => {
-                                const bStock = parseFloat(v.warehouseStocks[b]) || 0;
-                                branchesStockTotal += bStock;
-                                totalStock += bStock;
-                                branchesCells += `<td style="padding: 8px; font-weight: 800; color: ${bStock > 0 ? '#0f766e' : '#94a3b8'}; background: #f8fafc;">${bStock > 0 ? bStock : '-'}</td>`;
-                            });
-                        } else {
-                            totalStock = parseFloat(v.stock !== undefined ? v.stock : 0);
-                            mainStock = totalStock; 
-                            branches.forEach(b => {
-                                branchesCells += `<td style="padding: 8px; font-weight: 800; color: #94a3b8; background: #f8fafc;">-</td>`;
-                            });
-                        }
+            if (!variantsContainer || !variantsTableBody) return;
 
-                        const formatStockBadge = (qty, bgOk = '#dcfce7', colorOk = '#15803d') => {
-                            if (qty <= 0) return `<span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 10px; font-weight: 800; font-size: 0.78rem;">0</span>`;
-                            return `<span style="background: ${bgOk}; color: ${colorOk}; padding: 2px 8px; border-radius: 10px; font-weight: 900; font-size: 0.85rem;">${qty}</span>`;
-                        };
+            const variants = (p.variants && Array.isArray(p.variants) && p.variants.length > 0) ? p.variants : [];
+            if (variants.length === 0) {
+                variantsContainer.style.display = 'none';
+                return;
+            }
 
-                        return `
-                            <tr style="border-bottom: 1px solid #f1f5f9;">
-                                <td style="padding: 8px; font-weight: 800; color: #64748b;">${idx + 1}</td>
-                                <td style="padding: 8px;"><span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 6px; font-weight: 900;">${v.size || 'قياسي'}</span></td>
-                                <td style="padding: 8px;"><span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 6px; font-weight: 900;">${v.color || 'موحد'}</span></td>
-                                <td style="padding: 8px; border-right: 1px solid #e2e8f0; background: #f1f5f9;">${formatStockBadge(mainStock)}</td>
-                                ${branchesCells}
-                                <td style="padding: 8px; border-left: 1px solid #e2e8f0; background: #f1f5f9;">${formatStockBadge(branchesStockTotal, '#e0f2fe', '#0369a1')}</td>
-                                <td style="padding: 8px; background: #ecfdf5;">${formatStockBadge(totalStock, '#dcfce7', '#15803d')}</td>
-                                <td style="padding: 8px; font-weight: 900; color: #1e3a8a;">${vRetail.toFixed(2)} ج.م</td>
-                                ${allowInquiryCost ? `<td style="padding: 8px; font-weight: 800; color: #166534;">${vWs.toFixed(2)} ج.م</td>` : ''}
-                                <td style="padding: 8px; font-family: monospace; font-weight: bold; color: #475569;">${v.barcode || '---'}</td>
-                            </tr>
-                        `;
-                    }).join('');
+            variantsContainer.style.display = 'block';
+
+            // استخراج المقاسات والألوان الفريدة
+            const allSizes = [...new Set(variants.map(v => (v.size && String(v.size).trim()) || ''))].filter(Boolean);
+            const allColors = [...new Set(variants.map(v => (v.color && String(v.color).trim()) || ''))].filter(Boolean);
+
+            // تصفية التشكيلات حسب الفلتر المختار
+            const matchedVars = variants.filter(v => 
+                (selectedSectionInquirySize === 'all' || String(v.size || '').trim() === selectedSectionInquirySize) &&
+                (selectedSectionInquiryColor === 'all' || String(v.color || '').trim() === selectedSectionInquiryColor)
+            );
+
+            // تحديث شارات التشكيلات
+            if (variantsCountBadge) {
+                variantsCountBadge.textContent = (matchedVars.length === variants.length)
+                    ? `${variants.length} تشكيلة`
+                    : `${matchedVars.length} من ${variants.length} تشكيلة`;
+            }
+
+            if (selectedWhBadge) {
+                if (selectedSectionInquiryWarehouse !== 'all') {
+                    selectedWhBadge.style.display = 'inline-block';
+                    selectedWhBadge.innerHTML = `🏢 مخزن محدد: <b>${selectedSectionInquiryWarehouse}</b>`;
                 } else {
-                    variantsContainer.style.display = 'none';
+                    selectedWhBadge.style.display = 'none';
                 }
             }
 
-            // جدول الوحدات
-            const unitsTableBody = document.getElementById('inquiryUnitsTableBody');
-            if (product.units && product.units.length > 0) {
-                unitsTableBody.innerHTML = product.units.map(u => `
+            // رسم شريط فلاتر المقاس واللون
+            if (filterBar) {
+                if (allSizes.length > 0 || allColors.length > 0 || selectedSectionInquiryWarehouse !== 'all') {
+                    const sizeOpts = allSizes.map(s => `<option value="${s}" ${selectedSectionInquirySize === s ? 'selected' : ''}>مقاس: ${s}</option>`).join('');
+                    const colorOpts = allColors.map(c => `<option value="${c}" ${selectedSectionInquiryColor === c ? 'selected' : ''}>لون: ${c}</option>`).join('');
+                    
+                    filterBar.innerHTML = `
+                        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 8px 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <span style="font-weight: 800; color: #1e293b; font-size: 0.85rem; display: flex; align-items: center; gap: 5px;">
+                                <span>👗</span> فلترة التشكيلة:
+                            </span>
+                            
+                            ${allSizes.length > 0 ? `
+                                <div style="display: flex; align-items: center; gap: 5px;">
+                                    <label style="font-weight: 800; font-size: 0.8rem; color: #047857;">المقاس:</label>
+                                    <select onchange="window.setSectionInquiryVariantFilter('size', this.value)"
+                                        style="padding: 5px 10px; border-radius: 8px; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer;">
+                                        <option value="all" ${selectedSectionInquirySize === 'all' ? 'selected' : ''}>كل المقاسات (${allSizes.length})</option>
+                                        ${sizeOpts}
+                                    </select>
+                                </div>
+                            ` : ''}
+
+                            ${allColors.length > 0 ? `
+                                <div style="display: flex; align-items: center; gap: 5px;">
+                                    <label style="font-weight: 800; font-size: 0.8rem; color: #1d4ed8;">اللون:</label>
+                                    <select onchange="window.setSectionInquiryVariantFilter('color', this.value)"
+                                        style="padding: 5px 10px; border-radius: 8px; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer;">
+                                        <option value="all" ${selectedSectionInquiryColor === 'all' ? 'selected' : ''}>كل الألوان (${allColors.length})</option>
+                                        ${colorOpts}
+                                    </select>
+                                </div>
+                            ` : ''}
+
+                            ${(selectedSectionInquirySize !== 'all' || selectedSectionInquiryColor !== 'all') ? `
+                                <button onclick="window.setSectionInquiryVariantFilter('reset')"
+                                    style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 0.78rem; cursor: pointer;">
+                                    ✕ إظهار الكل
+                                </button>
+                            ` : ''}
+
+                            ${selectedSectionInquiryWarehouse !== 'all' ? `
+                                <div style="margin-right: auto; display: flex; align-items: center; gap: 6px;">
+                                    <span style="background: #fef08a; color: #854d0e; border: 1px solid #fde047; padding: 3px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 900;">
+                                        🏢 المخزن النشط: <b>${selectedSectionInquiryWarehouse}</b>
+                                    </span>
+                                    <button onclick="window.setSectionInquirySelectedWarehouse('all')" 
+                                        style="background: #ffffff; color: #64748b; border: 1px solid #cbd5e1; padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800; cursor: pointer;"
+                                        title="الرجوع لعرض إجمالي كل المخازن">
+                                        عرض الكل ↺
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    filterBar.innerHTML = '';
+                }
+            }
+
+            // فحص صلاحيات أسعار الجملة والتكلفة
+            const posSettings = JSON.parse(getStore('pos_settings') || '{}');
+            const allowInquiryCost = posSettings.showInquiryCostPrice !== undefined ? !!posSettings.showInquiryCostPrice : false;
+            const canViewCost = allowInquiryCost && (typeof checkPermission === 'function' ? checkPermission('docs_purchase_price') : true);
+
+            // استخراج قائمة المخازن والفروع
+            let allWarehouses = (window.warehouses && window.warehouses.length > 0) ? window.warehouses.map(w => w.name) : [];
+            if (allWarehouses.length === 0 && typeof getStore === 'function' && getStore('pos_warehouses')) {
+                try {
+                    const parsedWh = JSON.parse(getStore('pos_warehouses'));
+                    if (Array.isArray(parsedWh)) allWarehouses = parsedWh.map(w => w.name);
+                } catch(e) {}
+            }
+            if (!allWarehouses.includes('المخزن الرئيسي')) allWarehouses.unshift('المخزن الرئيسي');
+            const mainStoreName = 'المخزن الرئيسي';
+            const branches = allWarehouses.filter(w => w !== mainStoreName);
+            const isSingleWh = selectedSectionInquiryWarehouse !== 'all';
+
+            // ترويسة جدول التشكيلات الديناميكية
+            if (variantsTableHead) {
+                let thHtml = `
                     <tr>
-                        <td style="padding: 10px; font-weight: bold;">${u.unitName}</td>
-                        <td style="padding: 10px; text-align: center; font-weight: 800;">${u.factor || 1}</td>
-                        <td style="padding: 10px; text-align: center; font-weight: 900; color: #1e3a8a;">${parseFloat(u.price || 0).toFixed(2)} ج.م</td>
-                        <td style="padding: 10px; text-align: center; font-family: monospace; color: #475569;">${u.unitBarcode || '---'}</td>
-                    </tr>
-                `).join('');
-            } else {
-                unitsTableBody.innerHTML = `
-                    <tr>
-                        <td colspan="4" style="text-align: center; color: #94a3b8; padding: 15px;">لا توجد وحدات إضافية لهذا الصنف</td>
+                        <th style="width: 35px; padding: 8px 4px; text-align: center;">#</th>
+                        <th style="padding: 8px; text-align: center;">المقاس (Size)</th>
+                        <th style="padding: 8px; text-align: center;">اللون (Color)</th>
+                `;
+                if (isSingleWh) {
+                    thHtml += `
+                        <th style="padding: 8px 12px; text-align: center; background: #fef08a; color: #854d0e; font-weight: 900; border-right: 2px solid #fde047; border-left: 2px solid #fde047;">
+                            رصيد (${selectedSectionInquiryWarehouse})
+                        </th>
+                        <th style="padding: 8px 8px; text-align: center; background: #e0f2fe; color: #0369a1;">إجمالي الفروع</th>
+                    `;
+                } else {
+                    thHtml += `<th style="padding: 8px 6px; text-align: center; background: rgba(255,255,255,0.1); border-right: 1px solid rgba(255,255,255,0.2);">${mainStoreName}</th>`;
+                    branches.forEach(b => {
+                        thHtml += `<th style="padding: 8px 6px; text-align: center; background: rgba(255,255,255,0.05);">${b}</th>`;
+                    });
+                    if (branches.length > 0) {
+                        thHtml += `<th style="padding: 8px 6px; text-align: center; background: #e0f2fe; color: #0369a1;">إجمالي الفروع</th>`;
+                    }
+                }
+                thHtml += `
+                        <th style="padding: 8px 8px; text-align: center; background: #166534; color: white;">الرصيد الكلي</th>
+                        <th style="padding: 8px 8px; text-align: center;">سعر القطاعي</th>
+                        ${canViewCost ? '<th style="padding: 8px 8px; text-align: center;">سعر الجملة</th>' : ''}
+                        <th style="padding: 8px 8px; text-align: center;">الباركود الفريد</th>
                     </tr>
                 `;
+                variantsTableHead.innerHTML = thHtml;
+            }
+
+            // رسم أسطر التشكيلات
+            if (matchedVars.length === 0) {
+                variantsTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="12" style="padding: 25px; text-align: center; color: #94a3b8; font-weight: 800; font-size: 0.95rem;">
+                            ⚠️ لا توجد تشكيلات مطابقة للمقاس واللون المحددين
+                        </td>
+                    </tr>
+                `;
+            } else {
+                variantsTableBody.innerHTML = matchedVars.map((v, idx) => {
+                    const vRetail = parseFloat(v.price !== undefined ? v.price : p.price) || 0;
+                    const vWs = parseFloat(v.wholesale !== undefined ? v.wholesale : (v.wholesalePrice !== undefined ? v.wholesalePrice : p.wholesale)) || 0;
+                    
+                    let mainStock = 0;
+                    let branchesStockTotal = 0;
+                    let totalStock = 0;
+                    let selectedWhStock = 0;
+                    let branchesCells = '';
+
+                    if (v.warehouseStocks && typeof v.warehouseStocks === 'object') {
+                        mainStock = parseFloat(v.warehouseStocks[mainStoreName]) || 0;
+                        branches.forEach(b => {
+                            const bStock = parseFloat(v.warehouseStocks[b]) || 0;
+                            branchesStockTotal += bStock;
+                            branchesCells += `<td style="padding: 8px; text-align: center; font-weight: 800; color: ${bStock > 0 ? '#0f766e' : '#94a3b8'}; background: #f8fafc;">${bStock > 0 ? bStock : '-'}</td>`;
+                        });
+                        totalStock = mainStock + branchesStockTotal;
+                        
+                        if (isSingleWh) {
+                            if (v.warehouseStocks[selectedSectionInquiryWarehouse] !== undefined) {
+                                selectedWhStock = parseFloat(v.warehouseStocks[selectedSectionInquiryWarehouse]) || 0;
+                            } else if (selectedSectionInquiryWarehouse === mainStoreName) {
+                                selectedWhStock = mainStock;
+                            }
+                        }
+                    } else {
+                        totalStock = parseFloat(v.stock !== undefined ? v.stock : 0);
+                        mainStock = totalStock;
+                        branches.forEach(b => {
+                            branchesCells += `<td style="padding: 8px; text-align: center; font-weight: 800; color: #94a3b8; background: #f8fafc;">-</td>`;
+                        });
+                        if (isSingleWh) {
+                            selectedWhStock = (selectedSectionInquiryWarehouse === mainStoreName) ? totalStock : 0;
+                        }
+                    }
+
+                    const formatStockBadge = (qty, bgOk = '#dcfce7', colorOk = '#15803d') => {
+                        if (qty <= 0) return `<span class="inquiry-stock-badge zero" style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 8px; font-weight: 900; font-size: 0.8rem;">0</span>`;
+                        return `<span class="inquiry-stock-badge positive" style="background: ${bgOk}; color: ${colorOk}; padding: 2px 8px; border-radius: 8px; font-weight: 900; font-size: 0.85rem;">${qty}</span>`;
+                    };
+
+                    const safeBarcode = String(v.barcode || '').replace(/'/g, "\\'");
+                    const barcodeCell = v.barcode 
+                        ? `<span class="inquiry-barcode-badge" onclick="copyInquiryBarcode('${safeBarcode}', this)" title="انقر لنسخ الباركود" style="cursor: pointer; font-family: monospace; font-weight: bold; color: #2563eb; background: #eff6ff; padding: 2px 8px; border-radius: 6px; border: 1px dashed #93c5fd; display: inline-flex; align-items: center; gap: 4px; transition: 0.15s;" onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">📋 ${v.barcode}</span>`
+                        : `<span style="color: #94a3b8;">---</span>`;
+
+                    return `
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                            <td style="padding: 8px; font-weight: 800; color: #64748b; text-align: center;">${idx + 1}</td>
+                            <td style="padding: 8px; text-align: center;"><span class="inquiry-variant-size-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 6px; font-weight: 900;">${v.size || 'قياسي'}</span></td>
+                            <td style="padding: 8px; text-align: center;"><span class="inquiry-variant-color-badge" style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 6px; font-weight: 900;">${v.color || 'موحد'}</span></td>
+                            ${isSingleWh ? `
+                                <td style="padding: 8px; text-align: center; background: #fefce8; border-right: 2px solid #fef08a; border-left: 2px solid #fde047;">${formatStockBadge(selectedWhStock, '#fef08a', '#854d0e')}</td>
+                                <td style="padding: 8px; text-align: center; background: #f1f5f9;">${formatStockBadge(branchesStockTotal, '#e0f2fe', '#0369a1')}</td>
+                            ` : `
+                                <td style="padding: 8px; border-right: 1px solid #e2e8f0; background: #f1f5f9; text-align: center;">${formatStockBadge(mainStock)}</td>
+                                ${branchesCells}
+                                ${branches.length > 0 ? `<td style="padding: 8px; border-left: 1px solid #e2e8f0; background: #f1f5f9; text-align: center;">${formatStockBadge(branchesStockTotal, '#e0f2fe', '#0369a1')}</td>` : ''}
+                            `}
+                            <td style="padding: 8px; background: #ecfdf5; text-align: center;">${formatStockBadge(totalStock, '#dcfce7', '#15803d')}</td>
+                            <td style="padding: 8px; font-weight: 900; color: #1e3a8a; text-align: center;">${vRetail.toFixed(2)} ج.م</td>
+                            ${canViewCost ? `<td style="padding: 8px; font-weight: 800; color: #166534; text-align: center;">${vWs.toFixed(2)} ج.م</td>` : ''}
+                            <td style="padding: 8px; text-align: center;">${barcodeCell}</td>
+                        </tr>
+                    `;
+                }).join('');
             }
         }
 
@@ -2154,4 +2769,99 @@
 
     return layout;
 }
+
+// ============================================================
+//  تعبئة ومزامنة القوائم المنسدلة للمخازن عبر شاشات النظام
+// ============================================================
+function populateWarehouseDropdowns() {
+    let whList = [];
+
+    // 1. من مصفوفة المخازن العامة
+    if (window.warehouses && Array.isArray(window.warehouses) && window.warehouses.length > 0) {
+        window.warehouses.forEach(w => {
+            const name = (typeof w === 'object' && w) ? (w.name || w.warehouseName) : String(w);
+            if (name && !whList.includes(name)) whList.push(name);
+        });
+    }
+
+    // 2. من المخزن المحلي (pos_warehouses)
+    if (typeof getStore === 'function' && getStore('pos_warehouses')) {
+        try {
+            const stored = JSON.parse(getStore('pos_warehouses'));
+            if (Array.isArray(stored)) {
+                stored.forEach(w => {
+                    const name = (typeof w === 'object' && w) ? (w.name || w.warehouseName) : String(w);
+                    if (name && !whList.includes(name)) whList.push(name);
+                });
+            }
+        } catch (e) {}
+    }
+
+    // 3. من بيانات الأصناف والتشكيلات المخزنية
+    if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+        productsDB.forEach(p => {
+            if (!p) return;
+            if (p.warehouseStocks && typeof p.warehouseStocks === 'object') {
+                Object.keys(p.warehouseStocks).forEach(k => { if (k && !whList.includes(k)) whList.push(k); });
+            }
+            if (p.variants && Array.isArray(p.variants)) {
+                p.variants.forEach(v => {
+                    if (v && v.warehouseStocks && typeof v.warehouseStocks === 'object') {
+                        Object.keys(v.warehouseStocks).forEach(k => { if (k && !whList.includes(k)) whList.push(k); });
+                    }
+                });
+            }
+        });
+    }
+
+    // 4. من سجل الحركات والفواتير السابقة
+    if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+        transactions.forEach(t => {
+            if (!t) return;
+            if (t.warehouse && !whList.includes(t.warehouse)) whList.push(t.warehouse);
+            if (t.sourceWarehouse && !whList.includes(t.sourceWarehouse)) whList.push(t.sourceWarehouse);
+            if (t.toWarehouse && !whList.includes(t.toWarehouse)) whList.push(t.toWarehouse);
+            if (t.destWarehouse && !whList.includes(t.destWarehouse)) whList.push(t.destWarehouse);
+        });
+    }
+
+    // ضمان وجود المخزن الرئيسي كخيار افتراضي
+    if (!whList.includes('المخزن الرئيسي')) {
+        whList.unshift('المخزن الرئيسي');
+    }
+
+    // تعبئة القائمة في تقرير الحركة اليومية
+    const dailySelect = document.getElementById('dailyReportWarehouseSelect');
+    if (dailySelect) {
+        const currentDailyVal = dailySelect.value || 'all';
+        let dailyOpts = '<option value="all">🏢 كافة المخازن والفروع</option>';
+        whList.forEach(wh => {
+            dailyOpts += `<option value="${wh}">🏢 ${wh}</option>`;
+        });
+        dailySelect.innerHTML = dailyOpts;
+        if (whList.includes(currentDailyVal) || currentDailyVal === 'all') {
+            dailySelect.value = currentDailyVal;
+        } else {
+            dailySelect.value = 'all';
+        }
+    }
+
+    // تعبئة القائمة في شاشة حركة الصنف
+    const histSelect = document.getElementById('historyWarehouseFilter');
+    if (histSelect) {
+        const currentHistVal = histSelect.value || 'all';
+        let histOpts = '<option value="all">🏢 كافة المخازن</option>';
+        whList.forEach(wh => {
+            histOpts += `<option value="${wh}">🏢 ${wh}</option>`;
+        });
+        histSelect.innerHTML = histOpts;
+        if (whList.includes(currentHistVal) || currentHistVal === 'all') {
+            histSelect.value = currentHistVal;
+        } else {
+            histSelect.value = 'all';
+        }
+    }
+}
+window.populateWarehouseDropdowns = populateWarehouseDropdowns;
+
 

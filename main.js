@@ -4,31 +4,17 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 // =========================================================================
-// 🔒 1. إدارة الجلسة المفردة وحماية الأجهزة من التكرار والتعليق
+// 🚀 1. تسريع الأداء الفائق والرسوميات (Native GPU Hardware Acceleration)
+// يمنح Electron نفس سرعة وسلاسة متصفح جوجل كروم (60 FPS) مع استهلاك خفيف للموارد
 // =========================================================================
-// 🛡️ صمام الأمان الفولاذي: تحسينات فائقة للأجهزة الضعيفة والمتوسطة (Ultra-Low Spec Optimization)
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch('disable-gpu');
-app.commandLine.appendSwitch('disable-gpu-compositing');
-app.commandLine.appendSwitch('disable-gpu-rasterization');
-app.commandLine.appendSwitch('disable-gpu-sandbox');
-app.commandLine.appendSwitch('disable-software-rasterizer');
-app.commandLine.appendSwitch('disable-accelerated-2d-canvas');
-app.commandLine.appendSwitch('disable-dev-shm-usage');
-app.commandLine.appendSwitch('no-sandbox');
-app.commandLine.appendSwitch('renderer-process-limit', '2');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
 
-// تنظيف دوري للرامات بالخلفية
-setInterval(() => {
-    if (global.gc) {
-        try { global.gc(); } catch (e) {}
-    }
-}, 60000);
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -52,11 +38,12 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
+            sandbox: false,
             devTools: false,
             spellcheck: false, // تعطيل التدقيق الإملائي لتوفير الرامات والمعالج
             backgroundThrottling: false // الحفاظ على أداء سريع حتى عند تصغير النافذة
         },
-        icon: path.join(__dirname, 'media', 'bayan_logo.png')
+        icon: path.join(__dirname, 'media', 'logo.ico')
     });
 
     // إظهار النافذة فور جاهزيتها
@@ -102,10 +89,11 @@ function createWindow() {
             return;
         }
 
-        // منع F12 و Ctrl+Shift+I و Ctrl+Shift+J و Ctrl+Shift+C
+        // منع F12 و Ctrl+Shift+I و Ctrl+Shift+J و Ctrl+Shift+C و Ctrl+U
         if (
             input.key === 'F12' || 
-            (input.control && input.shift && (key === 'i' || key === 'j' || key === 'c'))
+            (input.control && input.shift && (key === 'i' || key === 'j' || key === 'c')) ||
+            (input.control && key === 'u')
         ) {
             event.preventDefault();
             return;
@@ -124,6 +112,11 @@ function createWindow() {
             event.preventDefault();
             return;
         }
+    });
+
+    // 🔒 منع القائمة المنبثقة بالزر الأيمن لمنع أي فحص للعناصر نهائياً (Inspect Element)
+    win.webContents.on('context-menu', (e) => {
+        e.preventDefault();
     });
 
     // 🔒 إغلاق أدوات المطور فوراً
@@ -160,6 +153,24 @@ function createWindow() {
         });
     });
 
+    // 🔒 صمام الأمان الفولاذي: منع فتح أي نوافذ جديدة داخل بيئة Electron وتوجيه الروابط الآمنة للمتصفح الافتراضي
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url) || /^tel:/i.test(url)) {
+            shell.openExternal(url);
+        }
+        return { action: 'deny' };
+    });
+
+    // 🔒 منع الانتقال إلى أي روابط خارجية غير ملفات النظام المحلية لحماية صلاحيات Node.js
+    win.webContents.on('will-navigate', (event, url) => {
+        if (!url.startsWith('file://')) {
+            event.preventDefault();
+            if (/^https?:\/\//i.test(url)) {
+                shell.openExternal(url);
+            }
+        }
+    });
+
     return win;
 }
 
@@ -191,8 +202,12 @@ app.whenReady().then(() => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
 
-    // فحص التحديثات تلقائياً بعد 5 ثوانٍ من تشغيل التطبيق
+    // فحص التحديثات تلقائياً بعد 5 ثوانٍ من تشغيل التطبيق (مع التحقق الصارم من سياسة التجميد)
     setTimeout(() => {
+        if (typeof isAutoUpdatesFrozenOnDisk === 'function' && isAutoUpdatesFrozenOnDisk()) {
+            console.log('[Updater] 🔒 تخطي الفحص التلقائي عند بدء التشغيل: التحديثات مجمدة تماماً بناءً على اختيار العميل.');
+            return;
+        }
         if (autoUpdater) {
             autoUpdater.checkForUpdates().catch(err => {
                 console.warn('Auto check for updates failed (safe to ignore if offline):', err.message);
@@ -207,12 +222,8 @@ app.on('window-all-closed', function () {
 
 // قنوات الاتصال (IPC) لفتح نافذة جديدة
 ipcMain.handle('open-new-window', () => {
-    const newWin = createWindow();
-    return true;
-});
-
-ipcMain.on('open-new-window', () => {
     createWindow();
+    return true;
 });
 
 // قنوات الاتصال (IPC)
@@ -303,55 +314,6 @@ ipcMain.handle('hash-activation-payload', (event, payload) => {
 });
 
 // =========================================================================
-// 🌐 قنوات السيرفر المحلي والمزامنة الشبكية (Local Network Hub IPC)
-// =========================================================================
-ipcMain.handle('sync-master-db', (event, dbPayload) => {
-    try {
-        if (server_hub && typeof server_hub.updateMasterDbData === 'function') {
-            server_hub.updateMasterDbData(dbPayload);
-        }
-        return { success: true };
-    } catch (err) {
-        console.error('[Main] sync-master-db error:', err);
-        return { success: false, message: err.message };
-    }
-});
-
-ipcMain.handle('get-in-transit-transfers', () => {
-    try {
-        if (server_hub && typeof server_hub.getInTransitTransfersList === 'function') {
-            return server_hub.getInTransitTransfersList();
-        }
-        return [];
-    } catch (err) {
-        console.error('[Main] get-in-transit-transfers error:', err);
-        return [];
-    }
-});
-
-ipcMain.handle('get-paired-devices', () => {
-    try {
-        if (server_hub && typeof server_hub.getPairedDevicesList === 'function') {
-            return server_hub.getPairedDevicesList();
-        }
-        return [];
-    } catch (err) {
-        return [];
-    }
-});
-
-ipcMain.handle('remove-paired-device', (event, deviceId) => {
-    try {
-        if (server_hub && typeof server_hub.removePairedDevice === 'function') {
-            return server_hub.removePairedDevice(deviceId);
-        }
-        return [];
-    } catch (err) {
-        return [];
-    }
-});
-
-// =========================================================================
 // 📁 1. نظام إدارة مجلد والنسخ الاحتياطية (Smart Backup System)
 // =========================================================================
 
@@ -374,6 +336,7 @@ if (!fs.existsSync(backupDir)) {
 function autoMigrateLegacyBackups() {
     try {
         const legacyDirs = [
+            path.join(os.homedir(), 'Downloads'),
             path.join(os.homedir(), 'bayan_backups'),
             path.join(__dirname, 'bayan_backups'),
             path.join(process.cwd(), 'bayan_backups'),
@@ -384,21 +347,26 @@ function autoMigrateLegacyBackups() {
             if (fs.existsSync(dir) && dir !== backupDir) {
                 const files = fs.readdirSync(dir);
                 files.forEach(file => {
-                    if (file.endsWith('.json')) {
+                    if ((file.startsWith('backup_pos_') || file.startsWith('backup_complete_')) && file.endsWith('.json')) {
                         const src = path.join(dir, file);
                         const dest = path.join(backupDir, file);
                         if (!fs.existsSync(dest)) {
                             fs.copyFileSync(src, dest);
-                            console.log(`📦 Migrated legacy backup file: ${file} -> ${dest}`);
+                            console.log(`📦 Synced backup file: ${file} -> ${dest}`);
                         }
-                        try { fs.unlinkSync(src); } catch (e) {}
+                        // حذف الملفات القديمة فقط إذا لم تكن في مجلد التنزيلات
+                        if (dir !== path.join(os.homedir(), 'Downloads')) {
+                            try { fs.unlinkSync(src); } catch (e) {}
+                        }
                     }
                 });
                 try {
-                    const remaining = fs.readdirSync(dir);
-                    if (remaining.length === 0) {
-                        fs.rmdirSync(dir);
-                        console.log(`🧹 Cleaned up legacy backup folder: ${dir}`);
+                    if (dir !== path.join(os.homedir(), 'Downloads')) {
+                        const remaining = fs.readdirSync(dir);
+                        if (remaining.length === 0) {
+                            fs.rmdirSync(dir);
+                            console.log(`🧹 Cleaned up legacy backup folder: ${dir}`);
+                        }
                     }
                 } catch (e) {}
             }
@@ -417,17 +385,51 @@ ipcMain.handle('get-backup-dir', () => {
     return backupDir;
 });
 
-// فتح مجلد النسخ الاحتياطية بـ shell.openPath()
+// حفظ نسخة احتياطية مباشرة في مجلد النظام عبر IPC
+ipcMain.handle('save-backup-data', async (_e, payload) => {
+    try {
+        if (!fs.existsSync(backupDir)) {
+            fs.mkdirSync(backupDir, { recursive: true });
+        }
+        const pad = (n) => String(n).padStart(2, '0');
+        const d = new Date();
+        const timestamp = `${d.getFullYear()}_${pad(d.getMonth()+1)}_${pad(d.getDate())}__${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}`;
+        const prefix = payload?.isManual ? 'backup_pos_manual_' : 'backup_pos_auto_';
+        const fileName = `${prefix}${timestamp}.json`;
+        const filePath = path.join(backupDir, fileName);
+        fs.writeFileSync(filePath, payload?.dataStr || '{}', 'utf8');
+        return { success: true, filePath, fileName, backupDir };
+    } catch (err) {
+        console.error("save-backup-data IPC error:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+// فتح مجلد النسخ الاحتياطية بـ shell.openPath() أو explorer.exe المباشر
 ipcMain.handle('open-backup-folder', async () => {
     try {
         if (!fs.existsSync(backupDir)) {
             fs.mkdirSync(backupDir, { recursive: true });
         }
-        await shell.openPath(backupDir);
+        // مزامنة أي نسخ جديدة نزلت في مجلد التنزيلات أولاً لكي تظهر فوراً للمستخدم
+        autoMigrateLegacyBackups();
+
+        const openErr = await shell.openPath(backupDir);
+        if (openErr) {
+            console.warn("shell.openPath warning, using explorer fallback:", openErr);
+            const { exec } = require('child_process');
+            exec(`explorer.exe "${backupDir}"`);
+        }
         return true;
     } catch (err) {
-        console.error("Failed to open backup path:", err);
-        return false;
+        console.error("Failed to open backup path, fallback to explorer:", err);
+        try {
+            const { exec } = require('child_process');
+            exec(`explorer.exe "${backupDir}"`);
+            return true;
+        } catch (e2) {
+            return false;
+        }
     }
 });
 
@@ -462,6 +464,49 @@ ipcMain.handle('rotate-backups', async (event, maxKeep = 100) => {
 });
 
 // =========================================================================
+// 🔒 سياسة تجميد وإيقاف التحديثات التلقائية المباشرة (Auto-Updates Policy Storage)
+// =========================================================================
+function getUpdatePolicyFilePath() {
+    try {
+        return path.join(app.getPath('userData'), 'update-policy.json');
+    } catch (e) {
+        return null;
+    }
+}
+
+function isAutoUpdatesFrozenOnDisk() {
+    try {
+        const p = getUpdatePolicyFilePath();
+        if (p && fs.existsSync(p)) {
+            const content = fs.readFileSync(p, 'utf8');
+            const data = JSON.parse(content);
+            return data && (data.autoUpdatesDisabled === true || data.disabled === true);
+        }
+    } catch (e) {
+        console.warn('[Updater] Could not read update-policy.json:', e.message);
+    }
+    return false;
+}
+
+function setAutoUpdatesFrozenOnDisk(disabled) {
+    try {
+        const p = getUpdatePolicyFilePath();
+        if (p) {
+            fs.writeFileSync(p, JSON.stringify({
+                autoUpdatesDisabled: !!disabled,
+                version: app.getVersion(),
+                updatedAt: new Date().toISOString()
+            }, null, 2), 'utf8');
+            console.log(`[Updater] 🔒 تم حفظ سياسة التحديثات على القرص: ${disabled ? 'مجمدة ومقفولة' : 'مفعلة'}`);
+            return true;
+        }
+    } catch (e) {
+        console.error('[Updater] Could not write update-policy.json:', e.message);
+    }
+    return false;
+}
+
+// =========================================================================
 // 🚀 2. نظام التحديثات التلقائية المباشرة بالخلفية (Electron Auto Updater)
 // =========================================================================
 let autoUpdater = null;
@@ -478,8 +523,15 @@ try {
     });
 
     autoUpdater.on('update-available', (info) => {
+        if (isAutoUpdatesFrozenOnDisk()) {
+            console.log('[Updater] 🔒 تم حجب إشعار توفر التحديث لأن التحديثات التلقائية مجمدة ومقفولة.');
+            return;
+        }
         console.log('[Updater] Update available:', info ? info.version : 'unknown');
-        if (mainWindow) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
             mainWindow.webContents.send('update-available', {
                 currentVersion: app.getVersion(),
                 newVersion: info ? info.version : '',
@@ -528,8 +580,21 @@ try {
     console.warn('[Updater] electron-updater not loaded:', e.message);
 }
 
+ipcMain.handle('get-auto-updates-policy', () => {
+    return { frozen: isAutoUpdatesFrozenOnDisk() };
+});
+
+ipcMain.handle('set-auto-updates-policy', (_event, disabled) => {
+    const success = setAutoUpdatesFrozenOnDisk(disabled);
+    return { success, frozen: !!disabled };
+});
+
 ipcMain.handle('check-for-updates', async () => {
     console.log('[Updater] Triggering check-for-updates via IPC...');
+    if (isAutoUpdatesFrozenOnDisk()) {
+        console.log('[Updater] 🔒 Check blocked via IPC: Auto-updates are frozen.');
+        return { success: false, frozen: true, message: 'التحديثات التلقائية مجمدة ومقفولة بناءً على رغبة العميل.' };
+    }
     if (!autoUpdater) return { success: false, message: 'AutoUpdater not ready' };
     try {
         const checkResult = await autoUpdater.checkForUpdates();
@@ -586,45 +651,93 @@ ipcMain.handle('get-app-version', () => {
 // 🌐 Local Server Hub IPC Handlers
 // =========================================================================
 ipcMain.handle('get-local-server-info', () => {
-    return {
-        isRunning: true,
-        ip: server_hub.getLocalIPAddress(),
-        port: server_hub.SERVER_PORT,
-        pairedCount: server_hub.getPairedDevicesList().length,
-        pendingTransfersCount: server_hub.getInTransitTransfersList().filter(t => t.transferStatus === 'pending').length
-    };
+    try {
+        return {
+            isRunning: true,
+            ip: server_hub.getLocalIPAddress(),
+            port: server_hub.SERVER_PORT,
+            pairedCount: (server_hub.getPairedDevicesList() || []).length,
+            pendingTransfersCount: (server_hub.getInTransitTransfersList() || []).filter(t => t.transferStatus === 'pending').length
+        };
+    } catch (e) {
+        return { isRunning: false, ip: '127.0.0.1', port: 4545, pairedCount: 0, pendingTransfersCount: 0 };
+    }
 });
 
 ipcMain.handle('get-paired-devices', () => {
-    return server_hub.getPairedDevicesList();
+    try {
+        return server_hub.getPairedDevicesList() || [];
+    } catch (e) {
+        return [];
+    }
 });
 
 ipcMain.handle('remove-paired-device', (event, deviceId) => {
-    return server_hub.removePairedDevice(deviceId);
+    try {
+        return server_hub.removePairedDevice(deviceId);
+    } catch (e) {
+        return [];
+    }
+});
+
+ipcMain.handle('update-paired-device-name', (event, { deviceId, newName }) => {
+    try {
+        return server_hub.updatePairedDeviceName(deviceId, newName);
+    } catch (e) {
+        return false;
+    }
 });
 
 ipcMain.handle('get-pending-pairing-requests', () => {
-    return server_hub.getPendingPairingRequests();
+    try {
+        return server_hub.getPendingPairingRequests() || [];
+    } catch (e) {
+        return [];
+    }
 });
 
 ipcMain.handle('approve-pairing-request', (event, reqId) => {
-    return server_hub.approvePairingRequest(reqId);
+    try {
+        return server_hub.approvePairingRequest(reqId);
+    } catch (e) {
+        return false;
+    }
 });
 
 ipcMain.handle('get-in-transit-transfers', () => {
-    return server_hub.getInTransitTransfersList();
+    try {
+        return server_hub.getInTransitTransfersList() || [];
+    } catch (e) {
+        return [];
+    }
 });
 
 ipcMain.handle('sync-in-transit-transfers', (event, list) => {
-    return server_hub.updateInTransitTransfersList(list);
+    try {
+        return server_hub.updateInTransitTransfersList(list);
+    } catch (e) {
+        return [];
+    }
 });
 
 ipcMain.handle('sync-master-db', (event, dbData) => {
-    return server_hub.updateMasterDbData(dbData);
+    try {
+        if (server_hub && typeof server_hub.updateMasterDbData === 'function') {
+            return server_hub.updateMasterDbData(dbData, 'DEV-HOST', true);
+        }
+        return { success: true };
+    } catch (err) {
+        console.error('[Main] sync-master-db error:', err);
+        return { success: false, message: err.message };
+    }
 });
 
 ipcMain.handle('get-master-db', () => {
-    return server_hub.getMasterDbData();
+    try {
+        return server_hub.getMasterDbData();
+    } catch (e) {
+        return null;
+    }
 });
 
 ipcMain.handle('check-firewall-status', async () => {

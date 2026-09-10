@@ -24,17 +24,16 @@
 }
 
 .tr-stat-card {
-    border-radius: 20px;
-    padding: 20px 24px;
+    border-radius: 14px;
+    padding: 18px 22px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     min-height: 110px;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: blur(10px);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    transition: transform 0.15s ease, border-color 0.15s ease;
 }
 
 .tr-stat-card::before {

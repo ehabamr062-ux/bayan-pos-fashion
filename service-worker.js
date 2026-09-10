@@ -3,9 +3,9 @@
 //  النسخة المطورة للعمل أوفلاين 100%
 // ============================================================
 
-const CACHE_NAME = 'bayan-pos-v1.0.3';
-const STATIC_CACHE = 'bayan-static-v1.0.3';
-const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.3';
+const CACHE_NAME = 'bayan-pos-v1.0.5';
+const STATIC_CACHE = 'bayan-static-v1.0.5';
+const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.5';
 
 // كافة ملفات النظام الأساسية المتوفرة محلياً (بدون تكرار لتفادي خطأ Entry already exists على GitHub Pages)
 const STATIC_FILES = [
@@ -44,6 +44,7 @@ const STATIC_FILES = [
     './js/sales_fashion_picker.js',
     './js/sales_returns.js',
     './js/sales_history_view.js',
+    './js/sales_inquiry_modal.js',
     './js/inv_transfers.js',
     './js/acc_invoices.js',
     './js/acc_vouchers.js',

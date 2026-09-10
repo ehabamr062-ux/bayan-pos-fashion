@@ -3,13 +3,43 @@
 // يتم استدعاء هذه الدالة بعد تحميل كافة الملفات المعيارية (Modules)
 
 loadData().then(async () => {
-    // 0. تحميل الإعدادات والشعار بعد اكتمال جلب البيانات من IndexedDB
+    // 0. فحص واستعادة رتبة المدير الأساسي وصمام الأمان التلقائي
+    try {
+        if (typeof users !== 'undefined' && Array.isArray(users) && users.length > 0) {
+            let primaryAdmin = users.find(u => u.id === 1 || u.id === '1') || users[0];
+            if (primaryAdmin && primaryAdmin.role !== 'admin') {
+                console.log("🛡️ [Safety Restore] استعادة رتبة المدير الأساسي كاملة تلقائياً...");
+                primaryAdmin.role = 'admin';
+                primaryAdmin.isFrozen = false;
+                if (!primaryAdmin.permissions) primaryAdmin.permissions = {};
+                if (!primaryAdmin.permissions.general) primaryAdmin.permissions.general = {};
+                primaryAdmin.permissions.general.settings = true;
+                primaryAdmin.permissions.general.users = true;
+                primaryAdmin.permissions.general.reports = true;
+                primaryAdmin.permissions.general.profits = true;
+                if (typeof saveData === 'function') saveData();
+                if (currentUser && (currentUser.id === primaryAdmin.id || currentUser.pin === primaryAdmin.pin)) {
+                    currentUser.role = 'admin';
+                    currentUser.permissions = primaryAdmin.permissions;
+                }
+            }
+        }
+    } catch(e) { console.warn("Admin auto-heal notice:", e); }
+
+    // 0.1 تحميل الإعدادات والشعار بعد اكتمال جلب البيانات من IndexedDB
     if (typeof loadSettings === 'function') loadSettings();
     if (typeof applyBusinessTypeUI === 'function') applyBusinessTypeUI();
     if (typeof populatePaymentMethodSelects === 'function') populatePaymentMethodSelects();
-    const savedLogo = getStore('bayan_business_logo');
-    if (savedLogo && typeof updateLogoDisplays === 'function') {
-        updateLogoDisplays(savedLogo);
+    if (typeof populateWarehouseDropdowns === 'function') populateWarehouseDropdowns();
+    let savedLogo = getStore('bayan_business_logo');
+    // تنظيف الشعار التجريبي القديم غير المرغوب فيه واستعادة واجهة بيان الأصلية
+    if (savedLogo && typeof savedLogo === 'string' && (savedLogo.startsWith('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgA') || !getStore('bayan_user_confirmed_custom_logo'))) {
+        if (typeof removeStore === 'function') removeStore('bayan_business_logo');
+        if (window.AppStore) delete window.AppStore['bayan_business_logo'];
+        savedLogo = null;
+    }
+    if (typeof updateLogoDisplays === 'function') {
+        updateLogoDisplays(savedLogo || null);
     }
 
     // 1. تحديث التوجيهات وشاشة تسجيل الدخول فوراً وبأقصى سرعة (0ms)
@@ -36,7 +66,7 @@ loadData().then(async () => {
     // 4. صمام الأمان الفولاذي: إنشاء نسخة احتياطية تلقائية وفورية في الخلفية عند الترقية لإصدار جديد
     try {
         const lastVer = getStore('bayan_last_run_version');
-        const curVer = window.appVersion || '1.0.3';
+        const curVer = window.appVersion || '1.0.5';
         if (lastVer && lastVer !== curVer) {
             console.log(`🛡️ [Safety Shield] Version upgrade detected (${lastVer} ➔ ${curVer}). Creating automatic background backup...`);
             if (typeof window.executeAutoBackupToFile === 'function') {
@@ -45,6 +75,7 @@ loadData().then(async () => {
                 }).catch(err => console.warn('Post-upgrade backup notice:', err));
             }
         }
+        setStore('bayan_last_run_version', curVer);
     } catch (e) { }
 
     // 5. تشغيل مزامنة الشبكة المحلية والتابلت
@@ -111,3 +142,91 @@ window.addEventListener('beforeinstallprompt', (e) => {
         }
     }, 2000);
 });
+
+// =========================================================================
+// 🗝️ اختصار الطوارئ السري لفتح الإعدادات واستعادة رتبة المدير (Emergency Override)
+// يدعم الضغط على [Ctrl] مع الحروف (D + F + G) معاً أو بالتعاقب السريع
+// =========================================================================
+(function initEmergencySettingsShortcut() {
+    const activeKeys = new Set();
+
+    function triggerEmergencySettings() {
+        console.log("⚡ [Emergency Bypass] تفعيل اختصار الطوارئ السري للإعدادات!");
+
+        // 1. استعادة صلاحيات المدير الحالي وفك أي تجميد
+        if (typeof users !== 'undefined' && Array.isArray(users) && users.length > 0) {
+            let adminUser = users.find(u => u.id === 1 || u.id === '1') || users[0];
+            if (adminUser) {
+                adminUser.role = 'admin';
+                adminUser.isFrozen = false;
+                if (!adminUser.permissions) adminUser.permissions = {};
+                if (!adminUser.permissions.general) adminUser.permissions.general = {};
+                adminUser.permissions.general.settings = true;
+                adminUser.permissions.general.users = true;
+                adminUser.permissions.general.reports = true;
+                adminUser.permissions.general.profits = true;
+            }
+            if (currentUser) {
+                currentUser.role = 'admin';
+                currentUser.isFrozen = false;
+                if (!currentUser.permissions) currentUser.permissions = {};
+                if (!currentUser.permissions.general) currentUser.permissions.general = {};
+                currentUser.permissions.general.settings = true;
+                currentUser.permissions.general.users = true;
+            }
+            if (typeof saveData === 'function') saveData();
+        }
+
+        // 2. إغلاق شاشة الدخول إذا كانت مفتوحة
+        const loginModal = document.getElementById('loginModal');
+        if (loginModal) {
+            loginModal.classList.add('hidden');
+            loginModal.style.display = 'none';
+        }
+        document.body.classList.remove('is-logged-out');
+
+        // 3. فتح شاشة الإعدادات وتبويب المستخدمين مباشرة
+        if (typeof switchSection === 'function') {
+            switchSection('settings');
+        } else {
+            document.querySelectorAll('.section-view').forEach(s => s.classList.add('hidden'));
+            const setSec = document.getElementById('settings-section');
+            if (setSec) setSec.classList.remove('hidden');
+        }
+
+        if (typeof openSettingsTab === 'function') {
+            setTimeout(() => openSettingsTab('users'), 150);
+        }
+
+        if (typeof showToast === 'function') {
+            showToast("🔓 تم فتح قسم الإعدادات بنجاح واستعادة صلاحيات المدير!", "success");
+        } else {
+            alert("🔓 تم فتح قسم الإعدادات بنجاح واستعادة صلاحيات المدير!");
+        }
+    }
+
+    // رصد الضغط المتزامن
+    window.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        activeKeys.add(key);
+
+        const hasCtrl = e.ctrlKey || activeKeys.has('control');
+        const hasD = activeKeys.has('d') || activeKeys.has('ي'); // يدعم العربي والإنجليزي
+        const hasF = activeKeys.has('f') || activeKeys.has('ب');
+        const hasG = activeKeys.has('g') || activeKeys.has('ل');
+
+        if (hasCtrl && hasD && hasF && hasG) {
+            e.preventDefault();
+            activeKeys.clear();
+            triggerEmergencySettings();
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        activeKeys.delete(e.key.toLowerCase());
+    });
+
+    // إتاحة استدعاء يدوي في الكونسول أيضاً إن لزم
+    window.emergencyOpenSettings = triggerEmergencySettings;
+})();
+
