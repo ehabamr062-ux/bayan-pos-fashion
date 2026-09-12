@@ -267,17 +267,32 @@
                 ${(disbursements.nonCash && disbursements.nonCash > 0) ? `<tr><td>🏦 صرف بنكي / إلكتروني</td><td style="color:#7c3aed; font-weight:bold;">${disbursements.nonCash.toFixed(2)}</td></tr>` : ''}
                 <tr style="background: rgba(142, 68, 173, 0.05);"><td>⚖️ تسوية المخزن (غير مؤثرة على الكاش)</td><td style="color:${adjustments.total >= 0 ? 'var(--main-green)' : 'var(--box-red)'}; font-weight:bold;">${adjustments.total.toFixed(2)}</td></tr>
                 <tr style="background: rgba(94, 51, 112, 0.1);"><td>🚚 تحويل مخزني (غير مؤثر على الكاش)</td><td style="color:#5e3370; font-weight:bold;">${transfers.total.toFixed(2)}</td></tr>
-                <tr style="font-weight:bold; background:#f9f9f9; border-top:2px dashed #ccc;">
-                    <td>⏺️ رصيد سابق (افتتاحي نقدية)</td>
-                    <td style="color:#2c3e50;">${previousBalance.toFixed(2)}</td>
+                <tr style="font-weight:900; background:#f8fafc; border-top:2px dashed #cbd5e1;">
+                    <td style="text-align:right; padding: 10px 14px;">
+                        <span style="display:inline-flex; align-items:center; gap:6px;">
+                            <span>⏺️ رصيد سابق (افتتاحي نقدية)</span>
+                            <button type="button" class="daily-help-btn" onclick="showDailyTermHelp('previousBalance', event)" title="انقر لمعرفة شرح الرصيد السابق الافتتاحي">❓</button>
+                        </span>
+                    </td>
+                    <td style="color:#0f172a; font-weight:900; font-size:1.05rem;">${previousBalance.toFixed(2)}</td>
                 </tr>
-                <tr style="background:rgba(211, 211, 211, 0.2); font-weight:900;">
-                    <td>🔄 صافي الحركة النقدية بالدرج</td>
-                    <td style="color:${movementColor}; font-size:1.1rem;">${netCashMovement.toFixed(2)}</td>
+                <tr style="background:rgba(211, 211, 211, 0.25); font-weight:900;">
+                    <td style="text-align:right; padding: 10px 14px;">
+                        <span style="display:inline-flex; align-items:center; gap:6px;">
+                            <span>🔄 صافي الحركة النقدية بالدرج</span>
+                            <button type="button" class="daily-help-btn" onclick="showDailyTermHelp('netCashMovement', event)" title="انقر لمعرفة شرح صافي الحركة النقدية">❓</button>
+                        </span>
+                    </td>
+                    <td style="color:${movementColor}; font-size:1.15rem; font-weight:900;">${netCashMovement.toFixed(2)}</td>
                 </tr>
                 <tr style="background:var(--main-blue); color:white; font-weight:bold; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-                    <td>💰 الرصيد النهائي بالدرج</td>
-                    <td style="color:white; font-size:1.3rem; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">${finalCashBalance.toFixed(2)}</td>
+                    <td style="text-align:right; padding: 10px 14px;">
+                        <span style="display:inline-flex; align-items:center; gap:6px;">
+                            <span style="color:white;">💰 الرصيد النهائي بالدرج</span>
+                            <button type="button" class="daily-help-btn daily-help-btn-white" onclick="showDailyTermHelp('finalCashBalance', event)" title="انقر لمعرفة شرح الرصيد النهائي بالدرج">❓</button>
+                        </span>
+                    </td>
+                    <td style="color:white; font-size:1.35rem; font-weight:900; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">${finalCashBalance.toFixed(2)}</td>
                 </tr>
             `;
 
@@ -446,6 +461,113 @@
             }
         };
 
+        // ❓ نافذة شرح وتوضيح مصطلحات الخزينة وحركة اليومية التفاعلية
+        window.showDailyTermHelp = function(termKey, e) {
+            if (e) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+
+            const helpData = {
+                previousBalance: {
+                    title: "⏺️ رصيد سابق (افتتاحي نقدية)",
+                    tag: "الرصيد الافتتاحي للخزينة والدرج",
+                    tagBg: "#e0f2fe",
+                    tagColor: "#0369a1",
+                    summary: "هو مجموع كافة الأموال النقدية التي دخلت وخرجت من الخزينة/الدرج <b>قبل تاريخ بداية الفترة المحددة</b> في الفلتر.",
+                    points: [
+                        "<b>نقطة الانطلاق:</b> يمثل النقدية التي بدأت بها اليومية أو الوردية كقاعدة أساسية (المرحلة من الأيام السابقة).",
+                        "<b>العمليات المشمولة:</b> يشمل حصيلة (المبيعات النقدية + سندات القبض + مرتجع الشراء) مطروحاً منها (المصروفات + المشتريات النقدية + مرتجع البيع) حتى اللحظة السابقة لبداية التقرير.",
+                        "<b>الأهمية:</b> يضمن عدم إغفال النقدية الموجودة مسبقاً في الدرج حتى يكون الحساب التراكمي للجرد سليماً ومضبوطاً 100%."
+                    ],
+                    formula: "الرصيد السابق = صافي النقدية المتراكمة بالدرج قبل تاريخ (من)"
+                },
+                netCashMovement: {
+                    title: "🔄 صافي الحركة النقدية بالدرج",
+                    tag: "حركة الفترة المحددة فقط",
+                    tagBg: "#fef3c7",
+                    tagColor: "#b45309",
+                    summary: "هو الفارق الحقيقي بين إجمالي ما دخل الدرج نقداً وما خرج منه نقداً <b>خلال الفترة المحددة بالتقرير فقط</b> (دون حساب الأيام السابقة).",
+                    points: [
+                        "<b>الفائض أو العجز:</b> إذا كان الرقم <b>بالموجب والأخضر 🟢</b>، فهذا يعني أن الدرج حقق زيادة وسيولة نقدية جديدة خلال هذه الفترة.",
+                        "<b>في حالة السالب 🔴:</b> إذا كان الرقم بالسالب، فهذا يعني أن المصروفات والمدفوعات النقدية تجاوزت الإيرادات خلال هذه الفترة المحددة.",
+                        "<b>الكاش الفعلي فقط:</b> لا يشمل الحركات الآجلة، بل يعتمد حصراً على الأموال المقبوضة أو المدفوعة نقداً باليد."
+                    ],
+                    formula: "صافي الحركة = (مبيعات كاش + مقبوضات + مرتجع شراء نقدي) - (مصروفات + مشتريات كاش + مرتجع بيع نقدي)"
+                },
+                finalCashBalance: {
+                    title: "💰 الرصيد النهائي بالدرج",
+                    tag: "الكاش الفعلي المطلوب عند الجرد",
+                    tagBg: "#dcfce7",
+                    tagColor: "#15803d",
+                    summary: "هو <b>المبلغ الإجمالي الفعلي</b> الواجب تواجده بالكامل نقدياً وورقياً داخل درج الكاشير في هذه اللحظة عند جرد الدرج وتقفيل اليومية.",
+                    points: [
+                        "<b>مطابقة الجرد اليدوي:</b> عندما يقوم الكاشير أو صاحب العمل بعدّ الفلوس الورقية والمعدنية في الدرج، يجب أن يتطابق العد الفعلي مع هذا الرقم تماماً.",
+                        "<b>التسليم والاستلام:</b> هو الرقم المعتمد الذي يتم تسليمه لوردية تالية أو توريده لحساب الخزينة الرئيسية أو الإيداع البنكي.",
+                        "<b>العلاقة المحاسبية:</b> يجمع بين رصيد بداية اليومية وصافي ما جرى فيها (الرصيد السابق + صافي الحركة)."
+                    ],
+                    formula: "الرصيد النهائي بالدرج = الرصيد الافتتاحي السابق + صافي حركة النقدية للفترة"
+                }
+            };
+
+            const item = helpData[termKey];
+            if (!item) return;
+
+            let existingModal = document.getElementById('dailyTermHelpModal');
+            if (existingModal) existingModal.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'dailyTermHelpModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; direction: rtl; font-family: inherit;';
+
+            modal.innerHTML = `
+                <div style="background: #ffffff; color: #0f172a; width: 100%; max-width: 490px; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4); overflow: hidden; border: 1.5px solid #cbd5e1;">
+                    <!-- الهيدر -->
+                    <div style="background: linear-gradient(135deg, #0f172a, #1e293b); padding: 18px 22px; color: white; display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #3b82f6;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.5rem;">💡</span>
+                            <div>
+                                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 900; color: #ffffff;">${item.title}</h3>
+                                <span style="display: inline-block; background: ${item.tagBg}; color: ${item.tagColor}; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 900; margin-top: 4px;">${item.tag}</span>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('dailyTermHelpModal').remove()" style="background: rgba(255,255,255,0.15); border: none; color: white; width: 34px; height: 34px; border-radius: 50%; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.85)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
+                    </div>
+
+                    <!-- المحتوى -->
+                    <div style="padding: 22px; line-height: 1.7; font-size: 0.96rem; max-height: 75vh; overflow-y: auto;">
+                        <div style="background: #f8fafc; border-right: 4px solid #3b82f6; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; color: #0f172a; font-weight: 800; font-size: 0.98rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                            ${item.summary}
+                        </div>
+
+                        <div style="margin-bottom: 18px;">
+                            <div style="font-weight: 900; color: #0f172a; margin-bottom: 8px; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+                                <span>📌</span> نقاط أساسية للتوضيح:
+                            </div>
+                            <ul style="margin: 0; padding-right: 20px; color: #334155; font-weight: 700; font-size: 0.92rem; display: flex; flex-direction: column; gap: 8px;">
+                                ${item.points.map(p => `<li>${p}</li>`).join('')}
+                            </ul>
+                        </div>
+
+                        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1.5px solid #bfdbfe; padding: 12px 16px; border-radius: 12px; margin-bottom: 18px;">
+                            <div style="font-size: 0.82rem; font-weight: 900; color: #1d4ed8; margin-bottom: 4px;">📐 طريقة الحساب الرياضية:</div>
+                            <div style="font-weight: 900; color: #1e3a8a; font-size: 0.94rem; direction: rtl;">${item.formula}</div>
+                        </div>
+
+                        <button onclick="document.getElementById('dailyTermHelpModal').remove()" style="width: 100%; padding: 12px; border: none; border-radius: 12px; background: linear-gradient(135deg, #10b981, #059669); color: white; font-weight: 900; font-size: 1rem; cursor: pointer; box-shadow: 0 4px 12px rgba(16,185,129,0.3); transition: 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                            فهمت، شكراً 👍
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.addEventListener('click', function(ev) {
+                if (ev.target === modal) modal.remove();
+            });
+
+            document.body.appendChild(modal);
+        };
+
         window.switchSubTab = function(btnEl, targetId) {
             if (!btnEl) return;
             const parentContainer = btnEl.closest('.sub-tabs') || btnEl.parentElement;
@@ -537,7 +659,7 @@
 
             const opsSummary = document.getElementById('opsSummaryBody').innerHTML.replace(/📤|📥|🔄|🔙|💵|💸|⚖️|🚚|🛒|🧺|📦|💰|🌗|✅|⏳/g, '');
 
-            const treasurySummary = document.getElementById('treasurySummaryBody').innerHTML.replace(/📤|📥|🔄|🔙|💵|💸|⚖️|🚚|🛒|🧺|📦|💰|🌗|✅|⏳|⏺️/g, '');
+            const treasurySummary = document.getElementById('treasurySummaryBody').innerHTML.replace(/<button[^>]*>[\s\S]*?<\/button>/gi, '').replace(/📤|📥|🔄|🔙|💵|💸|⚖️|🚚|🛒|🧺|📦|💰|🌗|✅|⏳|⏺️|❓/g, '');
 
             const from = document.getElementById('reportDateFrom').value;
 

@@ -645,7 +645,15 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                     const label = document.createElement('div');
                     label.className = 'wp-label';
                     label.style.background = 'rgba(0,0,0,0.6)';
-                    label.innerHTML = `مخصصة <span onclick="event.stopPropagation(); deleteCustomWallpaper('${wp.name}')" style="color: #f43f5e; float: left; cursor: pointer; padding: 0 5px;">✖</span>`;
+                    label.textContent = 'مخصصة ';
+                    const delSpan = document.createElement('span');
+                    delSpan.textContent = '✖';
+                    delSpan.style.cssText = 'color: #f43f5e; float: left; cursor: pointer; padding: 0 5px;';
+                    delSpan.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteCustomWallpaper(wp.name);
+                    };
+                    label.appendChild(delSpan);
                     
                     div.appendChild(label);
                     grid.appendChild(div);
@@ -877,7 +885,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '1.0.5';
+            const version = window.appVersion || '1.0.6';
 
             const message = `السلام عليكم\nأريد الاشتراك في Bayan POS Fashion (بَيَان فاشون للملابس والأحذية)\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة المطلوبة: ${plan}\nالمبلغ: ${price} ج.م\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ وجاري انتظار كود التفعيل.`;
             
@@ -1219,21 +1227,25 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
         function showTemplatesFolder() {
             const modal = document.getElementById('templatesFolderModal');
             const list = document.getElementById('userTemplatesList');
+            if (!modal || !list) {
+                if (typeof showToast === 'function') showToast("📂 مجلد التصميمات: لا توجد تصميمات إضافية حالياً", "info");
+                return;
+            }
             const userTemplates = JSON.parse(getStore('bayan_user_templates') || '[]');
 
             list.innerHTML = '';
 
             if (userTemplates.length === 0) {
-                list.innerHTML = '<div style="grid-column: 1/3; text-align: center; color: #666; padding: 20px;">لا توجد تصميمات مضافة حالياً 📂</div>';
+                list.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #666; padding: 20px;">لا توجد تصميمات مضافة حالياً 📂<br><small style="color:#94a3b8">يمكنك حفظ أي تصميم بالضغط على "حفظ في قوالبي"</small></div>';
             } else {
                 userTemplates.forEach((t, index) => {
                     const card = document.createElement('div');
-                    card.style.cssText = 'background: #f8f9fa; border: 1px solid #ddd; padding: 12px; border-radius: 8px; position: relative;';
+                    card.style.cssText = 'background: #f8f9fa; border: 1.5px solid #e2e8f0; padding: 14px; border-radius: 12px; position: relative; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);';
                     card.innerHTML = `
-                        <div style="font-weight: bold; font-size: 0.9rem; color: var(--main-blue);">${t.type}</div>
-                        <div style="font-family: monospace; font-size: 0.8rem; margin: 4px 0;">ID: ${t.id}</div>
-                        <div style="font-size: 0.7rem; color: #999;">أضيف في: ${t.addedAt}</div>
-                        <button onclick="applySavedTemplate('${t.type}', '${t.id}')" style="margin-top: 8px; width: 100%; padding: 5px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">تفعيل هذا التصميم</button>
+                        <div style="font-weight: 900; font-size: 0.95rem; color: #0f172a;">${t.type || 'نموذج فاتورة'}</div>
+                        <div style="font-family: monospace; font-size: 0.8rem; color: #64748b;">النمط: ${t.id}</div>
+                        <div style="font-size: 0.72rem; color: #94a3b8;">📅 ${t.addedAt}</div>
+                        <button onclick="applySavedTemplate('${t.type}', '${t.id}')" style="margin-top: 8px; width: 100%; padding: 7px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.82rem; font-weight: 800;">تفعيل هذا التصميم</button>
                     `;
                     list.appendChild(card);
                 });
@@ -1241,21 +1253,71 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
 
             modal.classList.remove('hidden');
         }
+        window.showTemplatesFolder = showTemplatesFolder;
 
         function applySavedTemplate(type, id) {
-            // محاكاة اختيار من القوائم
             currentSelectedTemplateType = type;
             currentSelectedTemplateId = id;
             updatePrintPreview();
-            document.getElementById('templatesFolderModal').classList.add('hidden');
-            showToast(`تم تفعيل التصميم المختار: ${type}`);
+            const modal = document.getElementById('templatesFolderModal');
+            if (modal) modal.classList.add('hidden');
+            showToast(`تم تفعيل التصميم المختار: ${type} ✅`);
         }
+        window.applySavedTemplate = applySavedTemplate;
 
         function toggleTemplateEditor(show) {
             const editor = document.getElementById('quickTemplateEditor');
-            if (show) editor.classList.remove('hidden');
-            else editor.classList.add('hidden');
+            if (!editor) {
+                if (typeof showToast === 'function') showToast("🎨 محرر المظهر: يمكنك تعديل رسالة التذييل والخيارات من الإعدادات", "info");
+                return;
+            }
+            if (show) {
+                const footerVal = document.getElementById('printFooterMsg')?.value || '';
+                const tplFooter = document.getElementById('tplFooterText');
+                if (tplFooter && !tplFooter.value) tplFooter.value = footerVal;
+
+                editor.classList.remove('hidden');
+            } else {
+                editor.classList.add('hidden');
+            }
         }
+        window.toggleTemplateEditor = toggleTemplateEditor;
+
+        function applyCustomTemplateChanges() {
+            const tplFooter = document.getElementById('tplFooterText')?.value;
+            if (tplFooter !== undefined) {
+                const printFooterMsg = document.getElementById('printFooterMsg');
+                if (printFooterMsg) {
+                    printFooterMsg.value = tplFooter;
+                }
+            }
+
+            const prevShopName = document.getElementById('prevShopName');
+            const headerSize = document.getElementById('tplHeaderFontSize')?.value || '1.15rem';
+            if (prevShopName) prevShopName.style.fontSize = headerSize;
+
+            const livePreview = document.getElementById('invoiceLivePreview');
+            const bodySize = document.getElementById('tplBodyFontSize')?.value || '0.8rem';
+            if (livePreview) livePreview.style.fontSize = bodySize;
+
+            const prevFooter = document.getElementById('prevFooterMsg');
+            if (prevFooter && tplFooter) prevFooter.innerText = tplFooter;
+
+            if (typeof saveSettings === 'function') {
+                saveSettings();
+            } else if (typeof savePrintTemplateSettings === 'function') {
+                savePrintTemplateSettings();
+            }
+
+            const editor = document.getElementById('quickTemplateEditor');
+            if (editor) editor.classList.add('hidden');
+
+            if (typeof showToast === 'function') showToast("تم تطبيق وحفظ مظهر الفاتورة بنجاح ✨", "success");
+        }
+        window.applyCustomTemplateChanges = applyCustomTemplateChanges;
+
+        window.addToUserTemplates = addToUserTemplates;
+        window.deleteSelectedTemplate = deleteSelectedTemplate;
 
         window.registerOnCloud = async function() {
             const shopName = document.getElementById('shopName')?.value?.trim();

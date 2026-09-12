@@ -126,9 +126,10 @@
     }
 
     /**
-     * معالج النصوص والبحث العربي المرن والذكي (تطابق أ/إ/آ و ة/ه و ي/ى)
+     * معالج النصوص والبحث العربي المرن والذكي (تطابق أ/إ/آ و ة/ه و ي/ى وتحويل الأرقام الهندية)
      */
     const cleanArabic = (str) => String(str || '').trim().toLowerCase()
+        .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
         .replace(/[أإآ]/g, 'ا')
         .replace(/ة/g, 'ه')
         .replace(/[ىي]/g, 'ي')
@@ -220,9 +221,9 @@
         // 🌟 في حالة عدم اختيار صنف مسبقاً (فتح شاشة البحث الفوري الخضراء الأنيقة)
         if (!currentInquiryProduct) {
             modal.innerHTML = `
-                <div style="background: #ffffff; width: 95%; max-width: 650px; border-radius: 24px; overflow: hidden; box-shadow: 0 30px 70px rgba(0,0,0,0.4); border: 2.5px solid #059669; animation: slideUp 0.3s ease-out;">
+                <div style="background: #ffffff; width: 95%; max-width: 680px; max-height: 88vh; border-radius: 24px; box-shadow: 0 30px 70px rgba(0,0,0,0.4); border: 2.5px solid #059669; animation: slideUp 0.3s ease-out; display: flex; flex-direction: column; overflow: hidden;">
                     <!-- هيدر البحث الأخضر الزاهي -->
-                    <div style="background: linear-gradient(135deg, #065f46 0%, #047857 50%, #059669 100%); padding: 18px 24px; color: white; border-bottom: 3px solid #10b981; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="background: linear-gradient(135deg, #065f46 0%, #047857 50%, #059669 100%); padding: 16px 24px; color: white; border-bottom: 3px solid #10b981; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
                         <div style="display: flex; align-items: center; gap: 12px;">
                             <div style="background: #ffffff; color: #047857; width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 900; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
                                 ❓
@@ -236,25 +237,40 @@
                             onmouseover="this.style.background='#ef4444'; this.style.borderColor='#ef4444';" onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'; this.style.borderColor='rgba(255, 255, 255, 0.4)';">✕</button>
                     </div>
 
-                    <div style="padding: 24px; text-align: center;">
-                        <p style="color: #334155; font-size: 0.95rem; font-weight: 800; margin-bottom: 15px;">
-                            🔎 اكتب اسم الصنف، كوده، أو امسح الباركود مباشرة لعرض أرصدته وأسعاره:
+                    <div style="padding: 18px 24px; text-align: center; display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                        <p style="color: #334155; font-size: 0.95rem; font-weight: 800; margin: 0 0 10px; flex-shrink: 0;">
+                            🔎 اكتب اسم الصنف، كود الموديل، المقاس، أو امسح الباركود بالسكانر:
                         </p>
 
-                        <div style="position: relative; margin-bottom: 20px;">
-                            <input type="text" id="inquiryLiveSearch" placeholder="🔍 اكتب اسم الصنف أو امسح الباركود بالسكانر..."
-                                style="width: 100%; height: 50px; border-radius: 14px; border: 2.5px solid #059669; padding: 0 20px; font-size: 1.1rem; font-weight: 900; color: #0f172a; outline: none; box-sizing: border-box; background: #f0fdf4; box-shadow: inset 0 2px 6px rgba(0,0,0,0.05);"
+                        <!-- شارات توضيح طرق البحث الأربعة بوضوح فائق -->
+                        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; flex-shrink: 0;">
+                            <span style="background: #f0fdf4; color: #047857; border: 1.5px solid #a7f3d0; padding: 3px 10px; border-radius: 8px; font-size: 0.78rem; font-weight: 800;">🏷️ 1. اسم الصنف</span>
+                            <span style="background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe; padding: 3px 10px; border-radius: 8px; font-size: 0.78rem; font-weight: 800;">🔢 2. كود الموديل</span>
+                            <span style="background: #faf5ff; color: #7e22ce; border: 1.5px solid #e9d5ff; padding: 3px 10px; border-radius: 8px; font-size: 0.78rem; font-weight: 800;">📏 3. مقاس الموديل (مثل: 38)</span>
+                            <span style="background: #fffbeb; color: #b45309; border: 1.5px solid #fde68a; padding: 3px 10px; border-radius: 8px; font-size: 0.78rem; font-weight: 800;">⚡ 4. مسح الباركود بالسكانر</span>
+                        </div>
+
+                        <div style="margin-bottom: 12px; flex-shrink: 0;">
+                            <input type="text" id="inquiryLiveSearch" placeholder="🔍 اكتب اسم الصنف، كود الموديل، المقاس (مثل: 38)، أو امسح الباركود..."
+                                style="width: 100%; height: 50px; border-radius: 14px; border: 2.5px solid #059669; padding: 0 20px; font-size: 1.05rem; font-weight: 900; color: #0f172a; outline: none; box-sizing: border-box; background: #f0fdf4; box-shadow: inset 0 2px 6px rgba(0,0,0,0.05);"
                                 oninput="window.handleInquiryLiveSearch(this.value)"
                                 onkeydown="window.handleInquirySearchKeyDown(event)"
                                 autocomplete="off">
-                            <div id="inquirySearchDropdown" style="position: absolute; top: 56px; right: 0; left: 0; background: #ffffff; border: 2px solid #10b981; border-radius: 14px; max-height: 280px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 15px 35px rgba(0,0,0,0.2);" class="fast-scrollbar"></div>
                         </div>
 
-                        <div style="background: #f8fafc; border: 1.5px dashed #cbd5e1; border-radius: 14px; padding: 15px; margin-bottom: 20px; color: #64748b; font-size: 0.88rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        <!-- حاوية النتائج التدفقية الداخلية لمنع أي قص إطلاقاً -->
+                        <div id="inquirySearchDropdown" style="display: none; flex: 1; max-height: 380px; overflow-y: auto; background: #ffffff; border: 2px solid #10b981; border-radius: 14px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-bottom: 12px;" class="fast-scrollbar"></div>
+
+                        <!-- التوجيه الذكي عند عدم وجود كتابة -->
+                        <div id="inquirySearchGuide" style="background: #f8fafc; border: 1.5px dashed #cbd5e1; border-radius: 14px; padding: 12px; margin-bottom: 15px; color: #64748b; font-size: 0.86rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0;">
                             <span>💡</span> يمكنك استخدام قارئ الباركود أو الأسهم ⬇️ ⬆️ من لوحة المفاتيح والضغط على Enter للاختيار
                         </div>
 
-                        <button onclick="window.closeFastItemInquiryModal()" style="padding: 10px 35px; background: #64748b; color: white; border: none; border-radius: 12px; font-weight: 900; font-size: 0.95rem; cursor: pointer; transition: 0.2s;">إلغاء ✕</button>
+                        <!-- زر الإلغاء الثابت في أسفل الكارت دائماً -->
+                        <div style="flex-shrink: 0;">
+                            <button onclick="window.closeFastItemInquiryModal()" style="padding: 9px 36px; background: #64748b; color: white; border: none; border-radius: 12px; font-weight: 900; font-size: 0.95rem; cursor: pointer; transition: 0.2s;"
+                                onmouseover="this.style.background='#475569';" onmouseout="this.style.background='#64748b';">إلغاء ✕</button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -523,46 +539,79 @@
         const avgPurchasePrice = parseFloat(p.avgPurchasePrice || p.averageCost || costPrice);
         const lastPurchasePrice = parseFloat(p.lastPurchasePrice || costPrice);
 
-        // شريط فلاتر المقاس واللون
+        // شريط فلاتر المقاس واللون السريع والتفاعلي (Pills Ribbon & Dropdowns)
         let filterSectionHtml = '';
         if (hasVariants && (allSizes.length > 0 || allColors.length > 0)) {
-            const sizeOptions = allSizes.map(s => `<option value="${s}" ${selectedInquirySize === s ? 'selected' : ''}>مقاس: ${s}</option>`).join('');
-            const colorOptions = allColors.map(c => `<option value="${c}" ${selectedInquiryColor === c ? 'selected' : ''}>لون: ${c}</option>`).join('');
+            const sizePillsHtml = allSizes.map(s => {
+                const isSel = selectedInquirySize === s;
+                const sStock = variants.filter(v => String(v.size || '').trim() === s)
+                    .reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                const isOutOfStock = sStock <= 0;
+                return `
+                    <button type="button" onclick="window.setInquiryVariantFilter('size', '${s.replace(/'/g, "\\'")}')"
+                        style="padding: 4px 11px; border-radius: 8px; font-weight: 900; font-size: 0.84rem; cursor: pointer; transition: all 0.15s; flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; ${isSel ? 'background: #059669; color: #ffffff; border: 2px solid #047857; box-shadow: 0 2px 8px rgba(5,150,105,0.35); transform: scale(1.05);' : (isOutOfStock ? 'background: #f1f5f9; color: #94a3b8; border: 1px solid #cbd5e1;' : 'background: #ecfdf5; color: #047857; border: 1.5px solid #a7f3d0;')}"
+                        title="مقاس ${s} [الرصيد الكلي: ${sStock}]">
+                        <span>${isSel ? '✓ ' : ''}${s}</span>
+                        <span style="font-size: 0.72rem; opacity: 0.85; font-family: monospace; background: rgba(0,0,0,0.1); padding: 1px 5px; border-radius: 4px;">${sStock}</span>
+                    </button>
+                `;
+            }).join('');
+
+            const colorPillsHtml = allColors.map(c => {
+                const isSel = selectedInquiryColor === c;
+                return `
+                    <button type="button" onclick="window.setInquiryVariantFilter('color', '${c.replace(/'/g, "\\'")}')"
+                        style="padding: 4px 11px; border-radius: 8px; font-weight: 900; font-size: 0.84rem; cursor: pointer; transition: all 0.15s; flex-shrink: 0; ${isSel ? 'background: #2563eb; color: #ffffff; border: 2px solid #1d4ed8; box-shadow: 0 2px 8px rgba(37,99,235,0.35); transform: scale(1.05);' : 'background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe;'}"
+                        title="لون ${c}">
+                        ${isSel ? '✓ ' : ''}${c}
+                    </button>
+                `;
+            }).join('');
 
             filterSectionHtml = `
-                <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 14px; padding: 10px 15px; margin-bottom: 15px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
-                    <span style="font-weight: 900; color: #0f172a; font-size: 0.9rem; display: flex; align-items: center; gap: 6px;">
-                        <span>👗</span> فلترة الأرصدة:
-                    </span>
+                <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 14px; padding: 12px 16px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); display: flex; flex-direction: column; gap: 9px;">
                     
-                    ${allColors.length > 0 ? `
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <label style="font-weight: 800; font-size: 0.82rem; color: #1d4ed8;">اللون:</label>
-                        <select onchange="window.setInquiryVariantFilter('color', this.value)"
-                            style="padding: 6px 12px; border-radius: 8px; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer;">
-                            <option value="all" ${selectedInquiryColor === 'all' ? 'selected' : ''}>كل الألوان (${allColors.length})</option>
-                            ${colorOptions}
-                        </select>
+                    <!-- شريط المقاسات السريع بأسلوب الكبسولات القابلة للتمرير الأفقي -->
+                    ${allSizes.length > 0 ? `
+                    <div style="display: flex; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 3px;" class="fast-scrollbar">
+                        <span style="font-weight: 900; color: #047857; font-size: 0.86rem; display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
+                            <span>📏</span> المقاس (${allSizes.length}):
+                        </span>
+                        <button type="button" onclick="window.setInquiryVariantFilter('size', 'all')"
+                            style="padding: 4px 11px; border-radius: 8px; font-weight: 900; font-size: 0.84rem; cursor: pointer; transition: all 0.15s; flex-shrink: 0; ${selectedInquirySize === 'all' ? 'background: #0f172a; color: #ffffff; border: 2px solid #0f172a;' : 'background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;'}">
+                            الكل (${allSizes.length})
+                        </button>
+                        ${sizePillsHtml}
                     </div>
                     ` : ''}
 
-                    ${allSizes.length > 0 ? `
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <label style="font-weight: 800; font-size: 0.82rem; color: #047857;">المقاس:</label>
-                        <select onchange="window.setInquiryVariantFilter('size', this.value)"
-                            style="padding: 6px 12px; border-radius: 8px; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; font-weight: 900; font-size: 0.85rem; outline: none; cursor: pointer;">
-                            <option value="all" ${selectedInquirySize === 'all' ? 'selected' : ''}>كل المقاسات (${allSizes.length})</option>
-                            ${sizeOptions}
-                        </select>
+                    <!-- شريط الألوان السريع بأسلوب الكبسولات -->
+                    ${allColors.length > 0 ? `
+                    <div style="display: flex; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 2px;" class="fast-scrollbar">
+                        <span style="font-weight: 900; color: #1d4ed8; font-size: 0.86rem; display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
+                            <span>🎨</span> اللون (${allColors.length}):
+                        </span>
+                        <button type="button" onclick="window.setInquiryVariantFilter('color', 'all')"
+                            style="padding: 4px 11px; border-radius: 8px; font-weight: 900; font-size: 0.84rem; cursor: pointer; transition: all 0.15s; flex-shrink: 0; ${selectedInquiryColor === 'all' ? 'background: #0f172a; color: #ffffff; border: 2px solid #0f172a;' : 'background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;'}">
+                            الكل (${allColors.length})
+                        </button>
+                        ${colorPillsHtml}
                     </div>
                     ` : ''}
 
                     ${(selectedInquirySize !== 'all' || selectedInquiryColor !== 'all') ? `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 6px; border-top: 1px dashed #e2e8f0; flex-wrap: wrap; gap: 6px;">
+                        <span style="font-size: 0.82rem; color: #047857; font-weight: 800;">
+                            ⚡ معروض الآن: ${selectedInquirySize !== 'all' ? 'مقاس (' + selectedInquirySize + ')' : ''} ${selectedInquiryColor !== 'all' ? 'لون (' + selectedInquiryColor + ')' : ''} (${matchedVars.length} تشكيلة)
+                        </span>
                         <button onclick="window.setInquiryVariantFilter('reset')"
-                            style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; padding: 5px 12px; border-radius: 6px; font-weight: bold; font-size: 0.78rem; cursor: pointer;">
-                            ✕ إظهار الكل
+                            style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; padding: 3px 12px; border-radius: 6px; font-weight: bold; font-size: 0.78rem; cursor: pointer; transition: 0.15s;"
+                            onmouseover="this.style.background='#fecaca'" onmouseout="this.style.background='#fee2e2'">
+                            ✕ إعادة ضبط (عرض كل المقاسات والألوان)
                         </button>
+                    </div>
                     ` : ''}
+
                 </div>
             `;
         }
@@ -777,7 +826,7 @@
                         rowTds += `<td style="padding: 6px; text-align: center;">${addBtn}</td>`;
                     }
 
-                    return `<tr style="border-bottom: 1px solid #e2e8f0;">${rowTds}</tr>`;
+                    return `<tr data-variant-row="true" style="border-bottom: 1px solid #e2e8f0; transition: background 0.1s;">${rowTds}</tr>`;
                 }).join('');
             }
 
@@ -791,8 +840,12 @@
 
                 let matrixTh = `
                     <tr style="background: #f8fafc; color: #334155; font-size: 0.92rem; border-bottom: 2px solid #cbd5e1;">
-                        <th style="padding: 10px 12px; width: 105px; max-width: 115px; text-align: center; color: #1e40af; background: #eff6ff; font-weight: 900; border-left: 1.5px solid #cbd5e1;">الالوان</th>
-                        <th colspan="${matrixSizes.length}" style="padding: 10px 12px; text-align: center; color: #065f46; background: #ecfdf5; font-weight: 900; letter-spacing: 1px;">مقاس</th>
+                        <th style="padding: 8px 10px; width: 105px; max-width: 115px; text-align: center; color: #1e40af; background: #eff6ff; font-weight: 900; border-left: 1.5px solid #cbd5e1;">الالوان</th>
+                        ${matrixSizes.map(s => `
+                            <th style="padding: 8px 8px; text-align: center; color: #065f46; background: #ecfdf5; font-weight: 900; border-left: 1px solid #cbd5e1; min-width: 52px; font-size: 0.88rem;">
+                                ${s}
+                            </th>
+                        `).join('')}
                     </tr>
                 `;
 
@@ -816,28 +869,28 @@
 
                             if (sQty > 0) {
                                 return `
-                                    <td style="padding: 8px 6px; text-align: center; border-left: 1px solid #f1f5f9; min-width: 55px;">
+                                    <td style="padding: 6px 4px; text-align: center; border-left: 1px solid #f1f5f9; min-width: 52px;" data-variant-row="true">
                                         <button type="button" onclick="window.addInquiryVariantByIndex(${vIdx})" 
                                             title="انقر لإضافة (${c !== 'موحد' ? c + ' - ' : ''}مقاس ${s}) للسلة [المتاح بمخزن ${targetWh}: ${sQty}]"
-                                            style="background: #ecfdf5; color: #047857; border: 1.5px solid #10b981; border-radius: 8px; padding: 6px 14px; font-weight: 900; font-size: 0.98rem; cursor: pointer; transition: all 0.15s; min-width: 48px; box-shadow: 0 2px 5px rgba(16,185,129,0.18);"
-                                            onmouseover="this.style.background='#10b981'; this.style.color='#ffffff'; this.style.transform='scale(1.05)';"
+                                            style="background: #ecfdf5; color: #047857; border: 1.5px solid #10b981; border-radius: 8px; padding: 4px 8px; font-weight: 900; font-size: 0.88rem; cursor: pointer; transition: all 0.15s; min-width: 44px; box-shadow: 0 1px 4px rgba(16,185,129,0.18);"
+                                            onmouseover="this.style.background='#10b981'; this.style.color='#ffffff'; this.style.transform='scale(1.08)';"
                                             onmouseout="this.style.background='#ecfdf5'; this.style.color='#047857'; this.style.transform='scale(1)';">
-                                            ${s}
+                                            <span style="font-size: 0.72rem; opacity: 0.85; margin-left: 2px;">🛒</span>${sQty}
                                         </button>
                                     </td>
                                 `;
                             } else {
                                 return `
-                                    <td style="padding: 8px 6px; text-align: center; border-left: 1px solid #f8fafc; min-width: 55px;"></td>
+                                    <td style="padding: 6px 4px; text-align: center; border-left: 1px solid #f8fafc; min-width: 52px; color: #cbd5e1; font-weight: bold; font-size: 0.85rem;" data-variant-row="true">-</td>
                                 `;
                             }
                         } else {
-                            return `<td style="padding: 8px 6px; text-align: center; border-left: 1px solid #f8fafc; min-width: 55px;"></td>`;
+                            return `<td style="padding: 6px 4px; text-align: center; border-left: 1px solid #f8fafc; min-width: 52px; color: #cbd5e1; font-weight: bold; font-size: 0.85rem;" data-variant-row="true">-</td>`;
                         }
                     }).join('');
 
                     return `
-                        <tr style="border-bottom: 1.5px solid #e2e8f0; transition: background 0.15s;" onmouseover="this.style.background='#fbfcfd';" onmouseout="this.style.background='#ffffff';">
+                        <tr data-variant-row="true" style="border-bottom: 1.5px solid #e2e8f0; transition: background 0.15s;" onmouseover="this.style.background='#fbfcfd';" onmouseout="this.style.background='#ffffff';">
                             <td style="padding: 8px 10px; text-align: center; width: 105px; max-width: 115px; background: #fafafa; border-left: 1.5px solid #cbd5e1;">
                                 <span style="background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1d4ed8; font-weight: 900; font-size: 0.88rem; padding: 4px 12px; border-radius: 8px; display: inline-block; max-width: 95px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c}">${c}</span>
                             </td>
@@ -889,6 +942,15 @@
                                 <span>👕</span> تفاصيل الأرصدة للمقاسات والألوان
                             </span>
 
+                            <!-- حقل فلترة فورية وسريعة داخل الجدول -->
+                            <div style="position: relative;">
+                                <input type="text" id="inquiryVariantLiveFilter"
+                                    placeholder="🔍 فلترة سريعة (اكتب: 38)..."
+                                    oninput="window.filterInquiryVariantsLive(this.value)"
+                                    style="height: 30px; border-radius: 8px; border: 1.5px solid #10b981; padding: 0 10px; font-size: 0.8rem; font-weight: 800; outline: none; background: #ffffff; width: 170px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);"
+                                    title="فلترة فورية لصفوف المقاسات والألوان داخل الجدول">
+                            </div>
+
                             <!-- أزرار التبديل الذكية بين العرض الأفقي والرأسي -->
                             <div style="display: inline-flex; align-items: center; background: #e2e8f0; padding: 2px; border-radius: 8px; border: 1px solid #cbd5e1; gap: 2px;">
                                 <button type="button" onclick="window.setInquiryViewMode('horizontal')" 
@@ -907,6 +969,7 @@
                                 <span style="background: #fef08a; color: #854d0e; border: 1.5px solid #fde047; padding: 2px 10px; border-radius: 8px; font-weight: 900; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
                                     🏢 المخزن المحدد: ${selectedInquiryWarehouse}
                                     <button type="button" onclick="window.setInquirySelectedWarehouse('all')" title="إلغاء التحديد وعرض كل المخازن" style="background: #ffffff; border: 1px solid #fde047; color: #b45309; font-weight: 900; cursor: pointer; border-radius: 4px; padding: 0 5px; font-size: 0.72rem; line-height: 1.4;">✕ إظهار الكل</button>
+
                                 </span>
                             ` : `
                                 <span style="background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; padding: 2px 10px; border-radius: 8px; font-weight: 800; font-size: 0.78rem;">
@@ -1356,6 +1419,24 @@
     };
 
     /**
+     * ⚡ فلترة فورية وحية لصفوف جدول التشكيلات عند كتابة مقاس أو لون أو باركود
+     */
+    window.filterInquiryVariantsLive = function (val) {
+        const q = cleanArabic(val);
+        const container = document.getElementById('inquiryTabContentContainer');
+        if (!container) return;
+        const rows = container.querySelectorAll('tr[data-variant-row="true"]');
+        rows.forEach(r => {
+            if (!q) {
+                r.style.display = '';
+            } else {
+                const text = cleanArabic(r.textContent || '');
+                r.style.display = text.includes(q) ? '' : 'none';
+            }
+        });
+    };
+
+    /**
      * تحديد المخزن لعرض أرصدته بالجدول التفصيلي أدناه
      */
     window.setInquirySelectedWarehouse = function (whName) {
@@ -1474,82 +1555,396 @@
     };
 
     /**
-     * البحث الحي داخل المودال لتبديل الصنف
+     * 🚀 البحث الحي الفوري متعدد المعايير مع الترتيب الذكي وتجميع المقاسات
      */
     window.handleInquiryLiveSearch = function (query) {
         const dropdown = document.getElementById('inquirySearchDropdown');
+        const guideEl = document.getElementById('inquirySearchGuide');
         if (!dropdown) return;
 
-        const qRaw = String(query || '').trim().toLowerCase();
-        const qClean = cleanArabic(query);
-        if (!qClean || typeof productsDB === 'undefined' || !Array.isArray(productsDB)) {
+        const raw = String(query || '').trim();
+        if (!raw || typeof productsDB === 'undefined' || !Array.isArray(productsDB)) {
             dropdown.style.display = 'none';
             dropdown.innerHTML = '';
+            if (guideEl) guideEl.style.display = 'flex';
             inquirySearchResults = [];
             inquirySearchActiveIndex = -1;
             return;
         }
 
-        inquirySearchResults = productsDB.filter(p => {
-            const nameClean = cleanArabic(p.name);
-            const barcodeClean = cleanArabic(p.barcode);
-            const codeClean = cleanArabic(p.code);
+        if (guideEl) guideEl.style.display = 'none';
 
-            const nameMatch = nameClean.includes(qClean);
-            const barcodeMatch = barcodeClean.includes(qClean) || String(p.barcode || '').toLowerCase().includes(qRaw);
-            const codeMatch = codeClean.includes(qClean) || String(p.code || '').toLowerCase().includes(qRaw);
-            const variantMatch = p.variants && p.variants.some(v => 
-                String(v.barcode || '').trim().toLowerCase().includes(qRaw) ||
-                cleanArabic(v.barcode).includes(qClean) ||
-                (cleanArabic(v.size) + ' ' + cleanArabic(v.color)).includes(qClean)
-            );
+        const normalizeDigits = (str) => String(str || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+        const qNorm = normalizeDigits(raw).toLowerCase();
+        const qClean = cleanArabic(qNorm);
 
-            return nameMatch || barcodeMatch || codeMatch || variantMatch;
-        }).slice(0, 25);
+        // 🧠 استخراج ذكي للبادئات في حالة كتابة: "مقاس 38"، "كود 38"، "سايز 38"، "نمرة 38"، "لون أحمر"
+        let explicitMode = null; // 'size' | 'code' | 'barcode' | 'color'
+        let extractedQuery = qClean;
 
+        const sizePrefixRegex = /^(?:مقاس|سايز|نمرة|م)\s*[:=\-]?\s*(.+)$/i;
+        const codePrefixRegex = /^(?:كود|ك|رمز|رقم|موديل)\s*[:=\-]?\s*(.+)$/i;
+        const barcodePrefixRegex = /^(?:باركود|بار|سكانر)\s*[:=\-]?\s*(.+)$/i;
+        const colorPrefixRegex = /^(?:لون)\s*[:=\-]?\s*(.+)$/i;
+
+        if (sizePrefixRegex.test(qClean)) {
+            explicitMode = 'size';
+            extractedQuery = qClean.match(sizePrefixRegex)[1].trim();
+        } else if (codePrefixRegex.test(qClean)) {
+            explicitMode = 'code';
+            extractedQuery = qClean.match(codePrefixRegex)[1].trim();
+        } else if (barcodePrefixRegex.test(qClean)) {
+            explicitMode = 'barcode';
+            extractedQuery = qClean.match(barcodePrefixRegex)[1].trim();
+        } else if (colorPrefixRegex.test(qClean)) {
+            explicitMode = 'color';
+            extractedQuery = qClean.match(colorPrefixRegex)[1].trim();
+        }
+
+        const effectiveQuery = extractedQuery || qClean;
+        const effectiveNorm = normalizeDigits(effectiveQuery).trim().toLowerCase();
+        const tokens = effectiveQuery.split(/\s+/).filter(t => t.length > 0);
+
+        const results = [];
+
+        for (const p of productsDB) {
+            if (!p) continue;
+            const pName = cleanArabic(p.name);
+            const pCode = normalizeDigits(String(p.code || '')).trim().toLowerCase();
+            const pSysCode = normalizeDigits(String(p.sysCode || '')).trim().toLowerCase();
+            const pId = String(p.id || '').trim();
+            const pBarcode = normalizeDigits(String(p.barcode || '')).trim().toLowerCase();
+            const pScale = String(p.scalePlu || '').trim();
+
+            let isMatch = false;
+            let matchType = ''; // 'code' | 'size' | 'barcode' | 'color' | 'name' | 'compound'
+            let matchedDetail = '';
+            let matchedBarcode = '';
+            let matchedSize = '';
+            let matchedColor = '';
+            let isExactCode = false;
+            let isExactSize = false;
+            let isCompoundMatch = false;
+
+            // 1. مسح الباركود بالسكانر أو كتابة الباركود المباشر
+            if (pBarcode && (pBarcode === qNorm || pBarcode === effectiveNorm || pBarcode.includes(effectiveNorm))) {
+                isMatch = true;
+                matchType = 'barcode';
+                matchedBarcode = p.barcode;
+                matchedDetail = `${p.barcode}`;
+            }
+
+            // فحص باركود الوحدات
+            if (!isMatch && p.units && Array.isArray(p.units)) {
+                const uMatch = p.units.find(u => u.unitBarcode && normalizeDigits(String(u.unitBarcode)).trim().toLowerCase().includes(effectiveNorm));
+                if (uMatch) {
+                    isMatch = true;
+                    matchType = 'barcode';
+                    matchedBarcode = uMatch.unitBarcode;
+                    matchedDetail = `وحدة (${uMatch.unitName}): ${uMatch.unitBarcode}`;
+                }
+            }
+
+            // 2. كود الموديل / الصنف (Code / SysCode)
+            if (!isMatch && (pCode || pSysCode || pId || pScale)) {
+                if (pCode && (pCode === effectiveNorm || pCode === qNorm || pCode.includes(effectiveNorm))) {
+                    isMatch = true;
+                    matchType = 'code';
+                    isExactCode = (pCode === effectiveNorm || pCode === qNorm);
+                    matchedDetail = `كود الموديل: ${p.code}`;
+                } else if (pSysCode && (pSysCode === effectiveNorm || pSysCode === qNorm || pSysCode.includes(effectiveNorm))) {
+                    isMatch = true;
+                    matchType = 'code';
+                    isExactCode = (pSysCode === effectiveNorm || pSysCode === qNorm);
+                    matchedDetail = `كود النظام: ${p.sysCode}`;
+                } else if (pId && (pId === effectiveNorm || pId === qNorm)) {
+                    isMatch = true;
+                    matchType = 'code';
+                    isExactCode = true;
+                    matchedDetail = `رقم الصنف: ${p.id}`;
+                } else if (pScale && pScale === effectiveNorm) {
+                    isMatch = true;
+                    matchType = 'code';
+                    isExactCode = true;
+                    matchedDetail = `ميزان PLU: ${p.scalePlu}`;
+                }
+            }
+
+            // 3. المقاسات والألوان والباركود الفرعي للتشكيلة
+            const variants = (p.variants && Array.isArray(p.variants)) ? p.variants : [];
+            if (variants.length > 0) {
+                // فحص باركود الفارينت
+                const vBarMatch = variants.find(v => v.barcode && normalizeDigits(String(v.barcode)).trim().toLowerCase() === effectiveNorm);
+                if (vBarMatch) {
+                    isMatch = true;
+                    matchType = 'barcode';
+                    matchedBarcode = vBarMatch.barcode;
+                    matchedSize = vBarMatch.size || '';
+                    matchedColor = vBarMatch.color || '';
+                    matchedDetail = `باركود مقاس [${vBarMatch.size || '-'}] لون [${vBarMatch.color || '-'}]: ${vBarMatch.barcode}`;
+                }
+
+                // فحص المقاس الدقيق أو المطابق للمدخل (مثال: 38 أو L أو مقاس 38)
+                if (!isMatch) {
+                    // تطابق تام أولاً
+                    const vExactSize = variants.find(v => {
+                        const vs = normalizeDigits(String(v.size || '')).trim().toLowerCase();
+                        return vs && (vs === effectiveNorm || cleanArabic(vs) === effectiveQuery);
+                    });
+
+                    if (vExactSize) {
+                        isMatch = true;
+                        matchType = 'size';
+                        isExactSize = true;
+                        matchedSize = vExactSize.size;
+                        const availColors = [...new Set(variants.filter(v => v.size === matchedSize).map(v => v.color).filter(c => c && c !== '-'))];
+                        const totalStockForSize = variants.filter(v => v.size === matchedSize).reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                        matchedDetail = `المقاس: ${matchedSize}` + (availColors.length > 0 ? ` (ألوان: ${availColors.join('، ')})` : '') + ` - الرصيد: ${totalStockForSize}`;
+                        matchedBarcode = vExactSize.barcode || '';
+                        matchedColor = availColors.length === 1 ? availColors[0] : '';
+                    } else {
+                        // تطابق جزئي بالمقاس
+                        const vSizeMatches = variants.filter(v => {
+                            const vs = normalizeDigits(String(v.size || '')).trim().toLowerCase();
+                            return vs && vs.includes(effectiveNorm);
+                        });
+                        if (vSizeMatches.length > 0) {
+                            isMatch = true;
+                            matchType = 'size';
+                            matchedSize = vSizeMatches[0].size;
+                            const availColors = [...new Set(vSizeMatches.map(v => v.color).filter(c => c && c !== '-'))];
+                            const totalStockForSize = vSizeMatches.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                            matchedDetail = `المقاس: ${matchedSize}` + (availColors.length > 0 ? ` (ألوان: ${availColors.join('، ')})` : '') + ` - الرصيد: ${totalStockForSize}`;
+                            matchedBarcode = vSizeMatches[0].barcode || '';
+                            matchedColor = availColors.length === 1 ? availColors[0] : '';
+                        }
+                    }
+                }
+
+                // فحص الألوان
+                if (!isMatch) {
+                    const vColorMatches = variants.filter(v => {
+                        const vc = cleanArabic(v.color);
+                        return vc && (vc === effectiveQuery || vc.includes(effectiveQuery));
+                    });
+                    if (vColorMatches.length > 0) {
+                        isMatch = true;
+                        matchType = 'color';
+                        matchedColor = vColorMatches[0].color;
+                        const availSizes = [...new Set(vColorMatches.map(v => v.size).filter(s => s && s !== '-'))];
+                        matchedDetail = `اللون: ${matchedColor}` + (availSizes.length > 0 ? ` (مقاسات: ${availSizes.join('، ')})` : '');
+                        matchedBarcode = vColorMatches[0].barcode || '';
+                        matchedSize = availSizes.length === 1 ? availSizes[0] : '';
+                    }
+                }
+            }
+
+            // 4. تطابق اسم الصنف
+            if (!isMatch) {
+                if (tokens.every(t => pName.includes(t))) {
+                    isMatch = true;
+                    matchType = 'name';
+                    matchedDetail = `تطابق بالاسم`;
+                }
+            }
+
+            // 5. بحث ذكي مركب فائق (اسم + كود أو اسم + مقاس مثل: "شنطة 38" أو "فستان 38")
+            if (!isMatch && tokens.length > 1) {
+                const nameMatchedTokens = tokens.filter(t => pName.includes(t));
+                const otherTokens = tokens.filter(t => !pName.includes(t));
+
+                if (nameMatchedTokens.length > 0 && otherTokens.length > 0) {
+                    const subQuery = otherTokens.join(' ');
+                    const subNorm = normalizeDigits(subQuery).trim().toLowerCase();
+                    const codeMatches = (pCode && (pCode === subNorm || pCode.includes(subNorm))) || 
+                                        (pSysCode && (pSysCode === subNorm || pSysCode.includes(subNorm)));
+                    
+                    const sizeMatchV = variants.find(v => {
+                        const vs = normalizeDigits(String(v.size || '')).trim().toLowerCase();
+                        return vs && (vs === subNorm || cleanArabic(vs) === cleanArabic(subQuery));
+                    });
+
+                    if (codeMatches) {
+                        isMatch = true;
+                        isCompoundMatch = true;
+                        matchType = 'code';
+                        isExactCode = (pCode === subNorm);
+                        matchedDetail = `اسم: ${p.name} + كود: ${p.code || p.sysCode}`;
+                    } else if (sizeMatchV) {
+                        isMatch = true;
+                        isCompoundMatch = true;
+                        matchType = 'size';
+                        isExactSize = true;
+                        matchedSize = sizeMatchV.size;
+                        matchedBarcode = sizeMatchV.barcode || '';
+                        matchedDetail = `اسم: ${p.name} + مقاس: ${matchedSize}`;
+                    }
+                }
+            }
+
+            if (isMatch) {
+                results.push({
+                    product: p,
+                    matchType,
+                    matchedDetail,
+                    matchedBarcode,
+                    matchedSize,
+                    matchedColor,
+                    isExactCode,
+                    isExactSize,
+                    isCompoundMatch
+                });
+            }
+        }
+
+        // 🥇 ترتيب فائق الذكاء: التطابق التام للكود أو المقاس يوضع في قمة النتائج مباشرة (Rank #1)
+        results.sort((a, b) => {
+            const getScore = item => {
+                const p = item.product;
+                const pCode = normalizeDigits(String(p.code || '')).trim().toLowerCase();
+                const pBarcode = normalizeDigits(String(p.barcode || '')).trim().toLowerCase();
+                const mSize = normalizeDigits(String(item.matchedSize || '')).trim().toLowerCase();
+
+                // 1. تطابق مركب خارق: الاسم مطابق والمقاس أو الكود مطابق (مثل: شنطة 38)
+                if (item.isCompoundMatch) return 1;
+
+                if (explicitMode === 'size') {
+                    // إذا كان البحث صريحاً بالمقاس (مثل: "مقاس 38")، فالمقاس يسبق الكود
+                    if (item.isExactSize || (item.matchType === 'size' && (mSize === effectiveNorm || mSize === qNorm))) return 2;
+                    if (item.isExactCode || pCode === effectiveNorm || pCode === qNorm) return 3;
+                } else {
+                    // إذا كان البحث عن "38" أو "كود 38"، كود الموديل أولاً ثم مقاس الموديل
+                    if (item.isExactCode || pCode === effectiveNorm || pCode === qNorm) return 2;
+                    if (item.isExactSize || (item.matchType === 'size' && (mSize === effectiveNorm || mSize === qNorm))) return 3;
+                }
+
+                // 4. الباركود مطابق تماماً للمدخل
+                if (pBarcode === effectiveNorm || pBarcode === qNorm || (item.matchType === 'barcode' && normalizeDigits(String(item.matchedBarcode || '')).trim().toLowerCase() === effectiveNorm)) return 4;
+
+                // 5. كود الموديل يبدأ بالمدخل
+                if (pCode && pCode.startsWith(effectiveNorm)) return 5;
+                if (item.matchType === 'code') return 6;
+
+                // 6. المقاس يحتوي على المدخل
+                if (item.matchType === 'size') return 7;
+
+                // 7. الباركود يحتوي على المدخل
+                if (item.matchType === 'barcode') return 8;
+
+                // 8. تطابق باللون
+                if (item.matchType === 'color') return 9;
+
+                // 9. اسم الصنف يبدأ بالمدخل
+                if (cleanArabic(p.name).startsWith(effectiveQuery)) return 10;
+
+                // 10. تطابق عام بالاسم
+                return 11;
+            };
+            return getScore(a) - getScore(b);
+        });
+
+        inquirySearchResults = results.slice(0, 30);
         inquirySearchActiveIndex = -1;
 
         if (inquirySearchResults.length === 0) {
             dropdown.style.display = 'block';
-            dropdown.innerHTML = `<div style="padding: 12px; color: #94a3b8; text-align: center; font-size: 0.88rem; font-weight: 700;">لا توجد أصناف مطابقة</div>`;
+            const safeRaw = (window.escapeHtml ? window.escapeHtml(raw) : raw);
+            dropdown.innerHTML = `<div style="padding: 16px; color: #94a3b8; text-align: center; font-size: 0.92rem; font-weight: 700;">لا توجد أصناف أو مقاسات مطابقة لـ "${safeRaw}"</div>`;
             return;
         }
 
-        dropdown.innerHTML = inquirySearchResults.map((p, idx) => {
-            let matchedV = null;
-            if (p.variants && p.variants.length > 0) {
-                matchedV = p.variants.find(v => 
-                    (v.barcode && String(v.barcode).trim().toLowerCase() === qRaw) ||
-                    (v.barcode && cleanArabic(v.barcode) === qClean)
-                );
-            }
-            const matchedBarcode = matchedV ? String(matchedV.barcode).trim() : '';
-            const variantBadge = matchedV ? `<span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 1px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 800; margin-right: 6px;">مقاس/لون: ${[matchedV.size, matchedV.color].filter(Boolean).join(' - ')}</span>` : '';
+        dropdown.innerHTML = `
+            <div>
+                ${inquirySearchResults.map((res, idx) => {
+                    const p = res.product;
+                    const variants = (p.variants && Array.isArray(p.variants)) ? p.variants : [];
 
-            return `
-            <div id="inquirySearchRow_${idx}"
-                onclick="window.selectInquiryProduct(${p.id}, '${matchedBarcode}')"
-                style="padding: 10px 15px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.15s; background: #ffffff;"
-                onmouseover="window.highlightInquirySearchRow(${idx});" onmouseout="this.style.background='#ffffff';">
-                <div style="text-align: right;">
-                    <div style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center;">
-                        ${p.name}
-                        ${variantBadge}
+                    // استخراج كل المقاسات المتوفرة وتجميعها
+                    const distinctSizes = [...new Set(variants.map(v => String(v.size || '').trim()).filter(s => s && s !== '-'))];
+                    distinctSizes.sort((a, b) => getInquirySizeWeight(a) - getInquirySizeWeight(b));
+
+                    const safeDetail = (window.escapeHtml ? window.escapeHtml(res.matchedDetail || '') : (res.matchedDetail || ''));
+                    let badgeHtml = '';
+                    if (res.matchType === 'code') {
+                        badgeHtml = `<span style="background: #eff6ff; color: #1d4ed8; border: 1.5px solid #93c5fd; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 900;">🔢 ${safeDetail}</span>`;
+                    } else if (res.matchType === 'size') {
+                        badgeHtml = `<span style="background: #ecfdf5; color: #047857; border: 1.5px solid #10b981; padding: 2px 9px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; box-shadow: 0 1px 4px rgba(16,185,129,0.25);">📏 ${safeDetail} 👈</span>`;
+                    } else if (res.matchType === 'color') {
+                        badgeHtml = `<span style="background: #fdf4ff; color: #c026d3; border: 1.5px solid #f0abfc; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 900;">🎨 ${safeDetail}</span>`;
+                    } else if (res.matchType === 'barcode') {
+                        badgeHtml = `<span style="background: #fffbeb; color: #b45309; border: 1.5px solid #fde68a; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 900;">⚡ باركود: ${safeDetail}</span>`;
+                    } else {
+                        badgeHtml = `<span style="background: #f0fdf4; color: #047857; border: 1.5px solid #a7f3d0; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 800;">🏷️ صنف</span>`;
+                    }
+
+                    let totalStock = 0;
+                    if (p.warehouseStocks && typeof p.warehouseStocks === 'object') {
+                        totalStock = Object.values(p.warehouseStocks).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
+                    } else if (p.variants && p.variants.length > 0) {
+                        totalStock = p.variants.reduce((sum, v) => sum + (parseFloat(v.stock) || 0), 0);
+                    } else {
+                        totalStock = parseFloat(p.stock) || 0;
+                    }
+
+                    const safeBarcode = String(res.matchedBarcode || '').replace(/'/g, "\\'");
+                    const safeSize = String(res.matchedSize || '').replace(/'/g, "\\'");
+                    const safeColor = String(res.matchedColor || '').replace(/'/g, "\\'");
+
+                    // تجميع شريط أزرار المقاسات المتوفرة (كاملة بدون قص بأسلوب شريط كبسولات ممتد)
+                    let sizeChipsHtml = '';
+                    if (distinctSizes.length > 0) {
+                        sizeChipsHtml = `
+                            <div style="display: flex; align-items: center; gap: 4px; margin-top: 5px; overflow-x: auto; max-width: 100%; padding: 2px 0;" class="fast-scrollbar" onclick="event.stopPropagation();">
+                                <span style="font-size: 0.74rem; font-weight: 800; color: #475569; flex-shrink: 0;">المقاسات (${distinctSizes.length}):</span>
+                                ${distinctSizes.map(s => {
+                                    const isSelected = (res.matchedSize && String(res.matchedSize).trim().toLowerCase() === String(s).toLowerCase());
+                                    return `
+                                        <button type="button" 
+                                            onclick="event.stopPropagation(); window.selectInquiryProduct(${p.id}, '', '${s.replace(/'/g, "\\'")}', '');"
+                                            style="flex-shrink: 0; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; cursor: pointer; transition: 0.15s; ${isSelected ? 'border: 2px solid #059669; background: #dcfce7; color: #047857; box-shadow: 0 0 6px rgba(5,150,105,0.4); transform: scale(1.05);' : 'border: 1px solid #cbd5e1; background: #f8fafc; color: #334155;'}"
+                                            title="فتح الصنف مفلتر مباشرة على مقاس ${s}">
+                                            ${isSelected ? '✓ ' : ''}${s}
+                                        </button>
+                                    `;
+                                }).join('')}
+                            </div>
+                        `;
+                    }
+
+                    return `
+                    <div id="inquirySearchRow_${idx}"
+                        onclick="window.selectInquiryProduct(${p.id}, '${safeBarcode}', '${safeSize}', '${safeColor}')"
+                        style="padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.15s; background: #ffffff;"
+                        onmouseover="window.highlightInquirySearchRow(${idx});" onmouseout="this.style.background='#ffffff';">
+                        <div style="text-align: right; flex: 1; min-width: 0;">
+                            <div style="font-weight: 900; color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                <span>${(window.escapeHtml ? window.escapeHtml(p.name) : p.name)}</span>
+                                ${badgeHtml}
+                            </div>
+                            <div style="font-size: 0.78rem; color: #64748b; margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <span>كود: <b style="color: #2563eb; font-family: monospace;">${(window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id))}</b></span>
+                                <span>|</span>
+                                <span>باركود: <b style="color: #475569; font-family: monospace;">${(window.escapeHtml ? window.escapeHtml(res.matchedBarcode || p.barcode || '-') : (res.matchedBarcode || p.barcode || '-'))}</b></span>
+                                <span>|</span>
+                                <span>التصنيف: <b style="color: #059669;">${(window.escapeHtml ? window.escapeHtml(p.category || 'عام') : (p.category || 'عام'))}</b></span>
+                                <span>|</span>
+                                <span>الرصيد: <b style="color: ${totalStock > 0 ? '#047857' : '#dc2626'}; background: ${totalStock > 0 ? '#dcfce7' : '#fee2e2'}; padding: 1px 7px; border-radius: 5px; font-family: monospace;">${totalStock} ${(window.escapeHtml ? window.escapeHtml(p.unit || 'قطعة') : (p.unit || 'قطعة'))}</b></span>
+                            </div>
+                            ${sizeChipsHtml}
+                        </div>
+                        <div style="text-align: left; padding-right: 12px; flex-shrink: 0;">
+                            <span style="background: #10b981; color: white; padding: 4px 10px; border-radius: 8px; font-weight: 900; font-size: 0.9rem; font-family: monospace; box-shadow: 0 2px 6px rgba(16,185,129,0.2);">
+                                ${(parseFloat(p.price) || 0).toFixed(2)} ج.م
+                            </span>
+                        </div>
                     </div>
-                    <div style="font-size: 0.78rem; color: #64748b; margin-top: 2px;">
-                        كود: <b style="color: #2563eb; font-family: monospace;">${p.code || p.id}</b> | 
-                        باركود: <b style="color: #475569; font-family: monospace;">${matchedBarcode || p.barcode || '-'}</b> | 
-                        التصنيف: <b style="color: #059669;">${p.category || 'عام'}</b>
-                    </div>
-                </div>
-                <div style="text-align: left;">
-                    <span style="background: #10b981; color: white; padding: 4px 10px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; font-family: monospace;">
-                        ${(parseFloat(p.price) || 0).toFixed(2)}
-                    </span>
-                </div>
+                    `;
+                }).join('')}
             </div>
-            `;
-        }).join('');
+            <div style="padding: 7px 14px; background: #f8fafc; color: #64748b; font-size: 0.78rem; font-weight: 800; text-align: center; border-top: 1px solid #e2e8f0; position: sticky; bottom: 0; z-index: 5;">
+                🔍 تم العثور على (${inquirySearchResults.length}) صنف | يمكنك التمرير بالماوس أو التنقل بالأسهم ⬇️ ⬆️ أو PgDn/PgUp والضغط على Enter
+            </div>
+        `;
 
         dropdown.style.display = 'block';
     };
@@ -1574,7 +1969,7 @@
     };
 
     /**
-     * التحكم بالكيبورد (الأسهم للأعلى والأسفل وزر Enter و Escape) في شاشة الاستعلام
+     * التحكم بالكيبورد (الأسهم للأعلى والأسفل، PgDn/PgUp، Home/End، زر Enter و Escape ومسح السكانر المباشر)
      */
     window.handleInquirySearchKeyDown = function (e) {
         const dropdown = document.getElementById('inquirySearchDropdown');
@@ -1594,20 +1989,68 @@
             window.highlightInquirySearchRow(inquirySearchActiveIndex);
             const activeEl = document.getElementById(`inquirySearchRow_${inquirySearchActiveIndex}`);
             if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        } else if (e.key === 'Enter') {
+        } else if (e.key === 'PageDown') {
             if (!isDropdownOpen) return;
             e.preventDefault();
-            const targetP = (inquirySearchActiveIndex >= 0 && inquirySearchActiveIndex < inquirySearchResults.length)
-                ? inquirySearchResults[inquirySearchActiveIndex]
-                : inquirySearchResults[0];
-            if (targetP) {
-                const searchInputVal = (document.getElementById('inquiryLiveSearch')?.value || '').trim().toLowerCase();
-                let matchedBarcode = '';
-                if (searchInputVal && targetP.variants) {
-                    const mv = targetP.variants.find(v => v.barcode && String(v.barcode).trim().toLowerCase() === searchInputVal);
-                    if (mv) matchedBarcode = mv.barcode;
+            inquirySearchActiveIndex = Math.min(inquirySearchResults.length - 1, inquirySearchActiveIndex + 5);
+            window.highlightInquirySearchRow(inquirySearchActiveIndex);
+            const activeEl = document.getElementById(`inquirySearchRow_${inquirySearchActiveIndex}`);
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (e.key === 'PageUp') {
+            if (!isDropdownOpen) return;
+            e.preventDefault();
+            inquirySearchActiveIndex = Math.max(0, inquirySearchActiveIndex - 5);
+            window.highlightInquirySearchRow(inquirySearchActiveIndex);
+            const activeEl = document.getElementById(`inquirySearchRow_${inquirySearchActiveIndex}`);
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (e.key === 'Home') {
+            if (!isDropdownOpen) return;
+            e.preventDefault();
+            inquirySearchActiveIndex = 0;
+            window.highlightInquirySearchRow(inquirySearchActiveIndex);
+            const activeEl = document.getElementById(`inquirySearchRow_0`);
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (e.key === 'End') {
+            if (!isDropdownOpen) return;
+            e.preventDefault();
+            inquirySearchActiveIndex = inquirySearchResults.length - 1;
+            window.highlightInquirySearchRow(inquirySearchActiveIndex);
+            const activeEl = document.getElementById(`inquirySearchRow_${inquirySearchActiveIndex}`);
+            if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = (document.getElementById('inquiryLiveSearch')?.value || '').trim();
+            if (!val) return;
+
+            if (isDropdownOpen && inquirySearchResults.length > 0) {
+                const targetRes = (inquirySearchActiveIndex >= 0 && inquirySearchActiveIndex < inquirySearchResults.length)
+                    ? inquirySearchResults[inquirySearchActiveIndex]
+                    : inquirySearchResults[0];
+                if (targetRes) {
+                    const p = targetRes.product || targetRes;
+                    window.selectInquiryProduct(
+                        p.id,
+                        targetRes.matchedBarcode || '',
+                        targetRes.matchedSize || '',
+                        targetRes.matchedColor || ''
+                    );
+                    return;
                 }
-                window.selectInquiryProduct(targetP.id, matchedBarcode);
+            }
+
+            // مسح سريع بالباركود بالسكانر في حالة لم تكن القائمة مفتوحة
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                window.handleInquiryLiveSearch(val);
+                if (inquirySearchResults.length > 0) {
+                    const firstRes = inquirySearchResults[0];
+                    const p = firstRes.product || firstRes;
+                    window.selectInquiryProduct(
+                        p.id,
+                        firstRes.matchedBarcode || '',
+                        firstRes.matchedSize || '',
+                        firstRes.matchedColor || ''
+                    );
+                }
             }
         } else if (e.key === 'Escape') {
             if (isDropdownOpen) {
@@ -1620,9 +2063,9 @@
     };
 
     /**
-     * اختيار صنف من قائمة البحث مع دعم التحديد الذكي للمقاس/اللون الممسوح
+     * اختيار صنف من قائمة البحث مع دعم التحديد الذكي للمقاس واللون الممسوح أو المبحوث عنه
      */
-    window.selectInquiryProduct = function (productId, variantBarcode = '') {
+    window.selectInquiryProduct = function (productId, variantBarcode = '', targetSize = '', targetColor = '') {
         const prod = productsDB.find(p => p.id === productId || p.id == productId);
         if (prod) {
             currentInquiryProduct = prod;
@@ -1631,12 +2074,39 @@
             selectedInquiryWarehouse = 'all';
             isColCustomizerOpen = false;
 
-            // 🎯 إذا تم تحديد باركود تشكيلة، نقوم بفلترة المقاس واللون تلقائياً
+            // 1. إذا تم تحديد باركود تشكيلة (من السكانر أو قارئ الباركود)
             if (variantBarcode && prod.variants && prod.variants.length > 0) {
-                const matchedV = prod.variants.find(v => v.barcode && String(v.barcode).trim() === String(variantBarcode).trim());
+                const cleanVBar = String(variantBarcode).trim().toLowerCase();
+                const matchedV = prod.variants.find(v => v.barcode && String(v.barcode).trim().toLowerCase() === cleanVBar);
                 if (matchedV) {
                     if (matchedV.size && String(matchedV.size).trim()) selectedInquirySize = String(matchedV.size).trim();
                     if (matchedV.color && String(matchedV.color).trim()) selectedInquiryColor = String(matchedV.color).trim();
+                }
+            }
+
+            // 2. إذا تم تمرير مقاس مستهدف (من البحث بالمقاس مثل 38)
+            if (selectedInquirySize === 'all' && targetSize && prod.variants && prod.variants.length > 0) {
+                const cleanTSize = cleanArabic(targetSize);
+                const normTSize = cleanTSize.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+                const matchedV = prod.variants.find(v => {
+                    const vsClean = cleanArabic(v.size || '');
+                    const vsNorm = vsClean.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+                    return vsClean === cleanTSize || vsNorm === normTSize;
+                });
+                if (matchedV) {
+                    selectedInquirySize = String(matchedV.size).trim();
+                    if (targetColor) selectedInquiryColor = String(targetColor).trim();
+                } else {
+                    selectedInquirySize = String(targetSize).trim();
+                }
+            }
+
+            // 3. إذا تم تمرير لون مستهدف
+            if (selectedInquiryColor === 'all' && targetColor && prod.variants && prod.variants.length > 0) {
+                const cleanTColor = cleanArabic(targetColor);
+                const matchedV = prod.variants.find(v => v.color && cleanArabic(v.color) === cleanTColor);
+                if (matchedV) {
+                    selectedInquiryColor = String(matchedV.color).trim();
                 }
             }
 

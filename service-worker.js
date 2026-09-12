@@ -3,9 +3,9 @@
 //  النسخة المطورة للعمل أوفلاين 100%
 // ============================================================
 
-const CACHE_NAME = 'bayan-pos-v1.0.5';
-const STATIC_CACHE = 'bayan-static-v1.0.5';
-const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.5';
+const CACHE_NAME = 'bayan-pos-v1.0.6';
+const STATIC_CACHE = 'bayan-static-v1.0.6';
+const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.6';
 
 // كافة ملفات النظام الأساسية المتوفرة محلياً (بدون تكرار لتفادي خطأ Entry already exists على GitHub Pages)
 const STATIC_FILES = [
@@ -67,7 +67,6 @@ const STATIC_FILES = [
     './lib/Sortable.min.js',
     './lib/chart.min.js',
     './lib/qrcode.min.js',
-    './media/logo.png',
     './media/bayan_logo.png',
     './media/logo.ico',
     './media/wallpapers/fashion_boutique.jpg',

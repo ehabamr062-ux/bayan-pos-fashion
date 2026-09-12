@@ -1,7 +1,7 @@
 {
     "name": "Bayan POS - نظام بيان لإدارة نقاط البيع",
     "short_name": "Bayan POS",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "description": "نظام بيان الذكي لإدارة المبيعات، الحسابات، والمخازن - يعمل أوفلاين 100%",
     "start_url": "./index.html",
     "scope": "./",
@@ -12,12 +12,6 @@
     "lang": "ar",
     "dir": "rtl",
     "icons": [
-        {
-            "src": "media/logo.png",
-            "sizes": "512x512",
-            "type": "image/png",
-            "purpose": "any maskable"
-        },
         {
             "src": "media/bayan_logo.png",
             "sizes": "512x512",
@@ -38,7 +32,7 @@
             "url": "./index.html#sales",
             "icons": [
                 {
-                    "src": "media/logo.png",
+                    "src": "media/bayan_logo.png",
                     "sizes": "512x512"
                 }
             ]

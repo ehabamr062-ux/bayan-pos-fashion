@@ -205,6 +205,25 @@ const DEVICE_LOCAL_SETTINGS_KEYS = new Set([
     'bayan_expiry_date'
 ]);
 
+function getTerminalKey(t) {
+    if (!t) return 'HOST';
+    return String(t.terminalId || t.terminalLetter || t.terminal || 'HOST').trim();
+}
+
+function getDetailedInvoiceType(typeStr) {
+    const s = String(typeStr || '').toLowerCase();
+    if (s.includes('مرتجع شراء') || s.includes('purchase_return')) return 'purchase_return';
+    if (s.includes('مرتجع') || s.includes('sales_return') || s.includes('return')) return 'sales_return';
+    if (s.includes('شراء') || s.includes('purchase')) return 'purchase';
+    if (s.includes('بيع') || s.includes('sale')) return 'sale';
+    if (s.includes('قبض') || s.includes('receipt')) return 'receipt';
+    if (s.includes('صرف') || s.includes('payment') || s.includes('disbursement')) return 'disbursement';
+    if (s.includes('تحويل') || s.includes('transfer')) return 'transfer';
+    if (s.includes('تسوية') || s.includes('adjustment')) return 'adjustment';
+    if (s.includes('رصيد اول') || s.includes('opening')) return 'opening';
+    return s.trim() || 'other';
+}
+
 function getTrashedTransactionKeys(trashList = []) {
     const keySet = new Set();
     const invIdSet = new Set();
@@ -218,13 +237,18 @@ function getTrashedTransactionKeys(trashList = []) {
             const items = Array.isArray(data) ? data : (data.items ? data.items : [data]);
             items.forEach(it => {
                 if (!it) return;
+                const term = getTerminalKey(it);
+                const dType = getDetailedInvoiceType(it.type);
                 if (it.id) {
+                    keySet.add(`term_${term}_id_${it.id}`);
                     keySet.add(`id_${it.id}`);
                     keySet.add(String(it.id));
                 }
                 if (it.invoiceId != null && it.invoiceId !== '') {
-                    invIdSet.add(String(it.invoiceId));
-                    invIdSet.add(Number(it.invoiceId));
+                    invIdSet.add(`${term}__${dType}__${it.invoiceId}`);
+                    if (!it.terminalId && !it.terminalLetter) {
+                        invIdSet.add(`${dType}__${it.invoiceId}`);
+                    }
                 }
                 const inv = it.invoiceId || '';
                 const prod = it.product || it.productName || '';
@@ -234,6 +258,7 @@ function getTrashedTransactionKeys(trashList = []) {
                 const tm = it.timeISO || it.time || '';
                 const wh = it.warehouse || '';
                 const qty = it.qty || 0;
+                keySet.add(`tx_${term}_${dType}_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`);
                 keySet.add(`tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`);
             });
         }
@@ -246,8 +271,14 @@ function mergeTransactions(existingList = [], incomingList = [], trashList = [],
 
     const isTrashed = (t) => {
         if (!t) return true;
-        if (t.id && (trashedKeys.has(`id_${t.id}`) || trashedKeys.has(String(t.id)))) return true;
-        if (t.invoiceId != null && (trashedInvIds.has(String(t.invoiceId)) || trashedInvIds.has(Number(t.invoiceId)))) return true;
+        const term = getTerminalKey(t);
+        const dType = getDetailedInvoiceType(t.type);
+        if (t.id && (trashedKeys.has(`term_${term}_id_${t.id}`) || trashedKeys.has(`id_${t.id}`) || trashedKeys.has(String(t.id)))) return true;
+        if (t.invoiceId != null && t.invoiceId !== '') {
+            if (trashedInvIds.has(`${term}__${dType}__${t.invoiceId}`) || trashedInvIds.has(`${dType}__${t.invoiceId}`)) {
+                return true;
+            }
+        }
         const inv = t.invoiceId || '';
         const prod = t.product || t.productName || '';
         const s = t.size || t.selectedSize || '';
@@ -256,8 +287,9 @@ function mergeTransactions(existingList = [], incomingList = [], trashList = [],
         const tm = t.timeISO || t.time || '';
         const wh = t.warehouse || '';
         const qty = t.qty || 0;
-        const compKey = `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
-        return trashedKeys.has(compKey);
+        const compKey = `tx_${term}_${dType}_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+        const legacyCompKey = `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+        return trashedKeys.has(compKey) || trashedKeys.has(legacyCompKey);
     };
 
     const cleanExisting = (Array.isArray(existingList) ? existingList : []).filter(t => !isTrashed(t));
@@ -266,20 +298,27 @@ function mergeTransactions(existingList = [], incomingList = [], trashList = [],
     if (cleanExisting.length === 0) return cleanIncoming;
     if (cleanIncoming.length === 0) return cleanExisting;
 
-    // 1. تحديد كافة أرقام الفواتير الواردة التي تم تعديلها أو إنشاؤها حديثاً
+    // 1. تحديد أرقام الفواتير الواردة مفصولة بالطرف المصدر (الجهاز) ونوع الفاتورة الدقيق
     const incomingInvoiceKeys = new Set();
     cleanIncoming.forEach(t => {
         if (t && t.invoiceId != null && t.invoiceId !== '') {
-            const cleanType = String(t.type || '').includes('مرتجع') ? 'return' : 'normal';
-            incomingInvoiceKeys.add(`${t.invoiceId}_${cleanType}`);
+            const term = getTerminalKey(t);
+            const dType = getDetailedInvoiceType(t.type);
+            incomingInvoiceKeys.add(`${term}__${dType}__${t.invoiceId}`);
         }
     });
 
     const map = new Map();
     const getKey = (t) => {
         if (!t) return '';
-        if (t.id && t.invoiceId) return `inv_${t.invoiceId}_id_${t.id}`;
-        if (t.id) return `id_${t.id}_type_${t.type}`;
+        const term = getTerminalKey(t);
+        const dType = getDetailedInvoiceType(t.type);
+        if (t.id && t.invoiceId != null && t.invoiceId !== '') {
+            return `term_${term}_type_${dType}_inv_${t.invoiceId}_id_${t.id}`;
+        }
+        if (t.id) {
+            return `term_${term}_type_${dType}_id_${t.id}`;
+        }
         const inv = t.invoiceId || '';
         const prod = t.product || t.productName || '';
         const s = t.size || t.selectedSize || '';
@@ -288,16 +327,17 @@ function mergeTransactions(existingList = [], incomingList = [], trashList = [],
         const tm = t.timeISO || t.time || '';
         const wh = t.warehouse || '';
         const qty = t.qty || 0;
-        return `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+        return `tx_${term}_${dType}_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
     };
 
-    // 2. إضافة حركات القائمة السابقة بشرط ألا تكون تنتمي لفاتورة وردت بنسخة أحدث (منع دبلرة البنود المعدلة)
+    // 2. إضافة حركات القائمة السابقة مع حجب النسخ القديمة لنفس الفاتورة من نفس الجهاز ونفس النوع عند ورود تحديث لها
     cleanExisting.forEach(t => {
         if (!t) return;
         if (t.invoiceId != null && t.invoiceId !== '') {
-            const cleanType = String(t.type || '').includes('مرتجع') ? 'return' : 'normal';
-            if (incomingInvoiceKeys.has(`${t.invoiceId}_${cleanType}`)) {
-                // الفاتورة وردت في incomingList، لذا نتجاهل بنودها القديمة ونعتمد الواردة منعاً للتكرار
+            const term = getTerminalKey(t);
+            const dType = getDetailedInvoiceType(t.type);
+            if (incomingInvoiceKeys.has(`${term}__${dType}__${t.invoiceId}`)) {
+                // الفاتورة وردت بنسخة أحدث من نفس الجهاز ونفس النوع، نستبعد النسخة القديمة لصالح الأحدث
                 return;
             }
         }
@@ -418,13 +458,22 @@ function mergeProducts(existingList = [], incomingList = [], trashList = [], isM
                 ? Object.values(mergedWhStocks).reduce((sum, q) => sum + (parseFloat(q) || 0), 0)
                 : (p.stock !== undefined ? p.stock : existing.stock);
 
-            map.set(sKey, {
-                ...existing,
-                ...p,
-                stock: totalStock,
-                warehouseStocks: mergedWhStocks,
-                variants: mergedVariants
-            });
+            if (isMasterPush) {
+                map.set(sKey, {
+                    ...existing,
+                    ...p,
+                    stock: totalStock,
+                    warehouseStocks: mergedWhStocks,
+                    variants: mergedVariants
+                });
+            } else {
+                map.set(sKey, {
+                    ...existing,
+                    stock: totalStock,
+                    warehouseStocks: mergedWhStocks,
+                    variants: mergedVariants
+                });
+            }
         }
     });
 
@@ -450,10 +499,10 @@ function getTrashedAccountKeys(trashList = []) {
     return set;
 }
 
-function mergeAccounts(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+function mergeAccounts(existingList = [], incomingList = [], trashList = [], isMasterPush = false, isDelta = false) {
     const trashedKeys = getTrashedAccountKeys(trashList);
 
-    if (isMasterPush && Array.isArray(incomingList)) {
+    if (isMasterPush && !isDelta && Array.isArray(incomingList)) {
         return incomingList.filter(a => a && !trashedKeys.has(String(a.id)) && !trashedKeys.has(String(a.name || '').trim()));
     }
 
@@ -717,8 +766,11 @@ function syncInTransitFromTransactions(transactions = []) {
 function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
     if (db && typeof db === 'object') {
         const isMaster = (isMasterServer === true || sourceDeviceId === 'DEV-HOST' || db.isMasterServer);
+        const isDelta = (db.syncMode === 'delta' || db.isDelta === true);
         const purgedTrashIds = Array.isArray(db.purgedTrashIds) ? db.purgedTrashIds : [];
-        const mergedTrash = mergeTrash(masterDbData.trash || [], db.trash || [], purgedTrashIds, isMaster);
+        const mergedTrash = isDelta 
+            ? (masterDbData.trash || []) 
+            : mergeTrash(masterDbData.trash || [], db.trash || [], purgedTrashIds, isMaster);
 
         // تصفية الإعدادات لحجب أي مفاتيح محلية خاصة بالجهاز (Device Local Blacklist)
         const cleanIncomingSettings = {};
@@ -740,12 +792,12 @@ function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
         masterDbData = {
             trash: mergedTrash,
             products: mergeProducts(masterDbData.products || [], db.products || [], mergedTrash, isMaster),
-            accounts: mergeAccounts(masterDbData.accounts || [], db.accounts || [], mergedTrash, isMaster),
+            accounts: mergeAccounts(masterDbData.accounts || [], db.accounts || [], mergedTrash, isMaster, isDelta),
             transactions: mergeTransactions(masterDbData.transactions || [], db.transactions || [], mergedTrash, isMaster),
-            users: mergeUsers(masterDbData.users || [], db.users || [], mergedTrash, isMaster),
-            warehouses: mergeWarehouses(masterDbData.warehouses || [], db.warehouses || [], mergedTrash, isMaster),
-            treasuryAudit: mergeTreasuryAudit(masterDbData.treasuryAudit || [], db.treasuryAudit || []),
-            settings: { ...masterDbData.settings, ...cleanIncomingSettings },
+            users: (isDelta && (!db.users || db.users.length === 0)) ? (masterDbData.users || []) : mergeUsers(masterDbData.users || [], db.users || [], mergedTrash, isMaster),
+            warehouses: (isDelta && (!db.warehouses || db.warehouses.length === 0)) ? (masterDbData.warehouses || []) : mergeWarehouses(masterDbData.warehouses || [], db.warehouses || [], mergedTrash, isMaster),
+            treasuryAudit: (isDelta && (!db.treasuryAudit || db.treasuryAudit.length === 0)) ? (masterDbData.treasuryAudit || []) : mergeTreasuryAudit(masterDbData.treasuryAudit || [], db.treasuryAudit || []),
+            settings: (isDelta && Object.keys(cleanIncomingSettings).length === 0) ? (masterDbData.settings || {}) : { ...masterDbData.settings, ...cleanIncomingSettings },
             lastUpdated: new Date().toISOString()
         };
         saveMasterDb();
@@ -782,8 +834,8 @@ function startServer(appRootDir, onNotification) {
         const origin = req.headers.origin;
 
         // التحقق من أن مصدر الطلب محلي وموثوق (Localhost, Private IPs, or Official Demo)
+        // 🔒 تم استبعاد origin === 'null' لمنع أي صفحة ويب خبيثة من تنفيذ طلبات عبر iframes مجهولة
         const isTrustedOrigin = !origin || 
-            origin === 'null' || 
             /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) ||
             /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/i.test(origin) ||
             origin === 'https://ehabamr062-ux.github.io';
@@ -1382,6 +1434,32 @@ function startServer(appRootDir, onNotification) {
             return;
         }
 
+        // حظر الوصول المباشر للمجلدات الداخلية والملفات الحساسة الخاصة بالباك إند
+        const normalizedRel = path.relative(normalizedRoot, resolvedPath).replace(/\\/g, '/').toLowerCase();
+        const ext = path.extname(resolvedPath).toLowerCase();
+
+        // 🔒 السماح حصرياً بالامتدادات الخاصة بأصول الويب وتطبيقات التابلت فقط
+        const ALLOWED_EXTENSIONS = new Set(['.html', '.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.woff', '.woff2', '.ttf', '.eot', '.mp3', '.wav']);
+        if (!ALLOWED_EXTENSIONS.has(ext)) {
+            res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('403 Forbidden - نوع الملف غير مسموح بالوصول إليه عبر الشبكة');
+            return;
+        }
+
+        // 🔒 حظر المجلدات الحساسة نهائياً (node_modules, .git, .agents, backups, etc.)
+        if (
+            normalizedRel.startsWith('node_modules/') || 
+            normalizedRel.startsWith('.git') || 
+            normalizedRel.startsWith('.agents') || 
+            normalizedRel.startsWith('.gemini') || 
+            normalizedRel.startsWith('backups/') ||
+            path.basename(resolvedPath).startsWith('.')
+        ) {
+            res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('403 Forbidden - مسار نظام محمي');
+            return;
+        }
+
         // حظر الوصول المباشر للملفات الحساسة الخاصة بالباك إند وقواعد البيانات
         const forbiddenFiles = new Set(['.env', 'package.json', 'package-lock.json', '.git', 'server_hub.js', 'main.js', 'master_sync_db.json', 'paired_devices.json']);
         const baseFileName = path.basename(resolvedPath).toLowerCase();
@@ -1398,7 +1476,6 @@ function startServer(appRootDir, onNotification) {
                 return;
             }
 
-            const ext = path.extname(resolvedPath).toLowerCase();
             const contentType = MIME_TYPES[ext] || 'application/octet-stream';
             const headers = { 'Content-Type': contentType };
 

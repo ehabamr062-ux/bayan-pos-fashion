@@ -215,7 +215,8 @@
             }
         }
 
-        let currentProductImageData = null;
+        window.currentProductImageData = window.currentProductImageData || null;
+        var currentProductImageData = window.currentProductImageData;
 
 function getCurrencySymbol() {
     try {

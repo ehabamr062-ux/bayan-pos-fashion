@@ -107,48 +107,202 @@
             transform: translateY(-2px);
         }
 
-        /* --- تنسيقات تقرير الحركة اليومية --- */
+        /* --- 🌟 تنسيقات فائقة الوضوح والتباين لقسم تقرير الحركة اليومية (High Contrast & Sharp Typography) --- */
+        #daily-report-section {
+            color: #0f172a;
+        }
+
         .report-filter-bar {
             display: flex;
-            gap: 15px;
-            background: #ecf0f1;
-            padding: 15px;
-            border-radius: 8px;
+            gap: 14px;
+            background: #f8fafc;
+            padding: 14px 18px;
+            border-radius: 14px;
             margin-bottom: 20px;
-            border: 1px solid #e0e0e0;
+            border: 1.5px solid #cbd5e1;
             align-items: center;
             flex-wrap: wrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+
+        #daily-report-section .report-filter-bar label {
+            color: #0f172a !important;
+            font-weight: 900 !important;
+            font-size: 0.96rem !important;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        #daily-report-section .report-filter-bar select,
+        #daily-report-section .report-filter-bar input {
+            color: #0f172a !important;
+            font-weight: 800 !important;
+            border: 1.5px solid #94a3b8 !important;
+            background-color: #ffffff !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease;
+        }
+
+        #daily-report-section .report-filter-bar select:focus,
+        #daily-report-section .report-filter-bar input:focus {
+            border-color: #059669 !important;
+            box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2) !important;
+            outline: none;
         }
 
         .report-table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0 4px;
             margin-bottom: 20px;
-            border: 1px solid #e0e0e0;
-            /* إطار خارجي واضح */
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
 
-        .report-table th {
-            background-color: var(--main-green);
-            color: white;
-            padding: 15px;
+        #daily-report-section .report-table th {
+            background: linear-gradient(135deg, #1e293b, #334155) !important;
+            color: #ffffff !important;
+            padding: 13px 14px !important;
             text-align: center;
-            border-bottom: 3px solid rgba(0, 0, 0, 0.1);
-            font-size: 1.1rem;
+            font-weight: 900 !important;
+            font-size: 0.98rem !important;
+            letter-spacing: 0.2px;
+            border: none !important;
         }
 
-        .report-table td {
-            padding: 12px;
-            border: 1px solid #eee;
-            /* خطوط الشبكة (Grid) */
+        #daily-report-section .report-table th:first-child {
+            border-radius: 10px 0 0 10px !important;
+        }
+
+        #daily-report-section .report-table th:last-child {
+            border-radius: 0 10px 10px 0 !important;
+        }
+
+        #daily-report-section .report-table td {
+            padding: 12px 14px;
+            border: 1px solid #e2e8f0;
             text-align: center;
-            font-weight: 600;
+            font-weight: 800;
+            font-size: 0.98rem;
+            color: #0f172a;
+            transition: background-color 0.15s ease;
         }
 
-        .report-table tr:nth-child(even) {
-            background-color: #f2f4f6;
-            /* تلوين الصفوف الزوجية لسهولة القراءة */
+        #daily-report-section .report-table tbody tr {
+            background-color: #ffffff;
+            transition: background-color 0.15s ease;
+        }
+
+        #daily-report-section .report-table tbody tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        /* تأثير مرور الماوس ناعم وفخم بدون قلب الألوان أو التسبب في بهتان */
+        #daily-report-section .report-table tbody tr:hover {
+            background-color: #e2e8f0 !important;
+            cursor: pointer;
+        }
+
+        #daily-report-section .report-table tbody tr:hover td {
+            color: inherit !important;
+            opacity: 1 !important;
+        }
+
+        /* ❓ زر علامة الاستفهام التوضيحي للبنود */
+        .daily-help-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #e0f2fe;
+            color: #0284c7;
+            border: 1.5px solid #38bdf8;
+            font-size: 0.75rem;
+            font-weight: 900;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 4px rgba(2, 132, 199, 0.15);
+            margin: 0 6px;
+            padding: 0;
+            user-select: none;
+            vertical-align: middle;
+        }
+
+        .daily-help-btn:hover {
+            background: #0284c7;
+            color: #ffffff;
+            border-color: #0284c7;
+            transform: scale(1.18) rotate(10deg);
+            box-shadow: 0 4px 10px rgba(2, 132, 199, 0.35);
+        }
+
+        .daily-help-btn:active {
+            transform: scale(0.92);
+        }
+
+        .daily-help-btn-white {
+            background: rgba(255, 255, 255, 0.25);
+            color: #ffffff;
+            border: 1.5px solid rgba(255, 255, 255, 0.7);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .daily-help-btn-white:hover {
+            background: #ffffff;
+            color: var(--main-blue);
+            border-color: #ffffff;
+            transform: scale(1.18) rotate(10deg);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        @media print {
+            .daily-help-btn {
+                display: none !important;
+            }
+        }
+
+        /* دعم الوضع المظلم لتقرير الحركة اليومية */
+        body.dark-mode #daily-report-section {
+            color: #f8fafc;
+        }
+
+        body.dark-mode #daily-report-section .report-filter-bar {
+            background: #1e293b;
+            border-color: #334155;
+        }
+
+        body.dark-mode #daily-report-section .report-filter-bar label {
+            color: #f8fafc !important;
+        }
+
+        body.dark-mode #daily-report-section .report-filter-bar select,
+        body.dark-mode #daily-report-section .report-filter-bar input {
+            background: #0f172a !important;
+            color: #f8fafc !important;
+            border-color: #475569 !important;
+        }
+
+        body.dark-mode #daily-report-section .report-table th {
+            background: #0f172a !important;
+            color: #ffffff !important;
+        }
+
+        body.dark-mode #daily-report-section .report-table td {
+            color: #f8fafc;
+            border-color: #334155;
+        }
+
+        body.dark-mode #daily-report-section .report-table tbody tr {
+            background-color: #1e293b;
+        }
+
+        body.dark-mode #daily-report-section .report-table tbody tr:nth-child(even) {
+            background-color: rgba(255, 255, 255, 0.04);
+        }
+
+        body.dark-mode #daily-report-section .report-table tbody tr:hover {
+            background-color: #334155 !important;
         }
 
         .btn-show-report {
@@ -562,7 +716,6 @@
 
         /* تأثير الوقوف الاخترافي على الجداول */
         .invoice-table tbody tr:hover,
-        .report-table tbody tr:hover,
         .users-table tbody tr:hover,
         .history-table tbody tr:hover,
         .accounts-table tbody tr:hover {

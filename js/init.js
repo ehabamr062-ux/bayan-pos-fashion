@@ -66,7 +66,7 @@ loadData().then(async () => {
     // 4. صمام الأمان الفولاذي: إنشاء نسخة احتياطية تلقائية وفورية في الخلفية عند الترقية لإصدار جديد
     try {
         const lastVer = getStore('bayan_last_run_version');
-        const curVer = window.appVersion || '1.0.5';
+        const curVer = window.appVersion || '1.0.6';
         if (lastVer && lastVer !== curVer) {
             console.log(`🛡️ [Safety Shield] Version upgrade detected (${lastVer} ➔ ${curVer}). Creating automatic background backup...`);
             if (typeof window.executeAutoBackupToFile === 'function') {
@@ -110,7 +110,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
             `;
             banner.innerHTML = `
                 <div style="display:flex; align-items:center; gap:12px;">
-                    <img src="media/logo.png" style="width:48px; height:48px; border-radius:12px; border:1.5px solid rgba(255,255,255,0.2); box-shadow:0 4px 12px rgba(0,0,0,0.3);" alt="Logo">
+                    <img src="media/bayan_logo.png" style="width:48px; height:48px; border-radius:12px; border:1.5px solid rgba(255,255,255,0.2); box-shadow:0 4px 12px rgba(0,0,0,0.3);" alt="Logo">
                     <div>
                         <div style="font-weight:900; font-size:1rem; color:#ffffff;">تثبيت تطبيق بَيَان POS 📱</div>
                         <div style="font-size:0.78rem; color:#cbd5e1; font-weight:700;">ثبّت التطبيق ليعمل بدون إنترنت كبرنامج أندرويد أصلي</div>
@@ -207,6 +207,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 
     // رصد الضغط المتزامن
     window.addEventListener('keydown', (e) => {
+        if (!e || typeof e.key !== 'string') return;
         const key = e.key.toLowerCase();
         activeKeys.add(key);
 
@@ -223,6 +224,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
     });
 
     window.addEventListener('keyup', (e) => {
+        if (!e || typeof e.key !== 'string') return;
         activeKeys.delete(e.key.toLowerCase());
     });
 

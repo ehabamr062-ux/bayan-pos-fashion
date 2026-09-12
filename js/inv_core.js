@@ -152,7 +152,17 @@ window.handleInventorySearchKeyDown = function(e) {
     }
 };
 
-function renderInventoryTable() {
+window.inventoryRenderLimit = 100;
+window.loadMoreInventory = function(step) {
+    if (step === 0) {
+        window.inventoryRenderLimit = Infinity;
+    } else {
+        window.inventoryRenderLimit = (window.inventoryRenderLimit || 100) + step;
+    }
+    renderInventoryTable(true);
+};
+
+function renderInventoryTable(isLoadMore = false) {
     const tbody = document.getElementById('inventoryTableBody');
     if (!tbody) return;
 
@@ -168,6 +178,11 @@ function renderInventoryTable() {
     const catFilter = document.getElementById('invCategoryFilter')?.value || 'all';
 
     if (rawSearch === '' && typeof updateCategoryFilterOptions === 'function') updateCategoryFilterOptions();
+
+    if (!isLoadMore && !rawSearch) {
+        window.inventoryRenderLimit = window.inventoryRenderLimit || 100;
+    }
+    const renderLimit = rawSearch ? Infinity : (window.inventoryRenderLimit || 100);
 
     tbody.innerHTML = '';
     let totalStockSum = 0;
@@ -261,35 +276,55 @@ function renderInventoryTable() {
 
         const isSelected = window.selectedInventoryIds.has(p.id);
 
+        if (htmlRows.length < renderLimit) {
+            htmlRows.push(`
+                <tr onclick="toggleInventoryRowSelection(${p.id}, this, event)" data-id="${p.id}" class="${isSelected ? 'selected-row-gold' : ''}" style="background:${rowBg}">
+                    <td onclick="handleInventoryCheckClick(event, ${p.id}, this.parentElement)" class="col-inv-0"><input type="checkbox" class="inv-row-check" ${isSelected ? 'checked' : ''}></td>
+                    <td class="col-inv-1">${idx + 1}</td>
+                    <td class="col-inv-quick" style="text-align:center;">
+                        <button onclick="toggleQuickStatus(event, ${p.id})" 
+                            style="background:none; border:none; cursor:pointer; font-size:1.2rem; transition:0.3s; transform: ${p.isQuick ? 'scale(1.2)' : 'scale(1)'}; opacity: ${p.isQuick ? '1' : '0.2'};"
+                            title="${p.isQuick ? 'إزالة من الأصناف السريعة' : 'إضافة للأصناف السريعة'}">
+                            ⚡
+                        </button>
+                    </td>
+                    <td class="col-inv-3" style="font-weight:bold;">${p.name}</td>
+                    <td class="col-inv-13 num-cell" style="color:var(--main-orange); font-weight:900;">${(parseFloat(p.wholesale) || 0).toFixed(2)}</td>
+                    <td class="col-inv-10 num-cell" style="color:var(--main-blue); font-weight:900;">${retail.toFixed(2)}</td>
+                    <td class="col-inv-11 num-cell" style="color:#333;">${s.lastPur.toFixed(2)}</td>
+                    <td class="col-inv-9 num-cell" style="font-size:1.1rem; font-weight:900; color:${currentStock <= 0 ? 'red' : 'var(--main-green)'}">${displayStock}</td>
+                    <td class="col-inv-12 num-cell" style="color:#666;">${avgCost.toFixed(2)}</td>
+                    <td class="col-inv-detailed" style="font-size:0.9rem; text-align:center;">${detailed}</td>
+                    <td class="col-inv-6 num-cell">${(currentStock - s.in + s.out).toFixed(2)}</td>
+                    <td class="col-inv-7 num-cell" style="color:var(--main-green);">${s.in.toFixed(2)}</td>
+                    <td class="col-inv-8 num-cell" style="color:#c0392b;">${s.out.toFixed(2)}</td>
+                    <td class="col-inv-5">${p.shelf || '---'}</td>
+                    <td class="col-inv-4">${p.barcode || '-'}</td>
+                    <td class="col-inv-margin" style="text-align:center; font-weight:bold; color:${marginColor}">${profitMargin}%</td>
+                    <td class="col-inv-2" style="color:var(--main-green); font-weight:bold;">${p.sysCode || p.id}</td>
+                    <td class="col-inv-internal" style="color:#64748b;">${p.code || '-'}</td>
+                </tr>
+            `);
+        }
+    });
+
+    if (totalItemsDisplay > htmlRows.length) {
         htmlRows.push(`
-            <tr onclick="toggleInventoryRowSelection(${p.id}, this, event)" data-id="${p.id}" class="${isSelected ? 'selected-row-gold' : ''}" style="background:${rowBg}">
-                <td onclick="handleInventoryCheckClick(event, ${p.id}, this.parentElement)" class="col-inv-0"><input type="checkbox" class="inv-row-check" ${isSelected ? 'checked' : ''}></td>
-                <td class="col-inv-1">${idx + 1}</td>
-                <td class="col-inv-quick" style="text-align:center;">
-                    <button onclick="toggleQuickStatus(event, ${p.id})" 
-                        style="background:none; border:none; cursor:pointer; font-size:1.2rem; transition:0.3s; transform: ${p.isQuick ? 'scale(1.2)' : 'scale(1)'}; opacity: ${p.isQuick ? '1' : '0.2'};"
-                        title="${p.isQuick ? 'إزالة من الأصناف السريعة' : 'إضافة للأصناف السريعة'}">
-                        ⚡
-                    </button>
+            <tr id="invLoadMoreRow" style="background: #f8fafc; text-align: center;">
+                <td colspan="100%" style="padding: 14px; border-top: 2px solid #e2e8f0;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 15px; font-weight: 800; font-size: 0.95rem; flex-wrap: wrap;">
+                        <span style="color: #475569;">تم عرض <b>${htmlRows.length}</b> من أصل <b>${totalItemsDisplay}</b> صنف</span>
+                        <button type="button" onclick="window.loadMoreInventory(100)" class="tool-btn" style="background: var(--main-blue); color: white; border-radius: 8px; padding: 6px 16px; cursor: pointer; border: none; font-weight: 800;">
+                            ⬇️ عرض المزيد (+100 صنف)
+                        </button>
+                        <button type="button" onclick="window.loadMoreInventory(0)" class="tool-btn" style="background: #64748b; color: white; border-radius: 8px; padding: 6px 14px; cursor: pointer; border: none; font-weight: 800;">
+                            ⚡ عرض الكل (${totalItemsDisplay})
+                        </button>
+                    </div>
                 </td>
-                <td class="col-inv-3" style="font-weight:bold;">${p.name}</td>
-                <td class="col-inv-13 num-cell" style="color:var(--main-orange); font-weight:900;">${(parseFloat(p.wholesale) || 0).toFixed(2)}</td>
-                <td class="col-inv-10 num-cell" style="color:var(--main-blue); font-weight:900;">${retail.toFixed(2)}</td>
-                <td class="col-inv-11 num-cell" style="color:#333;">${s.lastPur.toFixed(2)}</td>
-                <td class="col-inv-9 num-cell" style="font-size:1.1rem; font-weight:900; color:${currentStock <= 0 ? 'red' : 'var(--main-green)'}">${displayStock}</td>
-                <td class="col-inv-12 num-cell" style="color:#666;">${avgCost.toFixed(2)}</td>
-                <td class="col-inv-detailed" style="font-size:0.9rem; text-align:center;">${detailed}</td>
-                <td class="col-inv-6 num-cell">${(currentStock - s.in + s.out).toFixed(2)}</td>
-                <td class="col-inv-7 num-cell" style="color:var(--main-green);">${s.in.toFixed(2)}</td>
-                <td class="col-inv-8 num-cell" style="color:#c0392b;">${s.out.toFixed(2)}</td>
-                <td class="col-inv-5">${p.shelf || '---'}</td>
-                <td class="col-inv-4">${p.barcode || '-'}</td>
-                <td class="col-inv-margin" style="text-align:center; font-weight:bold; color:${marginColor}">${profitMargin}%</td>
-                <td class="col-inv-2" style="color:var(--main-green); font-weight:bold;">${p.sysCode || p.id}</td>
-                <td class="col-inv-internal" style="color:#64748b;">${p.code || '-'}</td>
             </tr>
         `);
-    });
+    }
 
     tbody.innerHTML = htmlRows.join('');
 
@@ -452,7 +487,8 @@ function updateCategoryFilterOptions() {
 
 window.getSafeWhClass = function(whName) {
     if (!whName) return 'col-wh-unknown';
-    const safe = String(whName).trim().replace(/[^\w\u0600-\u06FF]/g, '_');
+    // تنظيف اسم المخزن وإزالة أي رموز خاصة أو علامات شباك نهائياً لضمان اسم كلاس CSS صالح دائماً
+    const safe = String(whName).trim().replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
     return 'col-wh-' + safe;
 };
 
@@ -505,13 +541,25 @@ window.applyWrColVisibility = function() {
     }
 
     Object.keys(settings).forEach(colClass => {
+        if (!colClass || !colClass.trim()) return;
         const isVisible = settings[colClass];
         try {
-            document.querySelectorAll('.' + colClass).forEach(el => {
+            // تنظيف أي مفاتيح تالفة أو غير صالحة
+            if (colClass.includes('##')) {
+                delete settings[colClass];
+                setStore('wrColSettings', JSON.stringify(settings));
+                return;
+            }
+
+            const cleanSelector = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+                ? '.' + CSS.escape(colClass)
+                : '.' + colClass.replace(/[^\w-]/g, '\\$&');
+
+            document.querySelectorAll(cleanSelector).forEach(el => {
                 el.style.display = isVisible ? '' : 'none';
             });
         } catch (err) {
-            console.warn("Error applying column visibility for:", colClass, err);
+            // تجاهل أي محددات غير صالحة بهدوء
         }
 
         try {
@@ -1425,7 +1473,9 @@ async function importProductsFromExcel(event) {
             for (let i = 0; i < rows.length; i++) {
                 const row = rows[i];
                 try {
-                    const name = row[nameIdx] ? String(row[nameIdx]).trim() : "";
+                    const rawName = row[nameIdx] ? String(row[nameIdx]).trim() : "";
+                    const clean = (typeof sanitizeInput === 'function') ? sanitizeInput(rawName) : rawName.replace(/<[^>]*>?/gm, '');
+                    const name = clean.trim();
                     if (!name) {
                         skippedEmpty++;
                         continue;
@@ -1434,15 +1484,15 @@ async function importProductsFromExcel(event) {
                     const sysCode = sysCodeIdx !== -1 ? String(row[sysCodeIdx] || "").trim() : "";
                     const intCode = intCodeIdx !== -1 ? String(row[intCodeIdx] || "").trim() : "";
                     const rawBarcode = barIdx !== -1 ? String(row[barIdx] || "").trim() : "";
-                    const vSize = sizeIdx !== -1 ? String(row[sizeIdx] || "").trim() : "";
-                    const vColor = colorIdx !== -1 ? String(row[colorIdx] || "").trim() : "";
+                    const vSize = sizeIdx !== -1 ? String(row[sizeIdx] || "").replace(/<[^>]*>?/gm, '').trim() : "";
+                    const vColor = colorIdx !== -1 ? String(row[colorIdx] || "").replace(/<[^>]*>?/gm, '').trim() : "";
                     const price = parseFloat(row[priceIdx]) || 0;
                     const wholesale = wholesaleIdx !== -1 ? (parseFloat(row[wholesaleIdx]) || price) : price;
                     const cost = parseFloat(row[costIdx]) || 0;
                     const rowStock = parseFloat(row[qtyIdx]) || 0;
-                    const unit = unitIdx !== -1 ? String(row[unitIdx] || "قطعة").trim() : "قطعة";
-                    const shelf = shelfIdx !== -1 ? String(row[shelfIdx] || "").trim() : "";
-                    const category = catIdx !== -1 ? String(row[catIdx] || "عام").trim() : "عام";
+                    const unit = unitIdx !== -1 ? String(row[unitIdx] || "قطعة").replace(/<[^>]*>?/gm, '').trim() : "قطعة";
+                    const shelf = shelfIdx !== -1 ? String(row[shelfIdx] || "").replace(/<[^>]*>?/gm, '').trim() : "";
+                    const category = catIdx !== -1 ? String(row[catIdx] || "عام").replace(/<[^>]*>?/gm, '').trim() : "عام";
                     const minStock = minStockIdx !== -1 ? (parseFloat(row[minStockIdx]) || 0) : 0;
 
                     let existing = productsDB.find(p => 

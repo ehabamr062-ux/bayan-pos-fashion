@@ -694,6 +694,7 @@ function setVariantModalSelectedIndexByCard(cardElement) {
 window.setVariantModalSelectedIndexByCard = setVariantModalSelectedIndexByCard;
 
 function handleVariantPickerKeydown(e) {
+    if (!e || typeof e.key !== 'string') return;
     const overlay = document.getElementById('bayanVariantPickerOverlay');
     if (!overlay || !variantModalProduct) return;
 

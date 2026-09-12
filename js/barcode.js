@@ -795,6 +795,7 @@ const BayanBarcode = (function () {
      * مستمع لوحة المفاتيح الفائق لمدخلات السكانر (Global KeyDown Listener)
      */
     function onGlobalKeyDown(e) {
+        if (!e || typeof e.key !== 'string') return;
         const currentTime = performance.now();
         const timeDiff = currentTime - lastKeyTime;
         lastKeyTime = currentTime;
@@ -1080,7 +1081,7 @@ window.dispatchSearchBarcode = function(code, context) {
         if (res) {
             res.style.display = 'none';
             res.innerHTML = '';
-            res.classList.add('hidden');
+            res.classList.remove('hidden');
         }
     };
 

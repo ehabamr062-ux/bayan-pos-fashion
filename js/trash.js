@@ -139,7 +139,7 @@ const trashManager = {
     },
 
     // عرض جدول المحذوفات في الإعدادات
-    renderTrashTable() {
+    renderTrashTable(isLoadMore = false) {
         const tbody = document.getElementById('trashTableBody');
         if (!tbody) return;
 
@@ -175,10 +175,17 @@ const trashManager = {
             return;
         }
 
+        if (!isLoadMore) {
+            window.trashRenderLimit = 50;
+        }
+        const renderLimit = window.trashRenderLimit || 50;
+
         // ترتيب من الأحدث للأقدم
         const sortedTrash = list.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+        const totalItems = sortedTrash.length;
+        const itemsToDisplay = sortedTrash.slice(0, renderLimit);
 
-        sortedTrash.forEach(item => {
+        itemsToDisplay.forEach(item => {
             const tr = document.createElement('tr');
             tr.style.cssText = "border-bottom: 1px solid #f1f5f9; transition: 0.2s;";
             tr.onmouseover = () => tr.style.background = '#f8fafc';
@@ -204,6 +211,9 @@ const trashManager = {
 
             const deleteDate = new Date(item.deletedAt).toLocaleString('ar-EG');
             const itemWarehouse = this.getItemWarehouse(item);
+            const safeLabel = (typeof window.escapeHtml === 'function' ? window.escapeHtml(item.label || '---') : (item.label || '---'));
+            const safeWh = (typeof window.escapeHtml === 'function' ? window.escapeHtml(itemWarehouse) : itemWarehouse);
+            const safeDeletedBy = (typeof window.escapeHtml === 'function' ? window.escapeHtml(item.deletedBy || 'غير معروف') : (item.deletedBy || 'غير معروف'));
 
             tr.innerHTML = `
                 <td style="padding: 10px 14px; font-weight: bold;">
@@ -212,15 +222,15 @@ const trashManager = {
                     </span>
                 </td>
                 <td style="padding: 10px 14px; font-weight: 800; color: #0f172a; font-size: 0.92rem;">
-                    ${item.label || '---'}
+                    ${safeLabel}
                 </td>
                 <td style="padding: 10px 14px; text-align: center;">
                     <span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 3px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 800; display: inline-block;">
-                        🏢 ${itemWarehouse}
+                        🏢 ${safeWh}
                     </span>
                 </td>
                 <td style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 0.85rem;">
-                    👤 ${item.deletedBy || 'غير معروف'}
+                    👤 ${safeDeletedBy}
                 </td>
                 <td style="padding: 10px 14px; color: #64748b; font-size: 0.8rem; font-weight: 600; direction: ltr; text-align: right;">
                     🕒 ${deleteDate}
@@ -234,6 +244,26 @@ const trashManager = {
             `;
             tbody.appendChild(tr);
         });
+
+        if (totalItems > itemsToDisplay.length) {
+            const loadMoreTr = document.createElement('tr');
+            loadMoreTr.id = 'trashLoadMoreRow';
+            loadMoreTr.style.cssText = "background: #f8fafc; text-align: center;";
+            loadMoreTr.innerHTML = `
+                <td colspan="6" style="padding: 14px; border-top: 2px solid #e2e8f0;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 15px; font-weight: 800; font-size: 0.95rem; flex-wrap: wrap;">
+                        <span style="color: #475569;">تم عرض <b>${itemsToDisplay.length}</b> من أصل <b>${totalItems}</b> عنصر محذوف</span>
+                        <button type="button" onclick="window.loadMoreTrash(50)" class="tool-btn" style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border-radius: 8px; padding: 7px 18px; cursor: pointer; border: none; font-weight: 800; box-shadow: 0 2px 6px rgba(239,68,68,0.3); font-family: 'Cairo', sans-serif; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s;">
+                            ⬇️ عرض المزيد (+50 عنصر)
+                        </button>
+                        <button type="button" onclick="window.loadMoreTrash(0)" class="tool-btn" style="background: white; color: #475569; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 7px 16px; cursor: pointer; font-weight: 800; font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                            ⚡ عرض الكل (${totalItems})
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(loadMoreTr);
+        }
     },
 
     /**
@@ -362,6 +392,8 @@ const trashManager = {
                 }
                 window.transactions = await db.transactions.toArray();
                 if (typeof invalidateStockCache === 'function') invalidateStockCache();
+                if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+                window.accountBalancesCache = {};
                 if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
                 if (typeof renderInventoryTable === 'function') renderInventoryTable();
                 if (typeof renderAccountsTable === 'function') renderAccountsTable();
@@ -430,99 +462,84 @@ const trashManager = {
     },
 
     /**
-     * حذف نهائي لعنصر واحد
+     * حذف نهائي لعنصر واحد - محمي برمز PIN المدير
      */
     async permanentDelete(id) {
-        if (typeof showCustomAlert === 'function') {
-            showCustomAlert({
-                type: 'warning',
-                titleText: '🗑️ تأكيد الحذف النهائي',
-                msg: 'هل أنت متأكد من حذف هذا العنصر نهائياً؟ <b>لا يمكن الاستعادة بعدها!</b>',
-                confirmText: 'نعم، حذف نهائي',
-                cancelText: 'تراجع',
-                showCancel: true,
-                onConfirm: async () => {
-                    try {
-                        registerPurgedTrashId(id);
-                        const item = (window.trashBin || []).find(x => String(x.id) === String(id));
-                        if (item) registerPurgedTrashId(`${item.type}_${item.label}_${item.deletedAt}`);
-                        await db.trash.delete(id);
-                        await this.loadTrash();
-                        if (typeof saveData === 'function') await saveData();
-                        showToast("🗑️ تم الحذف النهائي بنجاح", "info");
-                    } catch (error) {
-                        console.error("فشل الحذف النهائي:", error);
-                    }
-                }
-            });
-        } else {
-            if (!confirm("🚨 هل أنت متأكد من حذف هذا العنصر نهائياً؟ لا يمكن الاستعادة بعدها!")) return;
-            try {
-                registerPurgedTrashId(id);
-                const item = (window.trashBin || []).find(x => String(x.id) === String(id));
-                if (item) registerPurgedTrashId(`${item.type}_${item.label}_${item.deletedAt}`);
-                await db.trash.delete(id);
-                await this.loadTrash();
-                if (typeof saveData === 'function') await saveData();
-                showToast("🗑️ تم الحذف النهائي بنجاح", "info");
-            } catch (error) {
-                console.error("فشل الحذف النهائي:", error);
+        const item = (window.trashBin || []).find(x => String(x.id) === String(id));
+        const itemLabel = item ? (item.label || item.type || 'عنصر') : 'عنصر';
+
+        if (typeof window.verifyAdminPinAuthorization === 'function') {
+            const isAuthorized = await window.verifyAdminPinAuthorization(
+                '🗑️ تأكيد الحذف النهائي من السلة',
+                `سيتم حذف "${itemLabel}" بشكل نهائي ولا يمكن استعادته لاحقاً.`
+            );
+            if (!isAuthorized) return;
+        }
+
+        try {
+            registerPurgedTrashId(id);
+            if (item) registerPurgedTrashId(`${item.type}_${item.label}_${item.deletedAt}`);
+            await db.trash.delete(id);
+            await this.loadTrash();
+            if (typeof saveData === 'function') await saveData();
+            if (typeof logAuditAction === 'function') {
+                logAuditAction('حذف نهائي من السلة', `تم حذف: "${itemLabel}" بتأكيد رمز المدير`);
             }
+            showToast("🗑️ تم الحذف النهائي بنجاح", "info");
+        } catch (error) {
+            console.error("فشل الحذف النهائي:", error);
+            showToast("❌ فشل الحذف النهائي: " + error.message, "error");
         }
     },
 
     /**
-     * إفراغ السلة بالكامل
+     * إفراغ السلة بالكامل - محمي برمز PIN المدير
      */
     async emptyTrash() {
-        if (trashBin.length === 0) return showToast("السلة فارغة بالفعل", "info");
-        
-        if (typeof showCustomAlert === 'function') {
-            showCustomAlert({
-                type: 'error',
-                titleText: '🚨 إفراغ السلة بالكامل',
-                msg: '<p style="font-weight:bold; color:#b91c1c;">هل أنت متأكد من إفراغ سلة المحذوفات بالكامل؟</p><p style="font-size:0.9rem; margin-top:5px;">سيتم حذف كافة العناصر بشكل نهائي ولا يمكن التراجع عن هذه الخطوة.</p>',
-                confirmText: 'نعم، إفراغ السلة 🧹',
-                cancelText: 'إلغاء 🛡️',
-                showCancel: true,
-                onConfirm: async () => {
-                    try {
-                        (window.trashBin || []).forEach(it => {
-                            registerPurgedTrashId(it.id);
-                            registerPurgedTrashId(`${it.type}_${it.label}_${it.deletedAt}`);
-                        });
-                        await db.trash.clear();
-                        window.trashBin = [];
-                        await this.loadTrash();
-                        if (typeof saveData === 'function') await saveData();
-                        showToast("🧹 تم إفراغ السلة بنجاح", "success");
-                    } catch (error) {
-                        console.error("فشل إفراغ السلة:", error);
-                    }
-                }
+        const list = (window.trashBin && Array.isArray(window.trashBin)) ? window.trashBin : [];
+        if (list.length === 0) return showToast("السلة فارغة بالفعل", "info");
+
+        const count = list.length;
+        if (typeof window.verifyAdminPinAuthorization === 'function') {
+            const isAuthorized = await window.verifyAdminPinAuthorization(
+                '🚨 إفراغ سلة المحذوفات بالكامل',
+                `تحذير أمني: سيتم حذف كافة العناصر (${count} عنصر) بشكل نهائي لا رجعة فيه!`
+            );
+            if (!isAuthorized) return;
+        }
+
+        try {
+            list.forEach(it => {
+                registerPurgedTrashId(it.id);
+                registerPurgedTrashId(`${it.type}_${it.label}_${it.deletedAt}`);
             });
-        } else {
-            if (!confirm("🚨 هل أنت متأكد من إفراغ سلة المحذوفات بالكامل؟\nسيتم حذف كافة العناصر نهائياً!")) return;
-            try {
-                (window.trashBin || []).forEach(it => {
-                    registerPurgedTrashId(it.id);
-                    registerPurgedTrashId(`${it.type}_${it.label}_${it.deletedAt}`);
-                });
-                await db.trash.clear();
-                window.trashBin = [];
-                await this.loadTrash();
-                if (typeof saveData === 'function') await saveData();
-                showToast("🧹 تم إفراغ السلة بنجاح", "success");
-            } catch (error) {
-                console.error("فشل إفراغ السلة:", error);
+            await db.trash.clear();
+            window.trashBin = [];
+            await this.loadTrash();
+            if (typeof saveData === 'function') await saveData();
+            if (typeof logAuditAction === 'function') {
+                logAuditAction('إفراغ سلة المحذوفات', `تم إفراغ سلة المحذوفات بالكامل (${count} عنصر) بتأكيد رمز المدير`);
             }
+            showToast("🧹 تم إفراغ السلة بنجاح", "success");
+        } catch (error) {
+            console.error("فشل إفراغ السلة:", error);
+            showToast("❌ فشل إفراغ السلة: " + error.message, "error");
         }
     }
 };
 
 // جعل الوظائف متاحة عالمياً للأزرار في HTML
 window.emptyTrash = () => trashManager.emptyTrash();
-window.renderTrashTable = () => trashManager.renderTrashTable();
+window.trashRenderLimit = 50;
+window.loadMoreTrash = function(step) {
+    if (step === 0) {
+        window.trashRenderLimit = Infinity;
+    } else {
+        window.trashRenderLimit = (window.trashRenderLimit || 50) + step;
+    }
+    trashManager.renderTrashTable(true);
+};
+window.renderTrashTable = (isLoadMore) => trashManager.renderTrashTable(isLoadMore);
 window.trashManager = trashManager;
 
 // تحميل البيانات عند بدء التشغيل

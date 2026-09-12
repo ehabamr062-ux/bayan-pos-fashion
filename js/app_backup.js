@@ -5,11 +5,18 @@
 
 
 async function backupData() {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية تصدير النسخ الاحتياطية!", "error");
+    }
     await window.executeAutoBackupToFile(false, true);
 }
 
 function restoreData(input) {
-    const file = input.files[0];
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        if (input) input.value = '';
+        return showToast("🚫 ليس لديك صلاحية استعادة النسخ الاحتياطية!", "error");
+    }
+    const file = input ? input.files[0] : null;
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async function (e) {
@@ -85,13 +92,17 @@ function restoreData(input) {
                     if (data.transactions && data.transactions.length > 0) await db.transactions.bulkPut(data.transactions);
                     if (data.accounts && data.accounts.length > 0) await db.accounts.bulkPut(data.accounts);
                     if (data.users && data.users.length > 0) {
-                        // 🔒 فك تشفير رموز الـ PIN المسترجعة بسلاسة مع الحفاظ على التوافقية الكاملة
+                        // 🔒 تشفير رموز الـ PIN في قاعدة البيانات عند الاسترجاع مع دعم كامل للنسخ القديمة
                         const restoredUsers = data.users.map(u => {
                             if (!u) return u;
                             const copy = { ...u };
-                            if (copy.pin && typeof copy.pin === 'string' && copy.pin.startsWith('ENC:') && typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.deobfuscate === 'function') {
-                                copy.pin = window.BayanSecurity.deobfuscate(copy.pin.substring(4));
-                            }
+                            const rawPin = copy.pin;
+                            const plainPin = (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.decryptPin === 'function')
+                                ? window.BayanSecurity.decryptPin(rawPin)
+                                : rawPin;
+                            copy.pin = (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.encryptPin === 'function')
+                                ? window.BayanSecurity.encryptPin(plainPin)
+                                : rawPin;
                             return copy;
                         });
                         await db.users.bulkPut(restoredUsers);
@@ -430,8 +441,8 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     const securedUsers = (users || []).map(u => {
         if (!u) return u;
         const copy = { ...u };
-        if (copy.pin != null && copy.pin !== '' && typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.obfuscate === 'function') {
-            copy.pin = 'ENC:' + window.BayanSecurity.obfuscate(String(copy.pin));
+        if (copy.pin != null && copy.pin !== '' && typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.encryptPin === 'function') {
+            copy.pin = window.BayanSecurity.encryptPin(copy.pin);
         }
         return copy;
     });

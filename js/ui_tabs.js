@@ -516,7 +516,10 @@
                     }
                 });
 
-                if (targetTab.type === 'invoices') renderInvoicesTable();
+                if (targetTab.type === 'invoices') {
+                    if (typeof initInvoicesColumns === 'function') initInvoicesColumns();
+                    renderInvoicesTable();
+                }
                 if (targetTab.type === 'analysis') {
                     const anVal = document.getElementById('anPeriodFilter')?.value;
                     if (anVal && typeof applyAnalysisPeriodFilter === 'function' && anVal !== 'custom') {

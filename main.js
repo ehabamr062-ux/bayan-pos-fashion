@@ -67,8 +67,11 @@ function createWindow() {
     });
 
     win.webContents.on('unresponsive', () => {
-        console.warn("⚠️ Window became unresponsive. Reloading...");
-        win.reload();
+        console.warn("⚠️ [Main] Window is temporarily busy or unresponsive. Waiting for tasks to complete without reloading to preserve current invoice state.");
+    });
+
+    win.webContents.on('responsive', () => {
+        console.log("✅ [Main] Window has recovered responsiveness.");
     });
 
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -99,9 +102,8 @@ function createWindow() {
             return;
         }
 
-        // منع إعادة التحميل العادية F5 أو Ctrl+R
+        // منع إعادة التحميل العادية F5 أو Ctrl+R لحماية شاشة الكاشير وسلة المبيعات من التفريغ بالخطأ
         if (input.key === 'F5' || (input.control && key === 'r')) {
-            win.webContents.reload();
             event.preventDefault();
             return;
         }
@@ -153,21 +155,53 @@ function createWindow() {
         });
     });
 
-    // 🔒 صمام الأمان الفولاذي: منع فتح أي نوافذ جديدة داخل بيئة Electron وتوجيه الروابط الآمنة للمتصفح الافتراضي
+    // 🔒 صمام الأمان الفولاذي: منع فتح أي نوافذ جديدة داخل بيئة Electron وتوجيه الروابط الآمنة للمتصفح الافتراضي مع السماح بنوافذ الطباعة المحلية
     win.webContents.setWindowOpenHandler(({ url }) => {
         if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url) || /^tel:/i.test(url)) {
             shell.openExternal(url);
+            return { action: 'deny' };
+        }
+        // السماح بنوافذ الطباعة المحلية الفارغة (about:blank) لضمان عدم توقف الطباعة نهائياً
+        if (url === 'about:blank' || !url || url === '') {
+            return {
+                action: 'allow',
+                overrideBrowserWindowOptions: {
+                    autoHideMenuBar: true,
+                    webPreferences: {
+                        nodeIntegration: false,
+                        contextIsolation: true
+                    }
+                }
+            };
         }
         return { action: 'deny' };
     });
 
-    // 🔒 منع الانتقال إلى أي روابط خارجية غير ملفات النظام المحلية لحماية صلاحيات Node.js
+    // 🔒 صمام الأمان الفولاذي: منع الانتقال خارج واجهة البرنامج index.html نهائياً لحماية صلاحيات Node.js
     win.webContents.on('will-navigate', (event, url) => {
-        if (!url.startsWith('file://')) {
-            event.preventDefault();
-            if (/^https?:\/\//i.test(url)) {
-                shell.openExternal(url);
+        try {
+            const parsedUrl = new URL(url);
+            const indexFilePath = path.resolve(__dirname, 'index.html').replace(/\\/g, '/').toLowerCase();
+            let parsedPath = decodeURIComponent(parsedUrl.pathname).replace(/\\/g, '/').toLowerCase();
+            if (process.platform === 'win32' && parsedPath.startsWith('/')) {
+                parsedPath = parsedPath.slice(1);
             }
+            let normalizedIndex = indexFilePath;
+            if (process.platform === 'win32' && normalizedIndex.startsWith('/')) {
+                normalizedIndex = normalizedIndex.slice(1);
+            }
+
+            // السماح فقط بالبقاء داخل index.html (التنقل بالهاش أو نفس مسار الصفحة)
+            if (parsedUrl.protocol === 'file:' && (parsedPath === normalizedIndex || parsedPath.endsWith('/index.html'))) {
+                return;
+            }
+        } catch (e) {
+            // URL غير صالح
+        }
+
+        event.preventDefault();
+        if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url) || /^tel:/i.test(url)) {
+            shell.openExternal(url);
         }
     });
 
@@ -268,18 +302,19 @@ ipcMain.on('quit-directly', () => {
 // فتح الروابط الخارجية بأمان مع التحقق من الـ Protocol
 ipcMain.handle('open-url', async (event, url) => {
     try {
-        // ✅ أمان: السماح فقط بـ http و https و mailto ومنع أي بروتوكول آخر قد ينفّذ أوامر نظام
+        // ✅ أمان: السماح فقط بـ http و https و mailto و tel ومنع أي بروتوكول آخر قد ينفّذ أوامر نظام
         const parsedUrl = new URL(url);
-        const allowedProtocols = ['http:', 'https:', 'mailto:'];
-        if (!allowedProtocols.includes(parsedUrl.protocol)) {
+        const allowedProtocols = ['http:', 'https:', 'mailto:', 'tel:'];
+        if (!allowedProtocols.includes(parsedUrl.protocol.toLowerCase())) {
             console.error('⚠️ محاولة فتح رابط غير مسموح: ' + url);
             return false;
         }
         await shell.openExternal(parsedUrl.href);
+        return true;
     } catch (err) {
         console.error('Failed to open URL:', err);
+        return false;
     }
-    return true;
 });
 
 // تشفير وتوقيع التراخيص
@@ -326,6 +361,51 @@ app.setPath('userData', userDataPath);
 if (!fs.existsSync(userDataPath)) {
     fs.mkdirSync(userDataPath, { recursive: true });
 }
+
+// 🔒 استرجاع وتوليد كود الجهاز المشفر الثابت وغير القابل للتغيير (Hardware UUID / Machine GUID)
+ipcMain.handle('get-hardware-uuid', () => {
+    try {
+        const keyFile = path.join(userDataPath, 'device_hwid.key');
+        if (fs.existsSync(keyFile)) {
+            const saved = fs.readFileSync(keyFile, 'utf8').trim();
+            if (saved && /^BNC-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(saved)) {
+                return saved.toUpperCase();
+            }
+        }
+
+        let rawGuid = '';
+        if (process.platform === 'win32') {
+            try {
+                const { execSync } = require('child_process');
+                const out = execSync('reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid', {
+                    encoding: 'utf8',
+                    stdio: ['pipe', 'pipe', 'ignore'],
+                    timeout: 2000
+                });
+                const match = out.match(/MachineGuid\s+REG_SZ\s+([a-fA-F0-9-]+)/i);
+                if (match && match[1]) rawGuid = match[1].trim();
+            } catch(e) {}
+        }
+
+        if (!rawGuid) {
+            rawGuid = `${os.hostname()}_${os.platform()}_${os.arch()}_${os.cpus()[0]?.model || 'CPU'}`;
+        }
+
+        const hash = crypto.createHash('sha256').update(rawGuid).digest('hex').toUpperCase();
+        const part1 = hash.substring(0, 4);
+        const part2 = hash.substring(4, 8);
+        const hwid = `BNC-${part1}-${part2}`;
+
+        try {
+            fs.writeFileSync(keyFile, hwid, 'utf8');
+        } catch(e) {}
+
+        return hwid;
+    } catch(err) {
+        console.warn('[Main] get-hardware-uuid fallback:', err.message);
+        return null;
+    }
+});
 
 const backupDir = path.join(userDataPath, 'backups');
 if (!fs.existsSync(backupDir)) {
@@ -385,7 +465,7 @@ ipcMain.handle('get-backup-dir', () => {
     return backupDir;
 });
 
-// حفظ نسخة احتياطية مباشرة في مجلد النظام عبر IPC
+// حفظ نسخة احتياطية مباشرة في مجلد النظام عبر IPC (غير متزامن Asynchronous لمنع أي تجميد للواجهة)
 ipcMain.handle('save-backup-data', async (_e, payload) => {
     try {
         if (!fs.existsSync(backupDir)) {
@@ -397,7 +477,7 @@ ipcMain.handle('save-backup-data', async (_e, payload) => {
         const prefix = payload?.isManual ? 'backup_pos_manual_' : 'backup_pos_auto_';
         const fileName = `${prefix}${timestamp}.json`;
         const filePath = path.join(backupDir, fileName);
-        fs.writeFileSync(filePath, payload?.dataStr || '{}', 'utf8');
+        await fs.promises.writeFile(filePath, payload?.dataStr || '{}', 'utf8');
         return { success: true, filePath, fileName, backupDir };
     } catch (err) {
         console.error("save-backup-data IPC error:", err);

@@ -391,7 +391,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                     // Resave updated transactions to the DB
-                    if (typeof window.saveData === 'function') {
+                    const updatedTxRows = [];
+                    for (let i = oldLen; i < window.transactions.length; i++) {
+                        updatedTxRows.push(window.transactions[i]);
+                    }
+                    if (typeof window.saveTransactionChanges === 'function' && updatedTxRows.length > 0) {
+                        await window.saveTransactionChanges({
+                            newTransactions: updatedTxRows,
+                            modifiedProducts: [],
+                            modifiedAccounts: []
+                        });
+                    } else if (typeof window.saveData === 'function') {
                         await window.saveData();
                     }
                     // Reset notes cache on success

@@ -2276,23 +2276,22 @@ body.dark-mode .moon-icon {
         body.daily-amounts-hidden #daily-report-section #opsSummaryBody td:nth-child(5),
         body.daily-amounts-hidden #daily-report-section #treasurySummaryBody td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #profitSummaryBody td:nth-child(2) {
-            color: transparent !important;
-            text-shadow: 0 0 10px rgba(100, 116, 139, 0.85) !important;
+            filter: blur(8px) !important;
             user-select: none !important;
-            letter-spacing: 2px !important;
-            transition: all 0.2s ease;
-            opacity: 0.7;
+            pointer-events: none !important;
+            transition: filter 0.2s ease;
         }
 
+        /* 🔒 تأكيد استمرار إخفاء المبالغ حتى مع مرور الماوس فوق الصفوف أو الخلايا */
         body.daily-amounts-hidden #daily-report-section #opsSummaryBody tr:hover td:nth-child(3),
         body.daily-amounts-hidden #daily-report-section #opsSummaryBody tr:hover td:nth-child(4),
         body.daily-amounts-hidden #daily-report-section #opsSummaryBody tr:hover td:nth-child(5),
         body.daily-amounts-hidden #daily-report-section #treasurySummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #profitSummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #dailyTotalSalesReceipts:hover #dailyTotalVal {
-            color: inherit !important;
-            text-shadow: none !important;
-            opacity: 1 !important;
+            filter: blur(8px) !important;
+            user-select: none !important;
+            pointer-events: none !important;
         }
 
         @keyframes golden-glow {

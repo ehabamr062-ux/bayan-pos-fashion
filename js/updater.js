@@ -237,7 +237,7 @@
     // حالة نظام التحديث
     // =========================================================================
     const state = {
-        currentVersion: window.appVersion || '1.0.5',
+        currentVersion: window.appVersion || '1.0.6',
         latestVersion: null,
         releaseNotes: '',
         downloadUrl: '',
@@ -266,12 +266,20 @@
     }
 
     function getCurrentAppVersion() {
-        return window.appVersion || '1.0.5';
+        return window.appVersion || '1.0.6';
     }
 
     function fmtNotes(notes) {
         if (!notes) return 'تحسينات جديدة وإصلاحات مستقرة في هذا الإصدار.';
-        return String(notes)
+        // 🔒 تطهير الرموز الخاصة بـ HTML أولاً لمنع أي هجوم حقن كود خبيث من الإنترنت
+        const clean = String(notes)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+
+        return clean
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/^#{1,3}\s+(.+)$/gm, '<strong style="color:#10b981">$1</strong>')
             .replace(/^[-*]\s+(.+)$/gm, '• $1')
@@ -892,7 +900,7 @@
     // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر IndexedDB و Electron Disk
     // =========================================================================
     function updateAutoUpdatesPolicyDOM(isEnabled) {
-        const curVer = window.appVersion || '1.0.5';
+        const curVer = window.appVersion || '1.0.6';
         const badge = document.getElementById('updatePolicyBadge');
         const text = document.getElementById('toggleAutoUpdatesText');
         const toggle = document.getElementById('toggleAutoUpdatesSwitch');
@@ -962,7 +970,7 @@
 
     window.toggleAutoUpdatesPolicy = async function(isEnabled) {
         const disabled = !isEnabled;
-        const curVer = window.appVersion || '1.0.5';
+        const curVer = window.appVersion || '1.0.6';
         window.__isAutoUpdatesFrozen = disabled;
 
         // 💾 1. التخزين اللحظي في AppStore و IndexedDB

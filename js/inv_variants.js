@@ -3,8 +3,10 @@
 //  (Fashion Matrix, Hangtags & Barcode Label Printing)
 // ============================================================
 async function printInventoryBarcode() {
+    const hasSelected = (window.selectedInventoryIds && window.selectedInventoryIds.size > 0) || !!window.selectedInventoryId;
+
     if (typeof showCustomAlert !== 'function') {
-        const choice = await showCustomPrompt("1- المختارة | 2- الكل", "1");
+        const choice = await showCustomPrompt("1- المختارة | 2- الكل", hasSelected ? "1" : "2");
         if (choice) executePrinting(choice === "1" ? "selected" : "all");
         return;
     }
@@ -12,12 +14,18 @@ async function printInventoryBarcode() {
     showCustomAlert({
         type: 'question',
         titleText: '🏷️ خيارات طباعة الباركود',
-        msg: 'يرجى اختيار نطاق الطباعة المطلوب:',
+        msg: hasSelected 
+            ? 'يرجى اختيار نطاق طباعة ملصقات الباركود:' 
+            : 'لم تقم بتحديد أصناف معينة من الجدول.<br>هل ترغب في طباعة باركودات <b>كافة الأصناف</b> المسجلة؟',
         confirmText: 'طباعة كافة الأصناف كلياً',
-        cancelText: 'طباعة الأصناف المختارة (✔️) فقط',
+        cancelText: hasSelected ? 'طباعة الأصناف المختارة (✔️) فقط' : 'إلغاء',
         showCancel: true,
         onConfirm: () => requestCopiesAndPrint('all'),
-        onCancel: () => requestCopiesAndPrint('selected')
+        onCancel: () => {
+            if (hasSelected) {
+                requestCopiesAndPrint('selected');
+            }
+        }
     });
 }
 
@@ -197,13 +205,29 @@ async function executePrinting(modeOrTargets, copies = 1) {
     if (Array.isArray(modeOrTargets)) {
         targets = modeOrTargets;
     } else if (modeOrTargets === "selected") {
-        const selectedIds = Array.from(window.selectedInventoryIds || []);
+        let selectedIds = Array.from(window.selectedInventoryIds || []);
+        if (selectedIds.length === 0 && window.selectedInventoryId) {
+            selectedIds.push(window.selectedInventoryId);
+        }
         if (selectedIds.length === 0) return showToast("⚠️ عفواً، يجب عليك اختيار صنف واحد على الأقل من الجدول أولاً!", "error");
 
         selectedIds.forEach(id => {
-            const p = productsDB.find(x => x.id === id);
+            const p = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+                ? productsDB.find(x => String(x.id) === String(id) || String(x.barcode) === String(id) || String(x.code) === String(id))
+                : null;
             if (p) targets.push(p);
         });
+
+        if (targets.length === 0 && typeof db !== 'undefined' && db.products) {
+            try {
+                for (const id of selectedIds) {
+                    const dbP = await db.products.get(Number(id)) || await db.products.get(String(id));
+                    if (dbP) targets.push(dbP);
+                }
+            } catch(e) {}
+        }
+
+        if (targets.length === 0) return showToast("⚠️ لم يتم العثور على بيانات الصنف المحدد للطباعة!", "error");
     } else {
         // وضع كافة الأصناف: استرجاع كل الأصناف من قاعدة البيانات الحية (IndexedDB) لضمان جلب كل ما هو مسجل
         if (typeof db !== 'undefined' && db.products) {
@@ -244,7 +268,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     code: p.code || p.id,
                     barcode: vBc,
                     price: vPrice,
-                    copies: copies
+                    copies: parseInt(v.stock || p.copies || copies) || 1
                 });
             });
         } else {
@@ -260,10 +284,14 @@ async function executePrinting(modeOrTargets, copies = 1) {
                 code: p.code || barcodeVal,
                 barcode: barcodeVal,
                 price: parseFloat(p.price) || 0,
-                copies: copies
+                copies: parseInt(p.copies || copies) || 1
             });
         }
     });
+
+    if (printableItems.length === 0) {
+        return showToast("⚠️ لا توجد أصناف قابلة للطباعة!", "warning");
+    }
 
     const labelWidth = parseFloat(bSettings.width) || 50;
     const labelHeight = parseFloat(bSettings.height) || 25;
@@ -296,7 +324,10 @@ async function executePrinting(modeOrTargets, copies = 1) {
 
             if (window.JsBarcode) {
                 try {
-                    const bcStr = String(item.barcode || item.code || '1000001').trim();
+                    let bcStr = String(item.barcode || item.code || '1000001').trim();
+                    if (!bcStr || /[^\x00-\x7F]/.test(bcStr)) {
+                        bcStr = '20' + String(Date.now()).slice(-8);
+                    }
                     window.JsBarcode(svgEl, bcStr, {
                         format: "CODE128",
                         width: barcodeW,
@@ -335,12 +366,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
     // إزالة الحاوية المؤقتة
     document.body.removeChild(tempContainer);
 
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-    if (!printWindow) {
-        return showToast("⚠️ يرجى السماح بالنوافذ المنبثقة للطباعة!", "error");
-    }
-
-    printWindow.document.write(`
+    const fullPrintHtml = `
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
         <head>
@@ -494,15 +520,57 @@ async function executePrinting(modeOrTargets, copies = 1) {
             </div>
         </body>
         </html>
-    `);
+    `;
 
-    printWindow.document.close();
+    // 2. استخدام Iframe مخفي فائق السرعة والموثوقية للطباعة المباشرة في Electron وكافة المتصفحات بدون اعتراض النوافذ
+    let printIframe = document.getElementById('bayan-barcode-print-iframe');
+    if (!printIframe) {
+        printIframe = document.createElement('iframe');
+        printIframe.id = 'bayan-barcode-print-iframe';
+        printIframe.style.cssText = 'position:fixed;right:100%;bottom:100%;width:0;height:0;border:none;opacity:0;pointer-events:none;';
+        document.body.appendChild(printIframe);
+    }
 
-    setTimeout(() => {
-        printWindow.focus();
-        printWindow.print();
-    }, 400);
+    try {
+        const pDoc = printIframe.contentWindow.document;
+        pDoc.open();
+        pDoc.write(fullPrintHtml);
+        pDoc.close();
+
+        setTimeout(() => {
+            try {
+                printIframe.contentWindow.focus();
+                printIframe.contentWindow.print();
+            } catch (frameErr) {
+                console.warn("Barcode iframe print error:", frameErr);
+                const printWindow = window.open('', '_blank', 'width=800,height=600');
+                if (printWindow) {
+                    printWindow.document.open();
+                    printWindow.document.write(fullPrintHtml);
+                    printWindow.document.close();
+                    setTimeout(() => {
+                        printWindow.focus();
+                        printWindow.print();
+                    }, 400);
+                }
+            }
+        }, 400);
+    } catch(err) {
+        console.error("Barcode print execution error:", err);
+        const printWindow = window.open('', '_blank', 'width=800,height=600');
+        if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(fullPrintHtml);
+            printWindow.document.close();
+            setTimeout(() => {
+                printWindow.focus();
+                printWindow.print();
+            }, 400);
+        }
+    }
 }
+window.executePrinting = executePrinting;
+window.printInventoryBarcode = printInventoryBarcode;
 
 function applyPresetSizes(presetType) {
     const input = document.getElementById('variantSizesInput');
@@ -1487,6 +1555,7 @@ function printProductVariantHangtags() {
         }
     }
 }
+window.printProductVariantHangtags = printProductVariantHangtags;
 
 function updateVariantsCountBadge() {
     const count = document.getElementById('productVariantsTableBody')?.rows?.length || 0;

@@ -645,48 +645,57 @@ function renderHistoryTable(filterName = null) {
 // متغيرات للتحكم في ظهور الأعمدة مع الحفظ في IndexedDB (getStore)
 
 let invoicesColumnVisibility = JSON.parse(getStore('pos_inv_cols_visible') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true,"12":true,"13":true}');
+window.invoicesColumnVisibility = invoicesColumnVisibility;
+
+// دالة مركزية لاسترجاع تخصيص أعمدة الفواتير من الذاكرة وقاعدة البيانات لحظياً
+function loadInvoicesColumnPreferences() {
+    const saved = (typeof getStore === 'function') ? getStore('pos_inv_cols_visible') : null;
+    if (saved) {
+        try {
+            const parsed = (typeof saved === 'string') ? JSON.parse(saved) : saved;
+            if (parsed && typeof parsed === 'object') {
+                for (let k in parsed) {
+                    invoicesColumnVisibility[k] = parsed[k];
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to parse pos_inv_cols_visible:", e);
+        }
+    }
+    return invoicesColumnVisibility;
+}
+window.loadInvoicesColumnPreferences = loadInvoicesColumnPreferences;
 
 // دالة لتحديث أنماط الجدول بالكامل دفعة واحدة (تمنع الترحيل وتدعم الأداء)
-
 function updateInvoicesTableStyles() {
+    loadInvoicesColumnPreferences();
 
     let styleEl = document.getElementById('style-invoices-cols-global');
-
     if (!styleEl) {
-
         styleEl = document.createElement('style');
-
         styleEl.id = 'style-invoices-cols-global';
-
         document.head.appendChild(styleEl);
-
     }
 
     const hasProfitPerm = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
-
     let css = '';
 
     for (let i = 0; i <= 13; i++) {
-
         const isHiddenByPref = invoicesColumnVisibility[i] === false;
         const isProfitHidden = (i === 5 && !hasProfitPerm);
 
         if (isHiddenByPref || isProfitHidden) {
-
             css += `#invoicesMainTable .col-inv-${i} { display: none !important; }\n`;
-
         }
-
     }
 
     styleEl.innerHTML = css;
-
 }
+window.updateInvoicesTableStyles = updateInvoicesTableStyles;
 
-// دالة لتهيئة ظهور الأعمدة عند تحميل الصفحة
-
+// دالة لتهيئة ظهور الأعمدة عند تحميل الصفحة أو التنقل
 function initInvoicesColumns() {
-
+    loadInvoicesColumnPreferences();
     updateInvoicesTableStyles();
 
     // مزامنة حالة مربعات الاختيار في نافذة التخصيص
@@ -695,8 +704,8 @@ function initInvoicesColumns() {
         const checkbox = document.querySelector(`#invoicesColSelectorPopup input[onchange*="(${i},"]`);
         if (checkbox) checkbox.checked = isVisible;
     }
-
 }
+window.initInvoicesColumns = initInvoicesColumns;
 
 function setInvoicesView(view) {
 

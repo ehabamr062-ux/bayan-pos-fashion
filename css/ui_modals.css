@@ -2171,19 +2171,19 @@
 
         .premium-card-section h3 {
             margin: 0 0 18px 0;
-            font-size: 1.05rem;
-            font-weight: 800;
-            color: #4f46e5;
+            font-size: 1.1rem;
+            font-weight: 900;
+            color: #3730a3;
             display: flex;
             align-items: center;
             gap: 10px;
-            border-bottom: 1.5px solid #f1f5f9;
+            border-bottom: 2px solid #e2e8f0;
             padding-bottom: 10px;
         }
 
         body.dark-mode .premium-card-section h3 {
-            color: #818cf8;
-            border-bottom-color: rgba(255, 255, 255, 0.08);
+            color: #a5b4fc;
+            border-bottom-color: rgba(255, 255, 255, 0.12);
         }
 
         /* --- Custom Inputs for Premium Modal --- */
@@ -2194,13 +2194,14 @@
         .glass-label {
             display: block;
             margin-bottom: 8px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            color: #64748b;
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: #0f172a; /* حبر أسود واضح وصريح */
+            letter-spacing: -0.2px;
         }
 
         body.dark-mode .glass-label {
-            color: #94a3b8;
+            color: #f8fafc;
         }
 
         .glass-input-wrapper {
@@ -2213,32 +2214,41 @@
         .glass-input {
             width: 100%;
             height: 46px;
-            background: #f8fafc;
-            border: 1.5px solid #e2e8f0;
+            background: #ffffff;
+            border: 2px solid #cbd5e1; /* إطار واضح وبارز */
             border-radius: 12px;
             padding: 0 42px 0 16px;
-            font-size: 0.92rem;
-            font-weight: 600;
+            font-size: 0.95rem;
+            font-weight: 800; /* خط كتابة واضح وثقيل */
             transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
-            color: #0f172a;
+            color: #000000;
+        }
+
+        .glass-input::placeholder {
+            color: #64748b;
+            font-weight: 700;
         }
 
         body.dark-mode .glass-input {
-            background: rgba(15, 23, 42, 0.4);
-            border-color: #1e293b;
-            color: #f1f5f9;
+            background: rgba(15, 23, 42, 0.7);
+            border-color: #334155;
+            color: #f8fafc;
+        }
+
+        body.dark-mode .glass-input::placeholder {
+            color: #94a3b8;
         }
 
         .glass-input:focus {
             outline: none;
-            border-color: #6366f1;
+            border-color: #4f46e5;
             background: white;
-            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15), 0 4px 10px rgba(99, 102, 241, 0.05);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2), 0 4px 10px rgba(99, 102, 241, 0.08);
         }
 
         body.dark-mode .glass-input:focus {
-            background: rgba(15, 23, 42, 0.6);
-            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.25);
+            background: rgba(15, 23, 42, 0.9);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.35);
         }
 
         /* Select inputs customized */
@@ -2246,23 +2256,26 @@
             appearance: none;
             -webkit-appearance: none;
             -moz-appearance: none;
-            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
             background-repeat: no-repeat;
             background-position: left 14px center;
             background-size: 16px;
             padding-left: 36px;
             cursor: pointer;
+            font-weight: 800;
+            color: #0f172a;
         }
 
         body.dark-mode select.glass-input {
-            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            color: #f8fafc;
         }
 
         .glass-icon {
             position: absolute;
             right: 14px;
-            font-size: 1.1rem;
-            opacity: 0.7;
+            font-size: 1.15rem;
+            opacity: 0.85;
             pointer-events: none;
             display: flex;
             align-items: center;
@@ -2273,16 +2286,16 @@
         .glass-type-selector {
             display: flex;
             gap: 8px;
-            background: #f1f5f9;
+            background: #e2e8f0;
             padding: 6px;
             border-radius: 14px;
-            border: 1px solid #e2e8f0;
+            border: 1.5px solid #cbd5e1;
             position: relative;
         }
 
         body.dark-mode .glass-type-selector {
             background: rgba(15, 23, 42, 0.5);
-            border-color: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
         }
 
         .glass-type-selector label {
@@ -2303,16 +2316,18 @@
             justify-content: center;
             padding: 10px 5px;
             border-radius: 10px;
-            font-size: 0.82rem;
-            font-weight: 800;
+            font-size: 0.88rem;
+            font-weight: 900;
             transition: border-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), background-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            color: #64748b;
+            color: #0f172a; /* خط واضح وثقيل */
             gap: 4px;
-            background: transparent;
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid transparent;
         }
 
         body.dark-mode .glass-type-selector span {
-            color: #94a3b8;
+            color: #e2e8f0;
+            background: rgba(30, 41, 59, 0.7);
         }
 
         .glass-type-selector input[type="radio"]:checked + span {

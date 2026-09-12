@@ -94,12 +94,7 @@ function setStore(key, value) {
     const dbInstance = window.bayanDB || window.db;
     if (dbInstance && dbInstance.settings) {
         const storedVal = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : String(value);
-        dbInstance.settings.put({ id: key, value: storedVal }).then(() => {
-            if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
-                // Trigger sync but without awaiting to not block UI
-                window.BayanNetworkHub.onDataSaved();
-            }
-        }).catch(err => {
+        dbInstance.settings.put({ id: key, value: storedVal }).catch(err => {
             console.error(`❌ خطأ في حفظ الإعداد [${key}] داخل IndexedDB:`, err);
         });
     }

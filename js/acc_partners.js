@@ -186,34 +186,28 @@
 
             }
 
-            try {
-
-                await saveData();
-
-            } catch (err) {
-
-                console.error("❌ فشل حفظ البيانات:", err);
-
-                return alert("⚠️ حدث خطأ أثناء حفظ البيانات في قاعدة البيانات: " + err.message);
-
+            // تم الحفظ المباشر في قاعدة البيانات عبر put/add فورياً
+            window.accountBalancesCache = {};
+            if (typeof window.invalidateAccountBalancesCache === 'function') {
+                window.invalidateAccountBalancesCache();
             }
 
             if (isNew) {
 
                 // حفظ وإضافة آخر: تصفير كل الحقول بما فيها الحقل المختفي الخاص بالـ ID للتعديل
-
                 document.getElementById('editAccId').value = '';
 
-                document.querySelectorAll('#newAccountModal input:not([type=radio]):not([type=checkbox]):not([type=hidden]), #newAccountModal textarea').forEach(el => el.value = '');
+                document.querySelectorAll('#newAccountModal input:not([type=radio]):not([type=hidden]), #newAccountModal textarea').forEach(el => {
+                    if (el.type === 'checkbox') el.checked = false;
+                    else el.value = '';
+                });
 
-                // تصفير الأرصدة الافتراضية للتأكد من عدم تكرارها
-
+                // تصفير الأرصدة الافتراضية والقوائم للتأكد من بدء حساب نظيف
                 if (document.getElementById('accDebit')) document.getElementById('accDebit').value = '0';
-
                 if (document.getElementById('accCredit')) document.getElementById('accCredit').value = '0';
-
-                document.getElementById('accBalDate').value = new Date().toLocaleDateString('en-CA');
-
+                if (document.getElementById('accCategory')) document.getElementById('accCategory').value = 'عام';
+                if (document.getElementById('accPriceLevel')) document.getElementById('accPriceLevel').value = 'retail';
+                if (document.getElementById('accBalDate')) document.getElementById('accBalDate').value = new Date().toLocaleDateString('en-CA');
                 document.getElementById('accName').focus();
 
                 // تصفير الصورة
@@ -631,11 +625,25 @@
             document.body.appendChild(modal);
         }
 
-        function renderAccountsTable() {
+        window.accountsRenderLimit = 50;
+        window.loadMoreAccounts = function(step) {
+            if (step === 0) {
+                window.accountsRenderLimit = Infinity;
+            } else {
+                window.accountsRenderLimit = (window.accountsRenderLimit || 50) + step;
+            }
+            renderAccountsTable(true);
+        };
+
+        function renderAccountsTable(isLoadMore = false) {
 
             const tbody = document.getElementById('accountsTableBody');
 
             if (!tbody) return;
+
+            if (!isLoadMore) {
+                window.accountsRenderLimit = 50;
+            }
 
             tbody.innerHTML = '';
 
@@ -734,6 +742,10 @@
                 .replace(/\s+/g, ' ');
 
             const searchInput = document.getElementById('accSearchName');
+            const clearBtn = document.getElementById('accSearchClearBtn');
+            if (clearBtn && searchInput) {
+                clearBtn.style.display = searchInput.value.trim().length > 0 ? 'inline-flex' : 'none';
+            }
             const rawSearch = (searchInput ? searchInput.value : '').trim().toLowerCase();
             const searchClean = cleanArabicStr(rawSearch);
 
@@ -763,7 +775,39 @@
 
             });
 
-            filtered.forEach((acc, idx) => {
+            // ⚡ فهرسة سريعة لجميع حركات الشركاء دفعة واحدة O(T) لتسريع فتح جدول الحسابات فورياً
+            const partnerTransactionsMap = {};
+            if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+                for (let i = 0; i < transactions.length; i++) {
+                    const t = transactions[i];
+                    if (!t) continue;
+                    if (t.partner) {
+                        const pClean = cleanArabicStr(t.partner);
+                        if (!partnerTransactionsMap[pClean]) partnerTransactionsMap[pClean] = [];
+                        partnerTransactionsMap[pClean].push(t);
+                    }
+                    if (t.partnerCode) {
+                        const cStr = String(t.partnerCode).trim();
+                        if (cStr) {
+                            if (!partnerTransactionsMap[cStr]) partnerTransactionsMap[cStr] = [];
+                            partnerTransactionsMap[cStr].push(t);
+                        }
+                    }
+                    if (t.accountCode) {
+                        const acStr = String(t.accountCode).trim();
+                        if (acStr) {
+                            if (!partnerTransactionsMap[acStr]) partnerTransactionsMap[acStr] = [];
+                            partnerTransactionsMap[acStr].push(t);
+                        }
+                    }
+                }
+            }
+
+            const balanceFilter = document.getElementById('accFilterBalance') ? document.getElementById('accFilterBalance').value : 'all';
+
+            const matchedAccounts = [];
+
+            filtered.forEach((acc) => {
 
                 const targetAccNameClean = cleanArabicStr(acc.name);
                 const targetAccCode = (acc.code || '').toString().trim();
@@ -774,14 +818,8 @@
                 let totalSales = 0;
                 let lastReceiptDate = '-';
 
-                // فلترة حركات الحساب بدقة مع مراعاة توحيد الهمزات والمسافات والكود
-                const accTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => {
-                    if (!t) return false;
-                    if (t.partner === acc.name) return true;
-                    if (targetAccNameClean && cleanArabicStr(t.partner) === targetAccNameClean) return true;
-                    if (targetAccCode && (t.partnerCode === targetAccCode || t.accountCode === targetAccCode)) return true;
-                    return false;
-                });
+                // جلب حركات الحساب فورياً من الفهرس المباشر O(1) بدلاً من فلترة ملايين العمليات
+                const accTrans = partnerTransactionsMap[targetAccNameClean] || (targetAccCode ? partnerTransactionsMap[targetAccCode] : null) || [];
 
                 accTrans.forEach(t => {
                     const transType = (t.type || '');
@@ -815,8 +853,6 @@
 
                 // --- منطق فلترة الأرصدة (Zero Balance Logic) ---
 
-                const balanceFilter = document.getElementById('accFilterBalance') ? document.getElementById('accFilterBalance').value : 'all';
-
                 const isZero = Math.abs(currentBalance) < 0.01;
 
                 if (balanceFilter === 'nonzero' && isZero) return;
@@ -835,10 +871,34 @@
 
                 globalTotalCredit += displayCredit;
 
-                const typeLabels = { client: 'عميل', supplier: 'مورد', delegate: 'مندوب', mixed: 'عميل ومورد', other: 'أخرى' };
+                matchedAccounts.push({
+                    acc,
+                    displayDebit,
+                    displayCredit,
+                    lastTransDate,
+                    totalSales,
+                    lastReceiptDate
+                });
+
+            });
+
+            // تحديث إجمالي المديونيات في الأسفل لكافة الحسابات المطابقة
+            const totalDebitEl = document.getElementById('totalGlobalDebit');
+            const totalCreditEl = document.getElementById('totalGlobalCredit');
+            if (totalDebitEl) totalDebitEl.innerText = globalTotalDebit.toFixed(2);
+            if (totalCreditEl) totalCreditEl.innerText = globalTotalCredit.toFixed(2);
+
+            const renderLimit = window.accountsRenderLimit || 50;
+            const accountsToDisplay = matchedAccounts.slice(0, renderLimit);
+
+            const typeLabels = { client: 'عميل', supplier: 'مورد', delegate: 'مندوب', mixed: 'عميل ومورد', other: 'أخرى' };
+
+            accountsToDisplay.forEach((item, idx) => {
+                const { acc, displayDebit, displayCredit, lastTransDate, totalSales, lastReceiptDate } = item;
 
                 const row = document.createElement('tr');
                 row.style.cursor = 'pointer';
+                row.dataset.accId = acc.id;
                 if (selectedAccountID === acc.id) {
                     row.classList.add('acc-selected-row');
                 }
@@ -860,23 +920,14 @@
                     : '';
 
                 const thMapData = {
-
                     0: idx + 1,
-
                     1: `<span style="color:var(--text-secondary); font-family:monospace;">${acc.code || '-'}</span>`,
-
                     2: `<span style="font-weight:bold;">${acc.name}</span>${frozenBadge}${notifyBadge}`,
-
                     3: `<span class="stock-badge">${typeLabels[acc.type] || acc.type}</span>`,
-
                     4: acc.category || '-',
-
                     5: `<span class="color-danger" style="font-weight:bold;">${displayDebit > 0 ? displayDebit.toFixed(2) : '-'}</span>`,
-
                     6: `<span class="color-success" style="font-weight:bold;">${displayCredit > 0 ? displayCredit.toFixed(2) : '-'}</span>`,
-
                     7: `<span style="color:var(--text-primary);">${totalSales.toFixed(2)}</span>`,
-
                     8: lastReceiptDate,
                     9: lastTransDate,
                     10: `<div style="display:flex; justify-content:center; align-items:center; width:100%;"><input type="radio" name="accSelect" ${selectedAccountID === acc.id ? 'checked' : ''} onclick="event.stopPropagation(); selectAccountRow(${acc.id});" style="width: 20px; height: 20px; accent-color: #be185d; cursor: pointer;"></div>`
@@ -901,22 +952,46 @@
 
             });
 
-            // تحديث إجمالي المديونيات في الأسفل
-
-            const totalDebitEl = document.getElementById('totalGlobalDebit');
-
-            const totalCreditEl = document.getElementById('totalGlobalCredit');
-
-            if (totalDebitEl) totalDebitEl.innerText = globalTotalDebit.toFixed(2);
-
-            if (totalCreditEl) totalCreditEl.innerText = globalTotalCredit.toFixed(2);
+            if (matchedAccounts.length > accountsToDisplay.length) {
+                const loadMoreTr = document.createElement('tr');
+                loadMoreTr.id = 'accLoadMoreRow';
+                loadMoreTr.style.cssText = "background: #fdf2f8; text-align: center;";
+                loadMoreTr.innerHTML = `
+                    <td colspan="100%" style="padding: 14px; border-top: 2px solid #e2e8f0;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 15px; font-weight: 800; font-size: 0.95rem; flex-wrap: wrap;">
+                            <span style="color: #475569;">تم عرض <b>${accountsToDisplay.length}</b> من أصل <b>${matchedAccounts.length}</b> حساب</span>
+                            <button type="button" onclick="window.loadMoreAccounts(50)" class="tool-btn" style="background: linear-gradient(135deg, #be185d, #9d174d); color: white; border-radius: 8px; padding: 7px 18px; cursor: pointer; border: none; font-weight: 800; box-shadow: 0 2px 6px rgba(190,24,93,0.3); font-family: 'Cairo', sans-serif; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s;">
+                                ⬇️ عرض المزيد (+50 حساب)
+                            </button>
+                            <button type="button" onclick="window.loadMoreAccounts(0)" class="tool-btn" style="background: white; color: #475569; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 7px 16px; cursor: pointer; font-weight: 800; font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                                ⚡ عرض الكل (${matchedAccounts.length})
+                            </button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(loadMoreTr);
+            }
 
         }
 
         function selectAccountRow(id) {
             selectedAccountID = id;
             window.selectedAccountID = id;
-            renderAccountsTable(); // إعادة رسم لتحديث التحديد البصري
+            const tbody = document.getElementById('accountsTableBody');
+            if (tbody) {
+                const rows = tbody.querySelectorAll('tr');
+                rows.forEach(r => {
+                    if (r.id === 'accLoadMoreRow') return;
+                    const radio = r.querySelector('input[name="accSelect"]');
+                    if (r.dataset.accId === String(id)) {
+                        r.classList.add('acc-selected-row');
+                        if (radio) radio.checked = true;
+                    } else {
+                        r.classList.remove('acc-selected-row');
+                        if (radio) radio.checked = false;
+                    }
+                });
+            }
         }
 
         window.openSelectedAccountStatement = function() {
@@ -1088,7 +1163,13 @@
 
                 accounts = accounts.filter(a => a.id !== selectedAccountID);
                 await db.accounts.delete(selectedAccountID);
-                await saveData();
+                if (typeof window.invalidateAccountBalancesCache === 'function') {
+                    window.invalidateAccountBalancesCache();
+                }
+                window.accountBalancesCache = {};
+                if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
+                    window.BayanNetworkHub.onDataSaved();
+                }
 
                 selectedAccountID = null;
                 renderAccountsTable();
@@ -1400,7 +1481,7 @@
 
             if (!targetId) {
                 document.getElementById('statementTableBody').innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 30px; font-weight: bold; color: #64748b;">الرجاء اختيار الحساب أولاً لعرض التقرير</td></tr>';
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="12" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
                 if (document.getElementById('statementTableFoot')) document.getElementById('statementTableFoot').innerHTML = '';
                 document.getElementById('stmtFinalBalance').innerText = '0.00';
                 document.getElementById('statementHeaderAccName').style.display = 'none';
@@ -1470,12 +1551,22 @@
 
             const cleanAr = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
             const targetPartnerClean = cleanAr(acc.name);
+            const targetAccCode = (acc.code || '').toString().trim();
 
-            // فلترة العمليات من سجل الحركات (transactions) مع مطابقة مرنة للأسماء والهمزات
-            const accTrans = transactions.filter(t => t.partner === acc.name || cleanAr(t.partner) === targetPartnerClean);
+            // فلترة العمليات من سجل الحركات (transactions) مع مطابقة مرنة للأسماء والهمزات والكود لضمان تطابق تام مع الحسابات
+            const accTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => {
+                if (!t) return false;
+                if (t.partner === acc.name || cleanAr(t.partner) === targetPartnerClean) return true;
+                if (targetAccCode && (String(t.partnerCode || '').trim() === targetAccCode || String(t.accountCode || '').trim() === targetAccCode)) return true;
+                return false;
+            });
 
-            // ترتيب العمليات حسب التاريخ لضمان تسلسل الرصيد
-            accTrans.sort((a, b) => new Date(a.dateISO) - new Date(b.dateISO));
+            // ترتيب العمليات حسب التاريخ والوقت لضمان دقة تسلسل الرصيد التراكمي
+            accTrans.sort((a, b) => {
+                const dDiff = new Date(a.dateISO || 0) - new Date(b.dateISO || 0);
+                if (dDiff !== 0) return dDiff;
+                return String(a.timeISO || '').localeCompare(String(b.timeISO || ''));
+            });
 
             // تجميع الحركات (Grouping by InvoiceID)
 
@@ -1516,13 +1607,18 @@
 
                     ivMap[key].total += (parseFloat(t.total) || 0);
 
-                    if (t.isInvoiceHead || t.paidAmount !== undefined || t.paid !== undefined) {
+                    if (t.isInvoiceHead) {
                         const pVal = parseFloat(t.paidAmount != null ? t.paidAmount : (t.paid != null ? t.paid : 0));
                         if (!isNaN(pVal)) {
-                            ivMap[key].paid = pVal;
+                            ivMap[key].paid = Math.max(ivMap[key].paid, pVal);
                         }
-                        if (t.editDate || t.updatedAt) ivMap[key].editDate = t.editDate || t.updatedAt;
+                    } else if (t.paidAmount !== undefined || t.paid !== undefined) {
+                        const pVal = parseFloat(t.paidAmount != null ? t.paidAmount : (t.paid != null ? t.paid : 0));
+                        if (!isNaN(pVal) && pVal > 0) {
+                            ivMap[key].paid = Math.max(ivMap[key].paid, pVal);
+                        }
                     }
+                    if (t.editDate || t.updatedAt) ivMap[key].editDate = t.editDate || t.updatedAt;
 
                 } else {
 
@@ -1543,6 +1639,19 @@
 
                 }
 
+            });
+
+            // ضبط وتأكيد سداد الفواتير النقدية والصريحة (كاش / بنك / شبكة) التي لم يسجل لها مدفوع صريح لتطابق قسم الحسابات تماماً
+            groupedTrans.forEach(iv => {
+                if (iv.isInvoice && iv.paid === 0 && iv.total > 0) {
+                    const m = String(iv.method || '').trim();
+                    const isCreditMethod = typeof window.isTransactionCredit === 'function'
+                        ? window.isTransactionCredit(m, 0, 0, 0)
+                        : (m.includes('آجل') || m.includes('اجل') || m.includes('ذمم') || m.includes('credit'));
+                    if (!isCreditMethod) {
+                        iv.paid = iv.total;
+                    }
+                }
             });
 
             // إعادة الفلترة للعرض بعد التجميع
@@ -1786,7 +1895,7 @@
             }
 
             document.getElementById('statementTableBody').innerHTML = rowsHTML;
-            document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
+            document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="12" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">اضغط على إحدى الحركات بالأعلى لعرض تفاصيلها هنا</td></tr>';
             document.getElementById('stmtActionPrintDoc').disabled = true;
             document.getElementById('stmtActionEdit').disabled = true;
             document.getElementById('stmtActionDelete').disabled = true;
@@ -1818,12 +1927,12 @@
 
             // الحركات المالية (قبض وصرف) لا تحتوي على أصناف
             if (type && (type.includes('قبض') || type.includes('صرف'))) {
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية)</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="12" style="padding: 40px; color: #94a3b8; font-size: 1.1rem; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية)</td></tr>';
                 return;
             }
             
             if (!invoiceId) {
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف لهذه الحركة</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="12" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف لهذه الحركة</td></tr>';
                 return;
             }
             
@@ -1843,7 +1952,7 @@
             }
             
             if (invoiceItems.length === 0) {
-                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="10" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية أو قيد)</td></tr>';
+                document.getElementById('statementDetailsBody').innerHTML = '<tr><td colspan="12" style="padding: 20px; text-align: center;">لا توجد تفاصيل أصناف (حركة مالية أو قيد)</td></tr>';
                 return;
             }
 
@@ -1856,6 +1965,12 @@
             const totalInvoiceSubtotal = invoiceItems.reduce((sum, item) => sum + (parseFloat(item.qty || 0) * parseFloat(item.price || 0)), 0);
             const globalDiscount = parentDoc ? parseFloat(parentDoc.discount || parentDoc.discountValue || 0) : 0;
             const globalAddition = parentDoc ? parseFloat(parentDoc.tax || parentDoc.taxAmount || parentDoc.globalTax || parentDoc.addition || parentDoc.additionValue || 0) : 0;
+
+            // دالة التعقيم لمنع ثغرات XSS
+            const esc = (txt) => {
+                if (txt == null) return '';
+                return String(txt).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+            };
 
             let html = '';
             invoiceItems.forEach(i => {
@@ -1887,18 +2002,31 @@
                 const category = (productDbInfo && productDbInfo.category) ? productDbInfo.category : (i.category || '-');
                 const itemNotes = i.notes || (parentDoc && parentDoc.notes) || i.note || '-';
                 
+                const itemSize = (i.size || i.selectedSize || '').trim();
+                const itemColor = (i.color || i.selectedColor || '').trim();
+
+                const sizeBadge = (itemSize && itemSize !== '-') 
+                    ? `<span style="display:inline-block; background:#f1f5f9; color:#0f172a; padding:2px 8px; border-radius:6px; font-weight:800; border:1px solid #cbd5e1; font-size:0.82rem;">${esc(itemSize)}</span>` 
+                    : '<span style="color:#94a3b8;">-</span>';
+                
+                const colorBadge = (itemColor && itemColor !== '-') 
+                    ? `<span style="display:inline-block; background:#fdf2f8; color:#be185d; padding:2px 8px; border-radius:6px; font-weight:800; border:1px solid #fbcfe8; font-size:0.82rem;">${esc(itemColor)}</span>` 
+                    : '<span style="color:#94a3b8;">-</span>';
+
                 html += `
                     <tr>
-                        <td>${productDbInfo ? productDbInfo.id : '-'}</td>
-                        <td style="font-weight:bold; text-align:right;">${i.product || '-'}</td>
-                        <td>${i.unit || '-'}</td>
+                        <td>${esc(productDbInfo ? productDbInfo.id : '-')}</td>
+                        <td style="font-weight:bold; text-align:right;">${esc(i.product || '-')}</td>
+                        <td>${sizeBadge}</td>
+                        <td>${colorBadge}</td>
+                        <td>${esc(i.unit || '-')}</td>
                         <td>${qty}</td>
                         <td>${price.toFixed(2)}</td>
                         <td style="color:#e11d48; font-weight:bold;">${discount > 0 ? discount.toFixed(2) : '0.00'}</td>
                         <td style="color:#2563eb; font-weight:bold;">${addition > 0 ? '+' + addition.toFixed(2) : '0.00'}</td>
                         <td style="font-weight:bold; color:var(--main-green);">${total.toFixed(2)}</td>
-                        <td>${category}</td>
-                        <td style="color: #64748b; font-size: 0.85rem;">${itemNotes}</td>
+                        <td>${esc(category)}</td>
+                        <td style="color: #64748b; font-size: 0.85rem;">${esc(itemNotes)}</td>
                     </tr>
                 `;
             });
@@ -2031,6 +2159,8 @@
 
             // نسخ الجدول وتنظيفه من أزرار الاختيار والتحديد
             const tableClone = tableEl.cloneNode(true);
+            const loadMoreRow = tableClone.querySelector('#accLoadMoreRow');
+            if (loadMoreRow) loadMoreRow.remove();
 
             // إزالة عمود التحديد (الراديو) من كل صف لضمان تطابق الأعمدة المطبوعة
             tableClone.querySelectorAll('tr').forEach(tr => {
@@ -2503,10 +2633,117 @@
         }
 
         window.renderAccountsTable = renderAccountsTable;
+        window.loadMoreAccounts = loadMoreAccounts;
         window.selectAccountRow = selectAccountRow;
         window.editSelectedAccount = editSelectedAccount;
         window.deleteSelectedAccount = deleteSelectedAccount;
         window.printAccountStatement = printAccountStatement;
         window.exportAccountsToExcel = exportAccountsToExcel;
         window.importAccountsFromExcel = importAccountsFromExcel;
+
+        // وظائف مسح البحث السريع في قسم الحسابات
+        window.handleAccountSearchInput = function(inputEl) {
+            const clearBtn = document.getElementById('accSearchClearBtn');
+            if (clearBtn) {
+                clearBtn.style.display = (inputEl && inputEl.value && inputEl.value.trim().length > 0) ? 'inline-flex' : 'none';
+            }
+            if (typeof renderAccountsTable === 'function') {
+                renderAccountsTable();
+            }
+        };
+
+        window.clearAccountsSearch = function() {
+            const inputEl = document.getElementById('accSearchName');
+            const clearBtn = document.getElementById('accSearchClearBtn');
+            if (inputEl) {
+                inputEl.value = '';
+                inputEl.focus();
+            }
+            if (clearBtn) {
+                clearBtn.style.display = 'none';
+            }
+            if (typeof renderAccountsTable === 'function') {
+                renderAccountsTable();
+            }
+        };
+
+        // وظيفة استرجاع البيانات / تفريغ الحقول في نافذة الحساب (إلغاء التعديلات أو البدء من جديد)
+        window.revertOrResetAccountModal = async function() {
+            const editId = document.getElementById('editAccId')?.value;
+            if (editId) {
+                // وضع تعديل: استرجاع البيانات الأصلية للحساب من قاعدة البيانات
+                let acc = null;
+                if (typeof db !== 'undefined' && db.accounts) {
+                    try {
+                        acc = await db.accounts.get(Number(editId));
+                    } catch (e) {
+                        console.warn("Error fetching account for revert:", e);
+                    }
+                }
+                if (!acc && typeof accounts !== 'undefined') {
+                    acc = accounts.find(a => a.id == editId);
+                }
+
+                if (acc) {
+                    document.getElementById('accName').value = acc.name || '';
+                    const imgPreview = document.getElementById('accImagePreview');
+                    if (imgPreview) {
+                        if (acc.image) {
+                            imgPreview.src = acc.image;
+                            imgPreview.dataset.base64 = acc.image;
+                        } else {
+                            imgPreview.src = 'data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22avatarGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%236366f1%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%233b82f6%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2250%22%20fill%3D%22url(%23avatarGrad)%22%2F%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2240%22%20r%3D%2216%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M25%2075c0-12%2012-16%2025-16s25%204%2025%2016v5H25v-5z%22%20fill%3D%22%23ffffff%22%2F%3E%3C%2Fsvg%3E';
+                            delete imgPreview.dataset.base64;
+                        }
+                    }
+                    const imgInput = document.getElementById('accImageInput');
+                    if (imgInput) imgInput.value = '';
+
+                    const typeRadio = document.querySelector(`input[name="accType"][value="${acc.type}"]`);
+                    if (typeRadio) typeRadio.checked = true;
+
+                    if (document.getElementById('accDebit')) document.getElementById('accDebit').value = acc.debit || 0;
+                    if (document.getElementById('accCredit')) document.getElementById('accCredit').value = acc.credit || 0;
+                    if (document.getElementById('accBalDate')) document.getElementById('accBalDate').value = acc.balanceDate || '';
+                    if (document.getElementById('accMobile')) document.getElementById('accMobile').value = acc.mobile || '';
+                    if (document.getElementById('accLandline')) document.getElementById('accLandline').value = acc.landline || '';
+                    if (document.getElementById('accEmail')) document.getElementById('accEmail').value = acc.email || '';
+                    if (document.getElementById('accAddress')) document.getElementById('accAddress').value = acc.address || '';
+                    if (document.getElementById('accCode')) document.getElementById('accCode').value = acc.code || '';
+                    if (document.getElementById('accTax')) document.getElementById('accTax').value = acc.tax || '';
+                    if (document.getElementById('accCategory')) document.getElementById('accCategory').value = acc.category || 'عام';
+                    if (document.getElementById('accDiscount')) document.getElementById('accDiscount').value = acc.discount || 0;
+                    if (document.getElementById('accMaxAllowedDebtField')) document.getElementById('accMaxAllowedDebtField').value = (acc.maxDebt !== undefined && acc.maxDebt !== null) ? acc.maxDebt : 0;
+                    if (document.getElementById('accPriceLevel')) document.getElementById('accPriceLevel').value = acc.priceLevel || 'retail';
+                    if (document.getElementById('accRemind')) document.getElementById('accRemind').checked = !!acc.remind;
+                    if (document.getElementById('accInactive')) document.getElementById('accInactive').checked = !!acc.inactive;
+                    if (document.getElementById('accNotes')) document.getElementById('accNotes').value = acc.notes || '';
+
+                    if (typeof showToast === 'function') showToast("🔄 تم استرجاع البيانات الأصلية للحساب بنجاح", "info");
+                    document.getElementById('accName').focus();
+                }
+            } else {
+                // وضع إضافة جديد: تفريغ كل الحقول والبدء من جديد
+                document.querySelectorAll('#newAccountModal input:not([type=radio]):not([type=hidden]), #newAccountModal textarea').forEach(el => {
+                    if (el.type === 'checkbox') el.checked = false;
+                    else el.value = '';
+                });
+                if (document.getElementById('accDebit')) document.getElementById('accDebit').value = '0';
+                if (document.getElementById('accCredit')) document.getElementById('accCredit').value = '0';
+                if (document.getElementById('accCategory')) document.getElementById('accCategory').value = 'عام';
+                if (document.getElementById('accPriceLevel')) document.getElementById('accPriceLevel').value = 'retail';
+                if (document.getElementById('accBalDate')) document.getElementById('accBalDate').value = new Date().toLocaleDateString('en-CA');
+                
+                const imgPreview = document.getElementById('accImagePreview');
+                if (imgPreview) {
+                    imgPreview.src = 'data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22avatarGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%236366f1%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%233b82f6%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2250%22%20fill%3D%22url(%23avatarGrad)%22%2F%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2240%22%20r%3D%2216%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M25%2075c0-12%2012-16%2025-16s25%204%2025%2016v5H25v-5z%22%20fill%3D%22%23ffffff%22%2F%3E%3C%2Fsvg%3E';
+                    delete imgPreview.dataset.base64;
+                }
+                const imgInput = document.getElementById('accImageInput');
+                if (imgInput) imgInput.value = '';
+
+                if (typeof showToast === 'function') showToast("🔄 تم تفريغ الحقول وإعادة الضبط بنجاح", "info");
+                document.getElementById('accName').focus();
+            }
+        };
 

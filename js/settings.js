@@ -93,7 +93,11 @@ async function saveSettings() {
     if (typeof updateAllCurrencyLabels === 'function') updateAllCurrencyLabels();
     if (typeof applyBusinessTypeUI === 'function') applyBusinessTypeUI();
 
-    await saveData();
+    if (typeof window.saveSettingsDirect === 'function') {
+        await window.saveSettingsDirect(settings);
+    } else {
+        await saveData();
+    }
     if (typeof window.checkAndRunPeriodicBackup === 'function') {
         window.checkAndRunPeriodicBackup();
     }
@@ -756,9 +760,12 @@ function renderUsersTable() {
 }
 
 function toggleFreezeUser(idx) {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية تجميد أو تنشيط المستخدمين!", "error");
+    }
     const u = users[idx];
     if (!u) return;
-    if (u.id === 1) return showToast("🛡️ لا يمكن تجميد حساب مدير النظام الرئيسي!", "error");
+    if (u.id === 1 || u.role === 'admin' || u.name === 'المدير') return showToast("🛡️ لا يمكن تجميد حساب مدير النظام الرئيسي!", "error");
 
     u.isFrozen = !u.isFrozen;
     saveData();
@@ -779,8 +786,15 @@ function toggleFreezeUser(idx) {
 }
 
 function changeUserPin(idx) {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية تعديل رموز المستخدمين!", "error");
+    }
     const u = users[idx];
     if (!u) return;
+
+    if ((u.id === 1 || u.role === 'admin' || u.name === 'المدير') && (!currentUser || currentUser.role !== 'admin')) {
+        return showToast("🛡️ لا يمكن تعديل رمز حساب المدير إلا بواسطة المدير نفسه!", "error");
+    }
 
     const existingModal = document.getElementById('changePinModalOverlay');
     if (existingModal) existingModal.remove();
@@ -823,8 +837,16 @@ function changeUserPin(idx) {
 window.changeUserPin = changeUserPin;
 
 function executeChangeUserPin(idx) {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية تعديل رموز المستخدمين!", "error");
+    }
     const u = users[idx];
     if (!u) return;
+
+    if ((u.id === 1 || u.role === 'admin' || u.name === 'المدير') && (!currentUser || currentUser.role !== 'admin')) {
+        return showToast("🛡️ لا يمكن تعديل رمز حساب المدير إلا بواسطة المدير نفسه!", "error");
+    }
+
     const inp = document.getElementById('customNewPinInput');
     if (!inp) return;
     const cleanPin = String(inp.value).trim();
@@ -846,6 +868,9 @@ function executeChangeUserPin(idx) {
 window.executeChangeUserPin = executeChangeUserPin;
 
 function openCopyPermissionsModal(targetIdx) {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية إدارة وصلاحيات المستخدمين!", "error");
+    }
     const targetUser = users[targetIdx];
     if (!targetUser) return;
 
@@ -891,6 +916,9 @@ function openCopyPermissionsModal(targetIdx) {
 }
 
 function executeCopyPermissions(targetIdx) {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية إدارة وصلاحيات المستخدمين!", "error");
+    }
     const select = document.getElementById('sourceUserSelect');
     if (!select) return;
     const sourceId = select.value;
@@ -938,9 +966,12 @@ function onUserWarehouseScopeChange(scope) {
 window.onUserWarehouseScopeChange = onUserWarehouseScopeChange;
 
 function addUser() {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية إدارة وصلاحيات المستخدمين!", "error");
+    }
     const name = document.getElementById('newUserName').value.trim();
     const pin = document.getElementById('newUserPin').value.trim();
-    const role = document.getElementById('newUserRole').value;
+    let role = document.getElementById('newUserRole').value;
     const nfcUid = (document.getElementById('newUserNfcUid') ? document.getElementById('newUserNfcUid').value.trim() : '');
     const warehouseScope = document.getElementById('newUserWarehouseScope') ? document.getElementById('newUserWarehouseScope').value : 'all';
     const assignedWarehouse = (warehouseScope === 'specific' && document.getElementById('newUserSpecificWarehouse'))
@@ -948,6 +979,15 @@ function addUser() {
         : (warehouseScope === 'main' ? 'المخزن الرئيسي' : '');
 
     if (!name || !pin) return showToast("⚠️ يرجى إدخال اسم المستخدم ورمز الدخول", "error");
+
+    const duplicatePinUser = users.find(u => u.pin === pin && u.id !== (window.editingUserId || 0));
+    if (duplicatePinUser) {
+        return showToast(`🚫 رمز الدخول PIN (${pin}) مستخدم بالفعل للموظف (${duplicatePinUser.name})!`, "error");
+    }
+
+    if (window.editingUserId === 1 || window.editingUserId === '1') {
+        role = 'admin'; // حماية رتبة مدير النظام الأساسي من التخفيض
+    }
 
     if (nfcUid) {
         const existingUser = users.find(u => u.nfcUid === nfcUid && u.id !== window.editingUserId);
@@ -1066,7 +1106,11 @@ function toggleAdminPermsUI(role) {
 
 window.editingUserId = null;
 function editUser(idx) {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية تعديل بيانات المستخدمين!", "error");
+    }
     const u = users[idx];
+    if (!u) return;
     window.editingUserId = u.id;
     document.getElementById('newUserName').value = u.name;
     document.getElementById('newUserPin').value = u.pin;
@@ -1368,6 +1412,9 @@ function toggleUserPinVisibility() {
 window.toggleUserPinVisibility = toggleUserPinVisibility;
 
 function showAddUserFormCard() {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية إضافة مستخدمين جدد!", "error");
+    }
     resetUserForm();
     const formCard = document.getElementById('userFormCard');
     const titleEl = document.getElementById('userFormCardTitle');
@@ -1406,8 +1453,25 @@ document.addEventListener('keydown', function(e) {
 });
 
 function deleteUser(idx) {
-    if (confirm("هل أنت متأكد من حذف هذا المستخدم؟")) {
-        const u = users[idx];
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية حذف المستخدمين!", "error");
+    }
+    const u = users[idx];
+    if (!u) return;
+
+    if (u.id === 1 || u.id === '1' || u.role === 'admin' || u.name === 'المدير') {
+        return showToast("🛡️ لا يمكن حذف حساب مدير النظام الرئيسي نهائياً!", "error");
+    }
+
+    if (users.length <= 1) {
+        return showToast("⚠️ لا يمكن حذف آخر مستخدم في النظام!", "error");
+    }
+
+    if (currentUser && (currentUser.id === u.id || currentUser.pin === u.pin)) {
+        return showToast("🚫 لا يمكنك حذف حسابك الحالي أثناء تسجيل الدخول به!", "error");
+    }
+
+    if (confirm(`هل أنت متأكد من حذف الموظف (${u.name}) نهائياً؟`)) {
         if (typeof addToTrash === 'function') addToTrash('user', u, `مستخدم: ${u.name}`);
         const deletedName = u.name;
         users.splice(idx, 1);
@@ -1417,6 +1481,7 @@ function deleteUser(idx) {
 
         if (typeof logAuditAction === 'function') logAuditAction('حذف مستخدم', `الاسم: ${deletedName}`);
         if (typeof syncUsersToCloud === 'function') syncUsersToCloud();
+        showToast(`🗑️ تم حذف الموظف (${deletedName}) بنجاح`, "info");
     }
 }
 
@@ -1910,7 +1975,12 @@ function saveWarehouse() {
 
             if (currentUser && currentUser.warehouseName === oldName) {
                 currentUser.warehouseName = name;
-                if (typeof setStore === 'function') setStore('pos_session_user', JSON.stringify(currentUser));
+                if (typeof setStore === 'function') {
+                    const encPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                        ? window.BayanSecurity.encryptPin(currentUser.pin)
+                        : currentUser.pin;
+                    setStore('pos_session_user', JSON.stringify({ pin: encPin, warehouseName: name }));
+                }
                 if (document.getElementById('currentWarehouseName')) {
                     document.getElementById('currentWarehouseName').innerText = ` 📦 ${name}`;
                 }
@@ -1962,6 +2032,17 @@ function saveWarehouse() {
     if (modal) modal.classList.add('hidden');
     if (typeof showToast === 'function') showToast("تم حفظ بيانات الموقع بنجاح ✅", "success");
     if (typeof renderInventoryTable === 'function') renderInventoryTable();
+
+    // مزامنة قوائم شاشة التحويل المخزني إذا كانت مفتوحة
+    if (typeof window.updateTransferToList === 'function') {
+        const wFrom = document.getElementById('transferFrom');
+        if (wFrom) {
+            const currentFrom = wFrom.value;
+            wFrom.innerHTML = (window.warehouses || warehouses || []).map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+            if (currentFrom) wFrom.value = currentFrom;
+        }
+        window.updateTransferToList();
+    }
 }
 
 function renderWarehousesTable() {
@@ -2031,7 +2112,9 @@ window.saveTransferPriceTypeSetting = async function(val) {
         if (typeof setStore === 'function') setStore('pos_settings', JSON.stringify(settingsObj));
     } catch(e) {}
 
-    if (typeof saveData === 'function') {
+    if (typeof window.saveSettingsDirect === 'function') {
+        await window.saveSettingsDirect();
+    } else if (typeof saveData === 'function') {
         await saveData();
     }
     const labelMap = {
@@ -2065,7 +2148,9 @@ window.saveAdjustmentPriceTypeSetting = async function(val) {
         if (typeof setStore === 'function') setStore('pos_settings', JSON.stringify(settingsObj));
     } catch(e) {}
 
-    if (typeof saveData === 'function') {
+    if (typeof window.saveSettingsDirect === 'function') {
+        await window.saveSettingsDirect();
+    } else if (typeof saveData === 'function') {
         await saveData();
     }
     const labelMap = {
@@ -2091,8 +2176,11 @@ function applyWarehouseSwitchFromSettings() {
             return showToast(`⛔ عذراً، حسابك مقيد بـ (${currentUser.assignedWarehouse}) فقط ولا يمكنك التبديل لمخزن آخر.`, "error");
         }
         currentUser.warehouseName = val;
-        // ✅ أمان: نحفظ pin فقط (لا role أو permissions)
-        setStore('pos_session_user', JSON.stringify({ pin: currentUser.pin, warehouseName: val }));
+        // ✅ أمان: نحفظ pin مشفراً فقط
+        const encWhPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+            ? window.BayanSecurity.encryptPin(currentUser.pin)
+            : currentUser.pin;
+        setStore('pos_session_user', JSON.stringify({ pin: encWhPin, warehouseName: val }));
         const whHeader = document.getElementById('currentWarehouseName');
         if (whHeader) whHeader.innerText = ` 📦 ${val}`;
         if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
@@ -2172,7 +2260,10 @@ window.switchWarehouseFromHeader = function(val) {
         }
 
         currentUser.warehouseName = val;
-        setStore('pos_session_user', JSON.stringify({ pin: currentUser.pin, warehouseName: val }));
+        const encHeaderPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+            ? window.BayanSecurity.encryptPin(currentUser.pin)
+            : currentUser.pin;
+        setStore('pos_session_user', JSON.stringify({ pin: encHeaderPin, warehouseName: val }));
         window.updateHeaderWarehouseSelect();
 
         const settingsSel = document.getElementById('settingsActiveWarehouseSelect');
@@ -2204,7 +2295,10 @@ window.filterInventoryByWarehouse = function(whName) {
 
         currentUser.warehouseName = whName;
         if (typeof setStore === 'function') {
-            setStore('pos_session_user', JSON.stringify({ pin: currentUser.pin, warehouseName: whName }));
+            const encFilterPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                ? window.BayanSecurity.encryptPin(currentUser.pin)
+                : currentUser.pin;
+            setStore('pos_session_user', JSON.stringify({ pin: encFilterPin, warehouseName: whName }));
         }
     }
     if (typeof renderInventoryTable === 'function') renderInventoryTable();
@@ -2217,6 +2311,10 @@ window.filterInventoryByWarehouse = function(whName) {
 function updateWarehousesSummaryBoard() {
     const board = document.getElementById('warehousesSummaryBoard');
     if (!board) return;
+    // ⚡ حماية الأداء: إذا كان قسم المخازن غير معروض حالياً على الشاشة، نتخطى الحسابات لتسريع حفظ الأصناف والفواتير
+    const sec = board.closest('.section-view');
+    if (sec && sec.classList.contains('hidden')) return;
+
     board.innerHTML = '';
 
     warehouses.forEach(w => {
@@ -2379,7 +2477,11 @@ async function toggleTheme() {
     if (themeBtn) {
         themeBtn.innerText = isDark ? '☀️ ' : '';
     }
-    await saveData();
+    if (typeof window.saveSettingsDirect === 'function') {
+        await window.saveSettingsDirect();
+    } else {
+        await saveData();
+    }
 }
 
 function changeAppColor(color) {

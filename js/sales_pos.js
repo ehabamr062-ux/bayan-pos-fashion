@@ -338,9 +338,12 @@ async function selectProductToHeader(productId) {
 async function handleSearch(query) {
 
     const resultsDiv = document.getElementById('searchResults');
+    if (!resultsDiv) return;
 
     searchSelectedIndex = -1; // إعادة تصغير المؤشر عند كل كتابة جديدة
 
+    // فك أي حجب برمجي أو كلاس hidden فوراً
+    resultsDiv.classList.remove('hidden');
     resultsDiv.style.setProperty('overflow', 'visible', 'important');
     resultsDiv.style.setProperty('max-height', 'none', 'important');
     resultsDiv.style.setProperty('border', 'none', 'important');
@@ -349,63 +352,92 @@ async function handleSearch(query) {
 
     // إذا تمت معالجة مسح باركود للتو عبر السكانر، نتجاهل كود البحث هنا لمنع الازدواجية
     if (typeof window.isBayanRecentScan === 'function' && window.isBayanRecentScan()) {
-        if (resultsDiv) resultsDiv.style.display = 'none';
+        resultsDiv.style.display = 'none';
         const sInp = document.getElementById('productSearch');
         if (sInp) sInp.value = '';
         return;
     }
 
-    if (!query) {
+    if (!query || !query.trim()) {
         resultsDiv.innerHTML = '';
         resultsDiv.style.display = 'none';
         return;
     }
 
-    // 2. البحث الحي (Live Search)
-    const queryLower = query.toLowerCase();
+    // 2. البحث الحي الموحد بالاسم أو الباركود أو الكود مع تطبيع الحروف العربية
+    const cleanNorm = (s) => String(s || '').trim().toLowerCase()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/[ىي]/g, 'ي')
+        .replace(/\s+/g, ' ');
+
+    const queryClean = cleanNorm(query);
+    const queryLower = query.trim().toLowerCase();
 
     const filtered = [];
-    for (let i = 0; i < productsDB.length; i++) {
-        const p = productsDB[i];
+    const list = (typeof productsDB !== 'undefined' && Array.isArray(productsDB) && productsDB.length > 0)
+        ? productsDB 
+        : (window.productsDB || []);
+
+    for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        const pNameClean = cleanNorm(p.name);
+        const pBarcode = String(p.barcode || '').toLowerCase();
+        const pCode = String(p.code || '').toLowerCase();
+
         let hasVariantMatch = false;
         if (p.variants && Array.isArray(p.variants)) {
-            hasVariantMatch = p.variants.some(v => v.barcode && String(v.barcode).toLowerCase().includes(queryLower));
+            hasVariantMatch = p.variants.some(v => 
+                (v.barcode && String(v.barcode).toLowerCase().includes(queryLower)) ||
+                (v.size && cleanNorm(v.size).includes(queryClean)) ||
+                (v.color && cleanNorm(v.color).includes(queryClean))
+            );
         }
+
+        let hasUnitMatch = false;
+        if (p.units && Array.isArray(p.units)) {
+            hasUnitMatch = p.units.some(u => u.unitBarcode && String(u.unitBarcode).toLowerCase().includes(queryLower));
+        }
+
         if (
-            (p.name && p.name.toLowerCase().includes(queryLower)) ||
-            (p.barcode && String(p.barcode).toLowerCase().includes(queryLower)) ||
-            (p.code && String(p.code).toLowerCase().includes(queryLower)) ||
-            hasVariantMatch
+            pNameClean.includes(queryClean) ||
+            pBarcode.includes(queryLower) ||
+            pCode.includes(queryLower) ||
+            hasVariantMatch ||
+            hasUnitMatch
         ) {
             filtered.push(p);
-            if (filtered.length >= 10) break;
+            if (filtered.length >= 12) break;
         }
     }
 
     if (filtered.length > 0) {
         resultsDiv.innerHTML = `
-            <div class="pos-search-panel" style="width: calc(100% + 340px); max-width: 580px; min-width: 320px; position: absolute; top: 100%; left: 50%; transform: translateX(50%); z-index: 99999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); border: 1px solid #cbd5e1; direction: rtl; text-align: right; margin-top: 6px; animation: modalFadeIn 0.2s ease-out;">
+            <div class="pos-search-panel" style="width: min(580px, calc(100vw - 40px)); min-width: 320px; position: absolute; top: calc(100% + 4px); right: 0; left: auto; z-index: 999999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 1.5px solid #cbd5e1; direction: rtl; text-align: right; animation: modalFadeIn 0.15s ease-out;">
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 14px; border-top-right-radius: 14px;">
                     <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج البحث (${filtered.length} صنف)</span>
-                    <button onclick="document.getElementById('searchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة">❌</button>
+                    <button type="button" onclick="document.getElementById('searchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة" style="background:none; border:none; cursor:pointer; font-size:1rem;">❌</button>
                 </div>
                 <div style="max-height: 380px; overflow-y: auto; padding: 6px; scrollbar-gutter: stable;">
                     ${filtered.map(p => {
                         const priceVal = parseFloat(p.price) || 0;
                         const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
                         const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWH) : 0;
+                        const safeName = (window.escapeHtml ? window.escapeHtml(p.name) : p.name);
+                        const safeCode = (window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id));
+                        const safeBarcode = (window.escapeHtml ? window.escapeHtml(p.barcode || '---') : (p.barcode || '---'));
                         return `
-                            <div class="pos-search-row" onclick="selectProductToHeader(${p.id});" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 8px;">
-                                <div style="flex: 1.5; min-width: 180px;">
-                                    <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b;">${p.name}</div>
-                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${p.code || p.id}</b> | باركود: <b>${p.barcode || '---'}</b></div>
+                            <div class="pos-search-row" onclick="selectProductToHeader(${p.id});" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 10px;">
+                                <div style="flex: 1; min-width: 0; text-align: right;">
+                                    <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b; white-space: normal; word-break: break-word;">${safeName}</div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${safeCode}</b> | باركود: <b>${safeBarcode}</b></div>
                                 </div>
-                                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                                    <div style="text-align: center; background: #f8fafc; padding: 5px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+                                    <div style="text-align: center; background: #f8fafc; padding: 5px 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
                                         <div style="font-size: 0.7rem; color: #64748b;">📦 الرصيد (${activeWH})</div>
                                         <div style="font-weight: 900; font-size: 0.95rem; color: ${stockVal <= 5 ? '#ef4444' : '#10b981'};">${stockVal} <span style="font-size:0.7rem;">${p.unit || 'قطعة'}</span></div>
                                     </div>
-                                    <div style="text-align: center; background: rgba(59, 130, 246, 0.08); padding: 5px 14px; border-radius: 8px; border: 1.5px solid rgba(59, 130, 246, 0.25);">
+                                    <div style="text-align: center; background: rgba(59, 130, 246, 0.08); padding: 5px 12px; border-radius: 8px; border: 1.5px solid rgba(59, 130, 246, 0.25);">
                                         <div style="font-size: 0.7rem; color: #1d4ed8; font-weight: 800;">💰 سعر البيع</div>
                                         <div style="font-weight: 900; font-size: 1rem; color: #1e40af;">${priceVal.toFixed(2)} ج.م</div>
                                     </div>
@@ -416,59 +448,35 @@ async function handleSearch(query) {
                 </div>
             </div>
         `;
-        resultsDiv.style.display = 'block';
+        resultsDiv.classList.remove('hidden');
+        resultsDiv.style.setProperty('display', 'block', 'important');
     } else {
-
-        // إذا لم يتم العثور على أي صنف، نظهر خيار "إضافة صنف جديد"
-
-        resultsDiv.innerHTML = '';
-
-        resultsDiv.style.display = 'block';
-
-        const div = document.createElement('div');
-
-        div.className = 'search-item';
-
-        div.style.padding = '15px';
-
-        div.style.cursor = 'pointer';
-
-        div.style.background = '#f5f3ff';
-
-        div.style.border = '2px dashed #8e44ad';
-
-        div.style.borderRadius = '8px';
-
-        div.style.margin = '5px';
-
-        div.style.color = '#8e44ad';
-
-        div.style.textAlign = 'center';
-
-        div.style.fontWeight = 'bold';
-
-        div.innerHTML = `<span style="font-size: 1.2rem;">📝</span> إضافة تفصيلية لصنف جديد: (${query})`;
-
-        div.onclick = () => {
-
-            resultsDiv.style.display = 'none';
-
-            quickAddProduct(query, 'sales');
-
-        };
-
-        resultsDiv.appendChild(div);
-
+        // إذا لم يتم العثور على أي صنف، نظهر خيار "إضافة صنف جديد" في لوحة جميلة ومحاذية
+        const safeQuery = (window.escapeHtml ? window.escapeHtml(query) : query);
+        const jsEscapedQuery = String(query || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        resultsDiv.innerHTML = `
+            <div class="pos-search-panel" style="width: min(450px, calc(100vw - 40px)); position: absolute; top: calc(100% + 4px); right: 0; left: auto; z-index: 999999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 1.5px solid #cbd5e1; direction: rtl; text-align: right; padding: 14px; animation: modalFadeIn 0.15s ease-out;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-weight: 800; font-size: 0.85rem; color: #64748b;">⚠️ لا توجد نتائج مطابقة لـ "${safeQuery}"</span>
+                    <button type="button" onclick="document.getElementById('searchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق" style="background:none; border:none; cursor:pointer; font-size:1rem;">❌</button>
+                </div>
+                <button type="button" onclick="document.getElementById('searchResults').style.display='none'; quickAddProduct('${jsEscapedQuery}', 'sales');" 
+                    style="width: 100%; padding: 12px; background: #f5f3ff; border: 2px dashed #8e44ad; border-radius: 10px; color: #8e44ad; font-weight: 900; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s;">
+                    <span>📝 إضافة صنف جديد باسم: "${safeQuery}"</span>
+                </button>
+            </div>
+        `;
+        resultsDiv.classList.remove('hidden');
+        resultsDiv.style.setProperty('display', 'block', 'important');
     }
-
 }
 
 // دالة جديدة للتحكم في الأسهم والإنتر داخل مربع البحث
-
-const psElem = document.getElementById('productSearch');
-if (psElem && !psElem._hasKeydown) {
-    psElem._hasKeydown = true;
-    psElem.addEventListener('keydown', function (e) {
+const setupProductSearchKeydown = () => {
+    const psElem = document.getElementById('productSearch');
+    if (psElem && !psElem._hasKeydown) {
+        psElem._hasKeydown = true;
+        psElem.addEventListener('keydown', function (e) {
         const resultsDiv = document.getElementById('searchResults');
         if (!resultsDiv || resultsDiv.style.display === 'none') return;
         const items = resultsDiv.querySelectorAll('.pos-search-row, .search-item, .result-item');
@@ -492,7 +500,25 @@ if (psElem && !psElem._hasKeydown) {
             resultsDiv.style.display = 'none';
         }
     });
+    }
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupProductSearchKeydown);
+} else {
+    setupProductSearchKeydown();
 }
+
+// إغلاق نافذة البحث عند النقر خارجها في أي مكان بالشاشة
+document.addEventListener('click', function (e) {
+    const resultsDiv = document.getElementById('searchResults');
+    const psElem = document.getElementById('productSearch');
+    if (resultsDiv && resultsDiv.style.display !== 'none') {
+        if (!resultsDiv.contains(e.target) && e.target !== psElem) {
+            resultsDiv.style.display = 'none';
+        }
+    }
+});
 
 function updateSearchSelection(items) {
     items.forEach((item, index) => {
@@ -759,6 +785,7 @@ function closeUnitSelectionModal() {
 }
 
 function handleUnitModalKeydown(e) {
+    if (!e || typeof e.key !== 'string') return;
 
     const modal = document.getElementById('unitSelectionModal');
 
@@ -948,14 +975,21 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
         const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
             || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
         if (hPrice !== null && canEditPrice) {
-            let baseCost = 0;
+            let itemCost = 0;
             if (effVariant && (effVariant.avgBuyPrice || effVariant.cost || effVariant.buyPrice)) {
-                baseCost = parseFloat(effVariant.avgBuyPrice) || parseFloat(effVariant.cost) || parseFloat(effVariant.buyPrice) || 0;
+                itemCost = parseFloat(effVariant.avgBuyPrice) || parseFloat(effVariant.cost) || parseFloat(effVariant.buyPrice) || 0;
             }
-            if (baseCost <= 0) {
-                baseCost = parseFloat(product.avgBuyPrice) || parseFloat(product.cost) || parseFloat(product.buyPrice) || 0;
+            if (itemCost <= 0 && selectedUnit && selectedUnit.cost && parseFloat(selectedUnit.cost) > 0) {
+                itemCost = parseFloat(selectedUnit.cost);
             }
-            const itemCost = baseCost * factor;
+            if (itemCost <= 0) {
+                const pCost = parseFloat(product.avgBuyPrice) || parseFloat(product.cost) || parseFloat(product.buyPrice) || 0;
+                if (selectedUnit && selectedUnit.factor && parseFloat(selectedUnit.factor) > 1 && (!selectedUnit.isBaseUnit)) {
+                    itemCost = pCost / parseFloat(selectedUnit.factor);
+                } else {
+                    itemCost = pCost;
+                }
+            }
             if (itemCost > 0 && hPrice < itemCost) {
                 if (window.BayanBarcode && typeof BayanBarcode.playBeep === 'function') BayanBarcode.playBeep(false);
                 if (typeof showCustomAlert === 'function') {
@@ -967,6 +1001,7 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
                 } else if (typeof showToast === 'function') {
                     showToast("⚠️ غير مسموح بالبيع بأقل من سعر التكلفة المحدد من الإدارة!", "error");
                 }
+                return false;
             } else {
                 existingItem.price = hPrice;
             }
@@ -998,14 +1033,21 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
             }
         }
 
-        let baseCost = 0;
+        let itemCost = 0;
         if (effVariant && (effVariant.avgBuyPrice || effVariant.cost || effVariant.buyPrice)) {
-            baseCost = parseFloat(effVariant.avgBuyPrice) || parseFloat(effVariant.cost) || parseFloat(effVariant.buyPrice) || 0;
+            itemCost = parseFloat(effVariant.avgBuyPrice) || parseFloat(effVariant.cost) || parseFloat(effVariant.buyPrice) || 0;
         }
-        if (baseCost <= 0) {
-            baseCost = parseFloat(product.avgBuyPrice) || parseFloat(product.cost) || parseFloat(product.buyPrice) || 0;
+        if (itemCost <= 0 && selectedUnit && selectedUnit.cost && parseFloat(selectedUnit.cost) > 0) {
+            itemCost = parseFloat(selectedUnit.cost);
         }
-        const itemCost = baseCost * factor;
+        if (itemCost <= 0) {
+            const pCost = parseFloat(product.avgBuyPrice) || parseFloat(product.cost) || parseFloat(product.buyPrice) || 0;
+            if (selectedUnit && selectedUnit.factor && parseFloat(selectedUnit.factor) > 1 && (!selectedUnit.isBaseUnit)) {
+                itemCost = pCost / parseFloat(selectedUnit.factor);
+            } else {
+                itemCost = pCost;
+            }
+        }
 
         const baseOriginalPrice = price;
         const itemDiscount = parseFloat(product.discount) || 0;
@@ -1027,12 +1069,12 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
                     showCustomAlert({
                         type: 'error',
                         titleText: '⚠️ تنبيه أمان: بيع بأقل من سعر التكلفة!',
-                        msg: `عذراً، غير مسموح ببيع الصنف "<b>${product.name}</b>" بسعر أقل من سعر التكلفة المحدد من الإدارة منعاً للخسارة والتلاعب!\n\n🛡️ تم اعتماد السعر الرسمي.`
+                        msg: `عذراً، غير مسموح ببيع الصنف "<b>${product.name}</b>" بسعر أقل من سعر التكلفة المحدد من الإدارة منعاً للخسارة والتلاعب!\n\n🛡️ تم منع إضافة الصنف بسعر أقل من التكلفة (${itemCost.toFixed(2)} ج.م).`
                     });
                 } else if (typeof showToast === 'function') {
                     showToast("⚠️ غير مسموح بالبيع بأقل من سعر التكلفة المحدد من الإدارة!", "error");
                 }
-                price = baseOriginalPrice;
+                return false;
             } else {
                 price = hPrice;
             }
@@ -1787,8 +1829,10 @@ window.onSalesPriceLevelChange = function() {
 function renderCart() {
 
     const tbody = document.getElementById('cartTableBody');
+    if (!tbody) return;
 
     tbody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
 
     let subTotal = 0;
 
@@ -1884,33 +1928,40 @@ function renderCart() {
         `;
         tr.onclick = (e) => {
             if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
-                document.querySelectorAll('#cartTableBody tr').forEach(r => {
-                    r.style.backgroundColor = '';
-                    r.style.boxShadow = '';
-                });
+                if (window._activeCartRow && window._activeCartRow !== tr) {
+                    window._activeCartRow.style.backgroundColor = '';
+                    window._activeCartRow.style.boxShadow = '';
+                }
+                window._activeCartRow = tr;
                 tr.style.backgroundColor = '#eff6ff';
                 tr.style.boxShadow = 'inset 4px 0 0 #2563eb';
                 updatePOSProductImagePreview(item.id, item.selectedVariant || item);
             }
         };
-        // عند مرور مؤشر الماوس على أي صنف في الفاتورة، تظهر صورته مع إطار محدد فوراً
+        // عند مرور مؤشر الماوس على أي صنف في الفاتورة، تظهر صورته مع إطار محدد فوراً وبدون استعلام DOM ثقيل
         tr.onmouseenter = () => {
-            document.querySelectorAll('#cartTableBody tr').forEach(r => {
-                r.style.backgroundColor = '';
-                r.style.boxShadow = '';
-            });
+            if (window._activeCartRow && window._activeCartRow !== tr) {
+                window._activeCartRow.style.backgroundColor = '';
+                window._activeCartRow.style.boxShadow = '';
+            }
+            window._activeCartRow = tr;
             tr.style.backgroundColor = '#eff6ff';
             tr.style.boxShadow = 'inset 4px 0 0 #2563eb';
             updatePOSProductImagePreview(item.id, item.selectedVariant || item);
         };
         tr.onmouseleave = () => {
-            tr.style.backgroundColor = '';
-            tr.style.boxShadow = '';
+            if (window._activeCartRow === tr) {
+                tr.style.backgroundColor = '';
+                tr.style.boxShadow = '';
+                window._activeCartRow = null;
+            }
         };
         tr.style.cursor = 'pointer';
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
 
     });
+
+    tbody.appendChild(fragment);
 
     document.getElementById('subTotalDisplay').innerText = subTotal.toFixed(2);
 
@@ -2155,8 +2206,8 @@ function calculateTotals(subTotalParam) {
     const isGenericCust = !custName || (typeof window.isGenericCashPartner === 'function' && window.isGenericCashPartner(custName));
     const isExplicitCred = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(curMethod, 0, 0, 0) : (curMethod === 'آجل' || curMethod.includes('آجل') || curMethod.includes('اجل'));
 
-    // إذا كانت المعاملة نقدية والعميل نقدي، يتم تحديث المدفوع ليكون مساوياً للإجمالي الجديد تلقائياً
-    if (!isExplicitCred && isGenericCust && tenderedInput) {
+    // إذا كانت المعاملة غير آجلة (كاش / بنك / شبكة)، يتم تحديث المدفوع ليكون مساوياً للإجمالي الجديد تلقائياً سواء كان العميل نقدياً أو مسجلاً بالاسم
+    if (!isExplicitCred && tenderedInput) {
         tenderedInput.value = currentTotal.toFixed(2);
     }
 
@@ -2429,22 +2480,20 @@ async function saveBill(force = false, accountChecked = false) {
         const isExplicitCreditMethod = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل'));
 
         const tenderedInput = document.getElementById('tenderedAmount');
-        let tendered = (tenderedInput && tenderedInput.value !== '') ? (parseFloat(tenderedInput.value) || 0) : 0;
+        let tendered = 0;
 
-        // إذا كانت الفاتورة نقدية والعميل نقدي، أو خانة المدفوع فارغة، فالمدفوع = إجمالي الفاتورة تلقائياً
-        if (!isExplicitCreditMethod && isGenericCustomer) {
+        if (!isExplicitCreditMethod) {
+            // أي معاملة غير آجلة صراحة (كاش، بنك، شبكة، فيزا، محافظ) مدفوعة بالكامل فوراً
             tendered = currentTotal;
             if (tenderedInput) {
                 tenderedInput.value = currentTotal.toFixed(2);
             }
-        } else if (!isExplicitCreditMethod && tendered <= 0 && (!tenderedInput || tenderedInput.value === '')) {
-            tendered = currentTotal;
-            if (tenderedInput) {
-                tenderedInput.value = currentTotal.toFixed(2);
-            }
+        } else {
+            // في المعاملة الآجلة، نقرأ المدفوع إن وُجد (دفع جزئي)، وإلا فهو صفر
+            tendered = (tenderedInput && tenderedInput.value !== '') ? (parseFloat(tenderedInput.value) || 0) : 0;
         }
 
-        const isCredit = isExplicitCreditMethod || (!isGenericCustomer && ((currentTotal - tendered) > 0.001));
+        const isCredit = isExplicitCreditMethod;
 
         if (customerName && !window.isGenericCashPartner(customerName) && typeof checkAccountFrozenAndAlert === 'function') {
             if (checkAccountFrozenAndAlert(customerName)) {
@@ -2507,11 +2556,8 @@ async function saveBill(force = false, accountChecked = false) {
                 // التحقق من الحد الائتماني
 
                 const limit = parseFloat(acc.maxDebt) || 0;
-
                 const currentDebt = getAccountBalance(acc.name);
-
                 const newDebtAmount = currentTotal - tendered;
-
                 if (limit > 0 && (currentDebt + newDebtAmount) > limit) {
 
                     showCustomAlert({
@@ -2700,6 +2746,9 @@ async function saveBill(force = false, accountChecked = false) {
             };
         const terminalName = tInfo.terminal;
 
+        const newTransactionRows = [];
+        const affectedProducts = [];
+
         cart.forEach((cartItem, idx) => {
 
             const product = productsDB.find(p => p.id === cartItem.id || p.name === cartItem.name);
@@ -2741,6 +2790,9 @@ async function saveBill(force = false, accountChecked = false) {
                         }, 0);
                     }
                 }
+                if (!affectedProducts.some(ap => ap.id === product.id)) {
+                    affectedProducts.push(product);
+                }
             }
 
             let itemNetTotal = cartItem.price * cartItem.qty * ratio;
@@ -2779,7 +2831,7 @@ async function saveBill(force = false, accountChecked = false) {
             const profit = itemNetTotal - itemTotalCost;
 
             // تسجيل الحركة الجديدة
-            transactions.push({
+            const newRow = {
                 date: dt.full,
                 dateISO: dt.iso,
                 timeISO: dt.time,
@@ -2814,11 +2866,27 @@ async function saveBill(force = false, accountChecked = false) {
                 terminalId: tInfo.terminalId,
                 unitFactor: factor, // حفظ المعامل للرجوع إليه عند التعديل مستقبلاً
                 editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل: ${currentUser ? currentUser.name : 'مجهول'})` : '-'
-            });
+            };
+            transactions.push(newRow);
+            newTransactionRows.push(newRow);
 
         });
 
-        await saveData();
+        // ⚡ حفظ المعاملة والأصناف المتأثرة فورياً وبدون إعادة كتابة الجداول (في الوضعين: جديد وتعديل)
+        if (typeof window.saveTransactionChanges === 'function') {
+            const affectedAccountsList = [];
+            if (isCredit && customerName && Array.isArray(accounts)) {
+                const targetAcc = accounts.find(a => a.name === customerName);
+                if (targetAcc) affectedAccountsList.push(targetAcc);
+            }
+            await window.saveTransactionChanges({
+                newTransactions: newTransactionRows,
+                modifiedProducts: affectedProducts,
+                modifiedAccounts: affectedAccountsList
+            });
+        } else {
+            await saveData();
+        }
 
         if (!isEditMode && typeof window.registerTrialInvoiceCreation === 'function') {
             window.registerTrialInvoiceCreation();
@@ -2836,12 +2904,14 @@ async function saveBill(force = false, accountChecked = false) {
         if (shouldAutoPrint) {
             const customerNameInput = document.getElementById('customerName');
             const customer = customerNameInput ? customerNameInput.value.trim() : 'عميل نقدي';
-            const isExplicitCredit = selectedMethod.includes('آجل') || selectedMethod.includes('اجل') || selectedMethod.includes('ذمم');
+            const isExplicitCredit = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل') || selectedMethod.includes('ذمم'));
             let paidValue = currentTotal;
             const tenderedInp = document.getElementById('tenderedAmount');
-            if (tenderedInp && tenderedInp.value !== '') {
+            if (!isExplicitCredit) {
+                paidValue = currentTotal;
+            } else if (tenderedInp && tenderedInp.value !== '') {
                 paidValue = parseFloat(tenderedInp.value) || 0;
-            } else if (isExplicitCredit) {
+            } else {
                 paidValue = 0;
             }
 
@@ -3045,12 +3115,14 @@ function printBill() {
 
     const salesId = document.getElementById('salesBadgeID') ? document.getElementById('salesBadgeID').innerText : '---';
 
-    const isExplicitCredit = method.includes('آجل') || method.includes('اجل') || method.includes('ذمم') || method.includes('credit');
+    const isExplicitCredit = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(method, 0, 0, 0) : (method.includes('آجل') || method.includes('اجل') || method.includes('ذمم') || method.includes('credit'));
     let paidValue = currentTotal;
     const tenderedInp = document.getElementById('tenderedAmount');
-    if (tenderedInp && tenderedInp.value !== '') {
+    if (!isExplicitCredit) {
+        paidValue = currentTotal;
+    } else if (tenderedInp && tenderedInp.value !== '') {
         paidValue = parseFloat(tenderedInp.value) || 0;
-    } else if (isExplicitCredit) {
+    } else {
         paidValue = 0;
     }
 

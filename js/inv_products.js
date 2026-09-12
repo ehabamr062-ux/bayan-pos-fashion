@@ -304,7 +304,7 @@ async function saveNewItem(mode = 'save') {
     if (category && window.inventoryCategories && !window.inventoryCategories.includes(category)) {
         window.inventoryCategories.push(category);
         if (typeof updateDatalists === 'function') updateDatalists();
-        if (typeof saveData === 'function') saveData();
+        if (typeof setStore === 'function') setStore('bayan_inventory_categories', JSON.stringify(window.inventoryCategories));
     }
 
     let warehouseStocks = {};
@@ -392,19 +392,49 @@ async function saveNewItem(mode = 'save') {
     }
 
     const finalId = (typeof currentEditingProductId !== 'undefined' && currentEditingProductId) ? currentEditingProductId : Date.now();
+    const safeName = typeof sanitizeInput === 'function' ? sanitizeInput(name) : name;
+    const safeNotes = typeof sanitizeInput === 'function' ? sanitizeInput(notes) : notes;
+    const safeCategory = typeof sanitizeInput === 'function' ? sanitizeInput(category) : category;
+    const safeBrand = typeof sanitizeInput === 'function' ? sanitizeInput(brand) : brand;
+    const safeSupplier = typeof sanitizeInput === 'function' ? sanitizeInput(supplier) : supplier;
+    const safeShelf = typeof sanitizeInput === 'function' ? sanitizeInput(shelf) : shelf;
+
+    // 🛡️ تحديد صورة الصنف بدقة فائقة وحمايتها التامة من الاختفاء عند تعديل أي بيانات
+    const previewEl = document.getElementById('productImagePreview');
+    const isExplicitlyRemoved = (window.productImageRemoved === true) || (previewEl && previewEl.dataset && previewEl.dataset.removed === 'true');
+    
+    let resolvedImage = null;
+    if (isExplicitlyRemoved) {
+        resolvedImage = null;
+    } else if (window.currentProductImageData) {
+        resolvedImage = window.currentProductImageData;
+    } else if (typeof currentProductImageData !== 'undefined' && currentProductImageData) {
+        resolvedImage = currentProductImageData;
+    } else if (previewEl && previewEl.dataset && previewEl.dataset.image) {
+        resolvedImage = previewEl.dataset.image;
+    } else if (existingProduct && existingProduct.image) {
+        resolvedImage = existingProduct.image;
+    }
+
     const newItem = {
         ...(existingProduct || {}),
         id: finalId,
         sysCode: sysCode || String(finalId),
         scalePlu: scalePlu,
-        name, price, cost, wholesale, minPrice, discount,
-        barcode, code, category, brand, supplier, shelf,
-        stock, minStock, expiry, notes,
+        name: safeName,
+        price, cost, wholesale, minPrice, discount,
+        barcode, code,
+        category: safeCategory,
+        brand: safeBrand,
+        supplier: safeSupplier,
+        shelf: safeShelf,
+        stock, minStock, expiry,
+        notes: safeNotes,
         units,
         variants,
         warehouseStocks,
         unit: units.length > 0 ? units[0].unitName : "قطعة",
-        image: typeof currentProductImageData !== 'undefined' ? currentProductImageData : (existingProduct ? existingProduct.image : null),
+        image: resolvedImage,
         isQuick: document.getElementById('isQuickItem') ? document.getElementById('isQuickItem').checked : false
     };
 
@@ -418,9 +448,9 @@ async function saveNewItem(mode = 'save') {
         await db.products.add(newItem);
     }
 
-    if (typeof saveData === 'function') {
-        await saveData();
-    }
+    if (typeof invalidateStockCache === 'function') invalidateStockCache();
+    if (typeof window.invalidateStockCache === 'function') window.invalidateStockCache();
+    if (typeof updateNotifications === 'function') updateNotifications();
     if (typeof updateDatalists === 'function') updateDatalists();
     if (typeof renderProductsGrid === 'function') renderProductsGrid();
 
@@ -450,15 +480,120 @@ async function saveNewItem(mode = 'save') {
     if (mode === 'save') {
         document.getElementById('newItemModal')?.classList.add('hidden');
     } else if (mode === 'new') {
+        // 🔄 تفريغ وتصفير شامل لكافة حقول كارت الصنف والتبويبات للبدء الفوري بصنف جديد نظيف تماماً
         window.currentEditingProductId = null;
+
+        // 1. تصفير الحقول العلوية (الاسم والأسعار والخصم)
         if (document.getElementById('newItemName')) document.getElementById('newItemName').value = "";
         if (document.getElementById('newItemPrice')) document.getElementById('newItemPrice').value = "0";
-        document.getElementById('newItemName')?.focus();
+        if (document.getElementById('newItemWholesale')) document.getElementById('newItemWholesale').value = "0";
+        if (document.getElementById('newItemCost')) document.getElementById('newItemCost').value = "0";
+        if (document.getElementById('newItemCostQty')) document.getElementById('newItemCostQty').value = "0";
+        if (document.getElementById('newItemMinPrice')) document.getElementById('newItemMinPrice').value = "0";
+        if (document.getElementById('newItemDiscount')) document.getElementById('newItemDiscount').value = "0";
+
+        // 2. تصفير الأكواد والباركود والتصنيف والبيانات الإضافية
+        if (document.getElementById('newItemBarcode')) document.getElementById('newItemBarcode').value = "";
+        if (document.getElementById('newItemCode')) document.getElementById('newItemCode').value = "";
+        if (document.getElementById('newItemSysCode')) document.getElementById('newItemSysCode').value = "";
+        if (document.getElementById('newItemScalePlu')) document.getElementById('newItemScalePlu').value = "";
+        if (document.getElementById('newItemCategory')) document.getElementById('newItemCategory').value = "عام";
+        if (document.getElementById('newItemBrand')) document.getElementById('newItemBrand').value = "";
+        if (document.getElementById('newItemSupplier')) document.getElementById('newItemSupplier').value = "";
+        if (document.getElementById('newItemShelf')) document.getElementById('newItemShelf').value = "";
+        if (document.getElementById('newItemNotes')) document.getElementById('newItemNotes').value = "";
+        if (document.getElementById('newItemExpiry')) document.getElementById('newItemExpiry').value = "";
+        if (document.getElementById('isQuickItem')) document.getElementById('isQuickItem').checked = false;
+
+        // 3. تصفير الأرصدة والمخازن
+        const mainStockInp = document.getElementById('newItemStock');
+        if (mainStockInp) {
+            mainStockInp.value = "0";
+            mainStockInp.dataset.origStock = "0";
+        }
+        if (document.getElementById('newItemMinStock')) document.getElementById('newItemMinStock').value = "10";
+        if (typeof renderProductWarehouseStocksTable === 'function') {
+            renderProductWarehouseStocksTable(null);
+        }
+
+        // 4. تصفير وتفريغ جدول ومولدات المقاسات والألوان تماماً
+        if (document.getElementById('variantSizesInput')) document.getElementById('variantSizesInput').value = '';
+        if (document.getElementById('variantColorsInput')) document.getElementById('variantColorsInput').value = '';
+        if (document.getElementById('colorOnlyInput')) document.getElementById('colorOnlyInput').value = '';
+        const vBody = document.getElementById('productVariantsTableBody');
+        if (vBody) vBody.innerHTML = '';
+        window.initialModalVariants = [];
+        const vCountBadge = document.getElementById('variantsCountBadge');
+        if (vCountBadge) vCountBadge.innerText = '0';
+        const matrixWrapper = document.getElementById('smartMatrixWrapper');
+        if (matrixWrapper) {
+            matrixWrapper.innerHTML = `
+                <div style="padding: 30px; text-align: center; color: #94a3b8; font-weight: bold; font-size: 0.95rem;">
+                    <span>👕📦 لا توجد تشكيلات مضافة بعد. اختر قالباً أو أضف ألواناً لتظهر في الشبكة الذكية هنا.</span>
+                </div>
+            `;
+        }
+
+        // 5. إعادة تعيين جدول الوحدات لقطعة افتراضية
+        const uBody = document.getElementById('productUnitsTableBody');
+        if (uBody) uBody.innerHTML = '';
+        if (typeof addProductUnitRow === 'function') addProductUnitRow('قطعة');
+
+        // 6. تصفير الصورة
+        const imgPreview = document.getElementById('productImagePreview');
+        if (imgPreview) {
+            imgPreview.style.backgroundImage = 'none';
+            imgPreview.dataset.image = '';
+            imgPreview.dataset.removed = 'false';
+            imgPreview.innerText = '📷';
+        }
+        window.currentProductImageData = null;
+        window.productImageRemoved = false;
+        if (typeof currentProductImageData !== 'undefined') currentProductImageData = null;
+        document.getElementById('removeProductImageBtn')?.classList.add('hidden');
+
+        // 7. توجيه المؤشر لاسم الصنف والتحويل لتبويب البيانات العامة
+        if (typeof switchBayanTab === 'function') {
+            switchBayanTab('general', document.querySelector('.bayan-tab'));
+        }
         if (typeof updateProductNavCounter === 'function') updateProductNavCounter();
+        if (typeof window.updateVariantPriceSyncUI === 'function') window.updateVariantPriceSyncUI();
+
+        setTimeout(() => {
+            document.getElementById('newItemName')?.focus();
+        }, 150);
     } else if (mode === 'duplicate') {
         window.currentEditingProductId = null;
+        // 🔄 توليد باركود دولي فريد جديد للصنف المكرر لمنع أي تعارض أمني عند الحفظ
+        if (typeof generateVariantBarcode === 'function') {
+            const newMainBc = generateVariantBarcode('', '', 1);
+            if (document.getElementById('newItemBarcode')) document.getElementById('newItemBarcode').value = newMainBc;
+        } else {
+            if (document.getElementById('newItemBarcode')) document.getElementById('newItemBarcode').value = '20' + String(Date.now()).slice(-8);
+        }
+        if (document.getElementById('newItemSysCode')) {
+            document.getElementById('newItemSysCode').value = '';
+        }
+
+        // توليد باركودات جديدة لكل المقاسات في الجدول لمنع تكرار باركودات المقاسات
+        const vRows = document.getElementById('productVariantsTableBody')?.rows || [];
+        for (let i = 0; i < vRows.length; i++) {
+            const bcInp = vRows[i].querySelector('.var-barcode-input');
+            const szInp = vRows[i].querySelector('.var-size-input');
+            const clInp = vRows[i].querySelector('.var-color-input');
+            const s = szInp ? szInp.value.trim() : '';
+            const c = clInp ? clInp.value.trim() : '';
+            if (bcInp) {
+                if (typeof generateVariantBarcode === 'function') {
+                    bcInp.value = generateVariantBarcode(s, c, i + 1);
+                } else {
+                    bcInp.value = `20${String(Date.now()).slice(-6)}${i + 1}`;
+                }
+            }
+        }
+
         document.getElementById('newItemName')?.focus();
-        alert("تم الحفظ، يمكنك تعديل الاسم الآن للتكرار.");
+        showToast("✅ تم حفظ الصنف الأصلي بنجاح، وتم تجهيز كارت صنف مكرر مع باركودات جديدة. يمكنك تغيير الاسم الآن!", "info");
         if (typeof updateProductNavCounter === 'function') updateProductNavCounter();
     }
 
@@ -611,14 +746,28 @@ function fillProductModal(p) {
     if (preview) {
         if (p.image) {
             preview.style.backgroundImage = `url(${p.image})`;
+            preview.dataset.image = p.image;
+            preview.dataset.removed = 'false';
             preview.innerText = '';
             window.currentProductImageData = p.image;
-            if (removeBtn) removeBtn.classList.remove('hidden');
+            window.productImageRemoved = false;
+            if (typeof currentProductImageData !== 'undefined') currentProductImageData = p.image;
+            if (removeBtn) {
+                removeBtn.classList.remove('hidden');
+                removeBtn.style.display = 'flex';
+            }
         } else {
             preview.style.backgroundImage = 'none';
+            preview.dataset.image = '';
+            preview.dataset.removed = 'false';
             preview.innerText = '📷';
             window.currentProductImageData = null;
-            if (removeBtn) removeBtn.classList.add('hidden');
+            window.productImageRemoved = false;
+            if (typeof currentProductImageData !== 'undefined') currentProductImageData = null;
+            if (removeBtn) {
+                removeBtn.classList.add('hidden');
+                removeBtn.style.display = 'none';
+            }
         }
     }
 
@@ -835,6 +984,42 @@ window.generateMainProductBarcode = function(force = false) {
     if (typeof showToast === 'function') showToast(`⚡ تم توليد باركود فريد: ${barcode}`, 'success');
 };
 
+// وظيفة إدخال أو مسح باركود دولي يدوي مع حماية من التعديل العرضي
+window.promptManualBarcodeEntry = async function(force = false) {
+    const inp = document.getElementById('newItemBarcode');
+    if (!inp) return;
+    const currentVal = inp.value.trim();
+    if (currentVal && !force) {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'warning',
+                titleText: '⚠️ تنبيه: الصنف لديه باركود بالفعل',
+                msg: `الصنف مسجل له باركود بالفعل (${currentVal})، هل أنت متأكد من رغبتك في استبداله بباركود جديد؟`,
+                confirmText: 'نعم، إدخال باركود جديد',
+                cancelText: 'إلغاء والاحتفاظ بالباركود الحالي',
+                showCancel: true,
+                onConfirm: () => window.promptManualBarcodeEntry(true)
+            });
+            return;
+        }
+    }
+    
+    let entered = null;
+    if (typeof showCustomPrompt === 'function') {
+        entered = await showCustomPrompt('📷 يرجى تمرير الاسكانر لقراءة باركود الصنف أو كتابته يدوياً:', currentVal || '', 'text');
+    } else {
+        entered = prompt('📷 يرجى مسح الباركود بجهاز الاسكانر أو كتابته يدوياً:', currentVal || '');
+    }
+
+    if (entered !== null && entered !== undefined) {
+        const clean = String(entered).trim();
+        if (clean) {
+            inp.value = clean;
+            if (typeof showToast === 'function') showToast(`✅ تم تعيين الباركود بنجاح: ${clean}`, 'success');
+        }
+    }
+};
+
 // وظيفة نسخ محتوى الحقل بنقرة واحدة
 window.copyFieldContent = function(elementId, labelName = 'الكود') {
     const el = document.getElementById(elementId);
@@ -872,11 +1057,43 @@ window.printCurrentProductBarcodeDirect = function() {
     const price = parseFloat(document.getElementById('newItemPrice')?.value) || 0;
     const brand = document.getElementById('newItemBrand')?.value || '';
 
+    // إذا كان الموديل يحتوي على مقاسات وألوان مسجلة في جدول التشكيلات
+    const vRows = document.getElementById('productVariantsTableBody')?.rows || [];
+    if (vRows.length > 0 && typeof window.printProductVariantHangtags === 'function') {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'question',
+                titleText: '🏷️ خيارات طباعة التيكت',
+                msg: `يحتوي هذا الصنف على (${vRows.length}) تشكيلة مقاس ولون مسجلة.<br>هل ترغب في طباعة تيكتات كافة المقاسات والألوان أم باركود الموديل العام فقط؟`,
+                confirmText: 'طباعة تيكتات المقاسات والألوان',
+                cancelText: 'طباعة باركود الموديل العام فقط',
+                showCancel: true,
+                onConfirm: () => {
+                    window.printProductVariantHangtags();
+                },
+                onCancel: () => {
+                    const labelItem = {
+                        name: name,
+                        barcode: barcode,
+                        price: price,
+                        brand: brand,
+                        copies: 1
+                    };
+                    if (typeof executePrinting === 'function') {
+                        executePrinting([labelItem], 1);
+                    }
+                }
+            });
+            return;
+        }
+    }
+
     const labelItem = {
         name: name,
         barcode: barcode,
         price: price,
-        brand: brand
+        brand: brand,
+        copies: 1
     };
 
     if (typeof executePrinting === 'function') {

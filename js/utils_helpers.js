@@ -1,6 +1,29 @@
 // ============================================================
 //  الأدوات والدوال المساعدة العامة والتنبيهات (General Helpers & UI Alerts)
 // ============================================================
+        // 🛡️ دوال التطهير والتعقيم الأمني ضد ثغرات الحقن (XSS Protection)
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+        window.escapeHtml = escapeHtml;
+
+        function sanitizeInput(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                .replace(/on\w+\s*=\s*(['"]).*?\1/gi, '')
+                .replace(/on\w+\s*=\s*[^>\s]+/gi, '')
+                .replace(/javascript\s*:/gi, '')
+                .trim();
+        }
+        window.sanitizeInput = sanitizeInput;
+
         // دالة التأخير (Debounce) لتحسين الأداء عند الكتابة في خانات البحث
         function debounce(func, wait) {
             let timeout;
@@ -11,13 +34,13 @@
         }
 
         // --- النسخ المؤجلة (Debounced Versions) للوظائف المكثفة ---
-        const debouncedHandleSearch = debounce((val) => { if (typeof handleSearch === 'function') handleSearch(val); }, 300);
-        const debouncedHandleReturnSearch = debounce((val, type) => { if (typeof handleReturnSearch === 'function') handleReturnSearch(val, type); }, 300);
-        const debouncedHandleCustomerSearch = debounce((val) => { if (typeof handleCustomerSearch === 'function') handleCustomerSearch(val); }, 300);
-        const debouncedRenderInventoryTable = debounce(() => { if (typeof renderInventoryTable === 'function') renderInventoryTable(); }, 350);
-        const debouncedHandlePriceAdjSearch = debounce(() => { if (typeof handlePriceAdjSearch === 'function') handlePriceAdjSearch(); }, 300);
-        const debouncedHandleSupplierSearch = debounce((val) => { if (typeof handleSupplierSearch === 'function') handleSupplierSearch(val); }, 300);
-        const debouncedHandlePurchaseSearch = debounce((val) => { if (typeof handlePurchaseSearch === 'function') handlePurchaseSearch(val); }, 300);
+        const debouncedHandleSearch = debounce((val) => { if (typeof handleSearch === 'function') handleSearch(val); }, 120);
+        const debouncedHandleReturnSearch = debounce((val, type) => { if (typeof handleReturnSearch === 'function') handleReturnSearch(val, type); }, 200);
+        const debouncedHandleCustomerSearch = debounce((val) => { if (typeof handleCustomerSearch === 'function') handleCustomerSearch(val); }, 150);
+        const debouncedRenderInventoryTable = debounce(() => { if (typeof renderInventoryTable === 'function') renderInventoryTable(); }, 250);
+        const debouncedHandlePriceAdjSearch = debounce(() => { if (typeof handlePriceAdjSearch === 'function') handlePriceAdjSearch(); }, 200);
+        const debouncedHandleSupplierSearch = debounce((val) => { if (typeof handleSupplierSearch === 'function') handleSupplierSearch(val); }, 150);
+        const debouncedHandlePurchaseSearch = debounce((val) => { if (typeof handlePurchaseSearch === 'function') handlePurchaseSearch(val); }, 120);
 
         window.debouncedHandleSearch = debouncedHandleSearch;
         window.debouncedHandleReturnSearch = debouncedHandleReturnSearch;
@@ -34,6 +57,21 @@
             if (typeof BayanNetworkHub !== 'undefined' && !BayanNetworkHub.isMasterServer) {
                 const masterHwid = getStore('bayan_master_hwid');
                 if (masterHwid) return masterHwid;
+            }
+
+            // إذا كان التطبيق يعمل في Electron، استرجاع كود الجهاز الدائم والمحمي من نظام التشغيل مباشرة (MachineGuid)
+            if (typeof require !== 'undefined') {
+                try {
+                    const { ipcRenderer } = require('electron');
+                    const nativeHwid = await ipcRenderer.invoke('get-hardware-uuid');
+                    if (nativeHwid) {
+                        setStore('bayan_hwid', nativeHwid);
+                        if (typeof db !== 'undefined' && db.settings) {
+                            try { await db.settings.put({ id: 'hwid', value: nativeHwid }); } catch(e) {}
+                        }
+                        return nativeHwid;
+                    }
+                } catch(e) {}
             }
 
             let hwid = getStore('bayan_hwid');
@@ -170,7 +208,12 @@
         function addNewReason(value, array, listId) {
             if (value && !array.includes(value)) {
                 array.push(value);
-                saveData();
+                if (typeof setStore === 'function') {
+                    if (typeof discountReasons !== 'undefined' && array === discountReasons) setStore('pos_discount_reasons', JSON.stringify(discountReasons));
+                    else if (typeof taxReasons !== 'undefined' && array === taxReasons) setStore('pos_tax_reasons', JSON.stringify(taxReasons));
+                    else if (typeof purchaseDiscountReasons !== 'undefined' && array === purchaseDiscountReasons) setStore('pos_p_discount_reasons', JSON.stringify(purchaseDiscountReasons));
+                    else if (typeof purchaseTaxReasons !== 'undefined' && array === purchaseTaxReasons) setStore('pos_p_tax_reasons', JSON.stringify(purchaseTaxReasons));
+                }
                 updateDatalists();
             }
         }
@@ -529,17 +572,45 @@
             const activeDebt = allDebtAccounts.filter(a => !window.acknowledgedDebt.includes(String(a.id)));
             const archivedDebt = allDebtAccounts.filter(a => window.acknowledgedDebt.includes(String(a.id)));
 
-            // 4. الحسابات المتأخرة النشطة (محمية بالصلاحيات)
+            // 4. الحسابات المتأخرة النشطة (محمية بالصلاحيات - فهرسة سريعة فائقة الأداء O(T))
+            const lastTxTimeByPartner = {};
+            if (canViewAccounts && typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+                for (let i = 0; i < transactions.length; i++) {
+                    const t = transactions[i];
+                    if (!t) continue;
+                    const dStr = t.date || t.timestamp || t.dateISO;
+                    if (!dStr) continue;
+                    const dTime = new Date(dStr).getTime();
+                    if (isNaN(dTime)) continue;
+
+                    if (t.partnerId) {
+                        if (!lastTxTimeByPartner[t.partnerId] || dTime > lastTxTimeByPartner[t.partnerId]) {
+                            lastTxTimeByPartner[t.partnerId] = dTime;
+                        }
+                    }
+                    if (t.partner) {
+                        if (!lastTxTimeByPartner[t.partner] || dTime > lastTxTimeByPartner[t.partner]) {
+                            lastTxTimeByPartner[t.partner] = dTime;
+                        }
+                    }
+                    if (t.account) {
+                        if (!lastTxTimeByPartner[t.account] || dTime > lastTxTimeByPartner[t.account]) {
+                            lastTxTimeByPartner[t.account] = dTime;
+                        }
+                    }
+                }
+            }
+
+            const todayTime = today.getTime();
             const allDelayed = (canViewAccounts && typeof accounts !== 'undefined' && Array.isArray(accounts))
                 ? accounts.filter(a => {
                     const balance = (parseFloat(a.debit) || 0) - (parseFloat(a.credit) || 0);
                     if (!((a.type === 'client' || a.type === 'mixed') && balance > 0)) return false;
                     const isRemindActive = (a.remind === true || a.remind === 'true');
                     if (!isRemindActive) return false;
-                    const lastTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => t.partnerId === a.id || t.account === a.name || t.partner === a.name).sort((x, y) => new Date(y.date || y.timestamp) - new Date(x.date || x.timestamp))[0];
-                    if (!lastTrans) return true;
-                    const lastDate = new Date(lastTrans.date || lastTrans.timestamp);
-                    const diffDays = Math.ceil((today - lastDate) / (1000 * 60 * 60 * 24));
+                    const lastTime = lastTxTimeByPartner[a.id] || lastTxTimeByPartner[a.name];
+                    if (!lastTime) return true;
+                    const diffDays = Math.ceil((todayTime - lastTime) / (1000 * 60 * 60 * 24));
                     return diffDays > 30;
                 })
                 : [];
@@ -921,10 +992,16 @@
                     if (typeof db !== 'undefined' && db.accounts) {
                         try { await db.accounts.put(newAcc); } catch(e) { console.warn("DB account put:", e); }
                     }
-                    if (typeof saveData === 'function') {
-                        await saveData();
+                    // ⚡ مزامنة الحساب الجديد جزئياً بدون إعادة كتابة جداول المحل بالكامل
+                    if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDeltaSaved === 'function') {
+                        window.BayanNetworkHub.onDeltaSaved({ modifiedAccounts: [newAcc] });
                     }
-                    if (typeof renderAccountsTable === 'function') {
+                    if (typeof updateDatalists === 'function') {
+                        updateDatalists();
+                    }
+                    // تحديث جدول الحسابات فقط إذا كانت شاشة الحسابات مفتوحة حالياً
+                    const accSection = document.getElementById('accounts-section');
+                    if (accSection && !accSection.classList.contains('hidden') && typeof renderAccountsTable === 'function') {
                         renderAccountsTable();
                     }
                     if (typeof showToast === 'function') {
@@ -1040,6 +1117,13 @@
                         if (paidBox) paidBox.style.display = 'none';
                         if (remainingBox) remainingBox.style.display = 'none';
                         if (btnContainer) btnContainer.style.display = 'none';
+
+                        // عند التحويل لطريقة غير آجلة (كاش / بنك / شبكة)، المدفوع = الإجمالي فوراً
+                        if (tenderedInput) {
+                            const curTot = typeof currentTotal !== 'undefined' ? currentTotal : (parseFloat(document.getElementById('total')?.innerText) || 0);
+                            tenderedInput.value = curTot.toFixed(2);
+                        }
+                        if (typeof calculateTotals === 'function') calculateTotals();
                     }
                 }
                 // قسم الشراء
@@ -1344,8 +1428,12 @@
             reader.onload = function(e) {
                 const preview = document.getElementById('productImagePreview');
                 const removeBtn = document.getElementById('removeProductImageBtn');
-                currentProductImageData = e.target.result;
+                window.currentProductImageData = e.target.result;
+                window.productImageRemoved = false;
+                if (typeof currentProductImageData !== 'undefined') currentProductImageData = e.target.result;
                 if (preview) {
+                    preview.dataset.image = e.target.result;
+                    preview.dataset.removed = 'false';
                     preview.style.backgroundImage = `url(${e.target.result})`;
                     Array.from(preview.childNodes).forEach(node => {
                         if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
@@ -1366,6 +1454,8 @@
             const fileInput = document.getElementById('newItemImage');
             if (preview) {
                 preview.style.backgroundImage = 'none';
+                preview.dataset.image = '';
+                preview.dataset.removed = 'true';
                 let hasText = false;
                 Array.from(preview.childNodes).forEach(node => {
                     if (node.nodeType === Node.TEXT_NODE) {
@@ -1375,7 +1465,9 @@
                 });
                 if (!hasText) preview.insertAdjacentText('afterbegin', '📷');
             }
-            currentProductImageData = null;
+            window.currentProductImageData = null;
+            window.productImageRemoved = true;
+            if (typeof currentProductImageData !== 'undefined') currentProductImageData = null;
             if (removeBtn) {
                 removeBtn.classList.add('hidden');
                 removeBtn.style.display = 'none';
@@ -1402,9 +1494,15 @@
             if (typeof updateDatalists === 'function') updateDatalists();
 
             // إعادة تعيين الصورة
-            preview.style.backgroundImage = 'none';
-            preview.innerText = '📷';
-            currentProductImageData = null;
+            if (preview) {
+                preview.style.backgroundImage = 'none';
+                preview.dataset.image = '';
+                preview.dataset.removed = 'false';
+                preview.innerText = '📷';
+            }
+            window.currentProductImageData = null;
+            window.productImageRemoved = false;
+            if (typeof currentProductImageData !== 'undefined') currentProductImageData = null;
             if (removeBtn) removeBtn.classList.add('hidden');
 
             // إعادة تعيين حالة القفل والحماية للأرصدة
@@ -1501,7 +1599,7 @@
             }
         };
 
-        window.showCustomPrompt = function(message, defaultValue = '') {
+        window.showCustomPrompt = function(message, defaultValue = '', inputType = 'text') {
             return new Promise((resolve) => {
                 const modal = document.getElementById('customPromptModal');
                 const title = document.getElementById('customPromptTitle');
@@ -1516,6 +1614,7 @@
                 
                 title.innerText = message;
                 input.value = defaultValue;
+                input.type = inputType || 'text';
                 modal.style.zIndex = '2147483647';
                 modal.classList.remove('hidden');
                 setTimeout(() => {
@@ -1524,6 +1623,7 @@
                 }, 50);
                 
                 function cleanup() {
+                    input.type = 'text'; // إعادة الحقل إلى نص عادي دائماً
                     modal.classList.add('hidden');
                     confirmBtn.onclick = null;
                     cancelBtn.onclick = null;
@@ -1549,6 +1649,47 @@
                     }
                 };
             });
+        };
+
+        // 🛡️ صمام الأمان المركزي: التحقق الإجباري من رمز PIN المدير قبل العمليات الحساسة
+        window.verifyAdminPinAuthorization = async function(actionTitle, actionDesc) {
+            const userList = (window.users && Array.isArray(window.users) && window.users.length > 0)
+                ? window.users
+                : ((typeof users !== 'undefined' && Array.isArray(users)) ? users : []);
+
+            const admins = userList.filter(u => u && u.role === 'admin' && !u.isFrozen);
+            // إذا لم يكن هناك أي مدير مسجل بعد، نسمح بالإجراء
+            if (admins.length === 0) return true;
+
+            const promptMsg = `${actionTitle || '🔒 تأكيد إذن المدير'}\n${actionDesc ? (actionDesc + '\n') : ''}يرجى إدخال رمز PIN الخاص بالمدير لتأكيد العملية:`;
+            const enteredPin = await window.showCustomPrompt(promptMsg, '', 'password');
+
+            if (enteredPin === null || enteredPin === undefined || String(enteredPin).trim() === '') {
+                if (typeof showToast === 'function') showToast('🛡️ تم إلغاء العملية ولم يتم تنفيذ أي حذف.', 'info');
+                return false;
+            }
+            const cleanEntered = String(enteredPin).trim();
+            const isValidAdmin = admins.some(a => {
+                if (!a || !a.pin) return false;
+                if (window.BayanSecurity && typeof window.BayanSecurity.verifyPin === 'function') {
+                    return window.BayanSecurity.verifyPin(cleanEntered, a.pin);
+                }
+                const plainPin = (window.BayanSecurity && typeof window.BayanSecurity.decryptPin === 'function')
+                    ? window.BayanSecurity.decryptPin(a.pin)
+                    : a.pin;
+                return String(a.pin).trim() === cleanEntered || String(plainPin).trim() === cleanEntered;
+            });
+
+            if (!isValidAdmin) {
+                if (typeof showToast === 'function') showToast('❌ رمز PIN المدير غير صحيح! تم رفض العملية.', 'error');
+                else alert('❌ رمز PIN المدير غير صحيح! تم رفض العملية.');
+                if (typeof logAuditAction === 'function') {
+                    logAuditAction('محاولة غير مصرح بها', `فشل التحقق من رمز PIN المدير أثناء: ${actionTitle || 'عملية حساسة'}`);
+                }
+                return false;
+            }
+
+            return true;
         };
 
         let activeAlertTimeout = null;

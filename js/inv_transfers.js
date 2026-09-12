@@ -152,9 +152,13 @@ var transferItemsBatch = window.transferItemsBatch;
 
                 wFrom.innerHTML = '';
 
-                warehouses.forEach(w => {
+                const whList = (typeof warehouses !== 'undefined' && Array.isArray(warehouses)) ? warehouses : (window.warehouses || []);
 
-                    wFrom.innerHTML += `<option value="${w.name}">${w.name}</option>`;
+                whList.forEach(w => {
+
+                    if (w && w.name) {
+                        wFrom.innerHTML += `<option value="${w.name}">${w.name}</option>`;
+                    }
 
                 });
 
@@ -792,18 +796,22 @@ var transferItemsBatch = window.transferItemsBatch;
                     div.className = 'transfer-search-card';
                     div.style.cssText = 'padding: 10px 14px; margin-bottom: 8px; border-radius: 14px; border: 1.5px solid #e2e8f0; background: #ffffff; cursor: pointer; transition: all 0.2s ease; display: flex; justify-content: space-between; align-items: center; gap: 14px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); box-sizing: border-box; width: 100%;';
 
+                    const safeName = (window.escapeHtml ? window.escapeHtml(p.name) : p.name);
+                    const safeCode = (window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id));
+                    const safeBarcode = (window.escapeHtml ? window.escapeHtml(p.barcode || '---') : (p.barcode || '---'));
+
                     div.innerHTML = `
                         <div style="flex: 1; min-width: 180px; text-align: right;">
                             <div style="font-weight: 900; font-size: 1.02rem; color: #0f172a; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; line-height: 1.3;">
                                 <span style="color: #0284c7; font-size: 1.1rem; flex-shrink: 0;">🏷️</span>
-                                <span style="color: #0f172a;">${p.name}</span>
+                                <span style="color: #0f172a;">${safeName}</span>
                             </div>
                             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                                 <span style="background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800; border: 1px solid #e2e8f0;">
-                                    كود: <b style="color: #0284c7; font-family: monospace;">${p.code || p.id}</b>
+                                    كود: <b style="color: #0284c7; font-family: monospace;">${safeCode}</b>
                                 </span>
                                 <span style="background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800; border: 1px solid #e2e8f0;">
-                                    باركود: <b style="color: #334155; font-family: monospace;">${p.barcode || '---'}</b>
+                                    باركود: <b style="color: #334155; font-family: monospace;">${safeBarcode}</b>
                                 </span>
                             </div>
                         </div>
@@ -851,7 +859,8 @@ var transferItemsBatch = window.transferItemsBatch;
 
             } else {
 
-                resultsDiv.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;"><div style="font-size:2rem; margin-bottom:10px;">🔍</div>لا توجد نتائج مطابقة لـ "' + query + '"</div>';
+                const safeQuery = (window.escapeHtml ? window.escapeHtml(query) : query);
+                resultsDiv.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;"><div style="font-size:2rem; margin-bottom:10px;">🔍</div>لا توجد نتائج مطابقة لـ "' + safeQuery + '"</div>';
 
             }
 
@@ -1193,6 +1202,126 @@ var transferItemsBatch = window.transferItemsBatch;
             renderTransferTable();
         }
 
+        // ----------------------------------------------------
+        // 🏭 خاصية الإضافة السريعة لمخزن جديد من شاشة التحويل
+        // ----------------------------------------------------
+        let _quickAddWarehouseTarget = 'to';
+
+        window.openQuickAddWarehouseModal = function(target = 'to') {
+            _quickAddWarehouseTarget = target;
+            const modal = document.getElementById('quickWarehouseModal');
+            if (!modal) return;
+
+            const nameInput = document.getElementById('quickWhNameInput');
+            const addrInput = document.getElementById('quickWhAddressInput');
+            if (nameInput) nameInput.value = '';
+            if (addrInput) addrInput.value = '';
+
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                if (nameInput) nameInput.focus();
+            }, 100);
+        };
+
+        window.closeQuickAddWarehouseModal = function() {
+            const modal = document.getElementById('quickWarehouseModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
+        window.saveQuickWarehouseFromTransfer = async function() {
+            const nameInput = document.getElementById('quickWhNameInput');
+            const addrInput = document.getElementById('quickWhAddressInput');
+            if (!nameInput) return;
+
+            const name = nameInput.value.trim();
+            const address = addrInput ? addrInput.value.trim() : '';
+
+            if (!name) {
+                if (typeof showToast === 'function') showToast("يرجى كتابة اسم المخزن أو الفرع الجديد!", "error");
+                else alert("يرجى كتابة اسم المخزن الجديد");
+                nameInput.focus();
+                return;
+            }
+
+            if (!Array.isArray(window.warehouses)) {
+                window.warehouses = (typeof warehouses !== 'undefined' && Array.isArray(warehouses)) ? warehouses : [];
+            }
+
+            // فحص هل الاسم مكرر
+            if (window.warehouses.some(w => w && w.name && w.name.trim().toLowerCase() === name.toLowerCase())) {
+                if (typeof showToast === 'function') showToast(`اسم المخزن "${name}" مسجل بالفعل!`, "warning");
+                else alert(`اسم المخزن "${name}" مسجل بالفعل!`);
+                nameInput.focus();
+                return;
+            }
+
+            const newWh = {
+                id: Date.now(),
+                name: name,
+                address: address || ''
+            };
+
+            window.warehouses.push(newWh);
+            if (typeof warehouses !== 'undefined') {
+                warehouses = window.warehouses;
+            }
+
+            // حفظ فوري في قاعدة البيانات
+            try {
+                if (typeof db !== 'undefined' && db.warehouses) {
+                    await db.warehouses.put(newWh);
+                }
+            } catch (e) {
+                console.warn("⚠️ خطأ أثناء حفظ المخزن في db.warehouses:", e);
+            }
+
+            // حفظ عام في النظام
+            if (typeof saveData === 'function') {
+                try { saveData(); } catch (e) {}
+            }
+
+            // تحديث شاشات وجداول النظام
+            if (typeof renderWarehousesTable === 'function') renderWarehousesTable();
+            if (typeof updateSettingsWarehouseSelect === 'function') updateSettingsWarehouseSelect();
+            if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
+            if (typeof renderInventoryTable === 'function') renderInventoryTable();
+
+            // تحديث قوائم التحويل فورياً
+            const wFrom = document.getElementById('transferFrom');
+            const wTo = document.getElementById('transferTo');
+            const previousFromVal = wFrom ? wFrom.value : '';
+
+            if (wFrom) {
+                wFrom.innerHTML = '';
+                window.warehouses.forEach(w => {
+                    wFrom.innerHTML += `<option value="${w.name}">${w.name}</option>`;
+                });
+                if (_quickAddWarehouseTarget === 'from') {
+                    wFrom.value = name;
+                } else if (previousFromVal && window.warehouses.some(w => w.name === previousFromVal)) {
+                    wFrom.value = previousFromVal;
+                }
+            }
+
+            if (typeof window.updateTransferToList === 'function') {
+                window.updateTransferToList();
+            }
+
+            if (wTo && _quickAddWarehouseTarget === 'to') {
+                wTo.value = name;
+            }
+
+            window.closeQuickAddWarehouseModal();
+
+            if (typeof showToast === 'function') {
+                showToast(`تمت إضافة المخزن "${name}" بنجاح وجرى تحديده للتحويل ✅`, "success");
+            }
+
+            if (typeof renderTransferTable === 'function') {
+                renderTransferTable();
+            }
+        };
+
         window.updateTransferToList = function() {
 
             const wFromVal = document.getElementById('transferFrom').value;
@@ -1201,15 +1330,24 @@ var transferItemsBatch = window.transferItemsBatch;
 
             if (!wTo) return;
 
+            const prevToVal = wTo.value;
+
             wTo.innerHTML = '';
 
-            const filteredWarehouses = warehouses.filter(w => w.name !== wFromVal);
+            const currentWarehouses = (typeof warehouses !== 'undefined' && Array.isArray(warehouses)) ? warehouses : (window.warehouses || []);
 
-            filteredWarehouses.forEach(w => {
+            const filteredWarehouses = currentWarehouses.filter(w => w && w.name !== wFromVal);
 
-                wTo.innerHTML += `<option value="${w.name}">${w.name}</option>`;
-
-            });
+            if (filteredWarehouses.length === 0) {
+                wTo.innerHTML = '<option value="" disabled selected>⚠️ لا توجد فروع أخرى (اضغط ➕ مخزن جديد)</option>';
+            } else {
+                filteredWarehouses.forEach(w => {
+                    wTo.innerHTML += `<option value="${w.name}">${w.name}</option>`;
+                });
+                if (prevToVal && filteredWarehouses.some(w => w.name === prevToVal)) {
+                    wTo.value = prevToVal;
+                }
+            }
 
             renderTransferTable();
 
@@ -1376,7 +1514,16 @@ var transferItemsBatch = window.transferItemsBatch;
                         });
 
                         if (processedCount > 0) {
-                            await saveData();
+                            const newTransferRows = transactions.filter(t => String(t.invoiceId) === String(transId));
+                            if (typeof window.saveTransactionChanges === 'function') {
+                                await window.saveTransactionChanges({
+                                    newTransactions: newTransferRows,
+                                    modifiedProducts: [],
+                                    modifiedAccounts: []
+                                });
+                            } else {
+                                await saveData();
+                            }
                             if (typeof invalidateStockCache === 'function') invalidateStockCache();
 
                             // إشعار السيرفر المحلي بإذن التحويل الجديد فوراً لساحة الانتظار
@@ -1713,6 +1860,7 @@ var transferItemsBatch = window.transferItemsBatch;
             const receiverUser = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) ? currentUser.name : 'أمين المخزن';
             const nowFull = new Date().toLocaleString('ar-EG');
 
+            const affectedProducts = [];
             transItems.forEach(item => {
                 item.transferStatus = 'received';
                 item.receivedBy = receiverUser;
@@ -1726,6 +1874,7 @@ var transferItemsBatch = window.transferItemsBatch;
 
                 const p = productsDB.find(prod => prod && (prod.name === item.product || prod.id === item.id));
                 if (p) {
+                    if (!affectedProducts.includes(p)) affectedProducts.push(p);
                     if (!p.warehouseStocks) p.warehouseStocks = {};
 
                     // 1. خصم الكمية من المخزن المصدر
@@ -1734,19 +1883,15 @@ var transferItemsBatch = window.transferItemsBatch;
                         : (wFrom === 'المخزن الرئيسي' ? (parseFloat(p.stock) || 0) : 0);
                     p.warehouseStocks[wFrom] = Math.max(0, currentSrcPStock - baseQty);
 
-                    // 2. إضافة الكمية لرصيد المخزن المستلم
+                    // 2. إضافة الكمية للمخزن المستلم
                     const currentDstPStock = (p.warehouseStocks[wTo] !== undefined && !isNaN(parseFloat(p.warehouseStocks[wTo])))
                         ? parseFloat(p.warehouseStocks[wTo])
                         : (wTo === 'المخزن الرئيسي' ? (parseFloat(p.stock) || 0) : 0);
                     p.warehouseStocks[wTo] = currentDstPStock + baseQty;
 
-                    // 3. تحديث التشكيلات (المقاس واللون) في مصفوفة الصنف للمخزنين
+                    // معالجة التشكيلات (المقاس واللون) بدقة تامة
                     if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
-                        const norm = s => String(s || '').trim().toLowerCase()
-                            .replace(/[أإآ]/g, 'ا')
-                            .replace(/ة/g, 'ه')
-                            .replace(/ى/g, 'ي')
-                            .replace(/\s+/g, ' ');
+                        const norm = (str) => String(str || '').trim().toLowerCase();
                         const nSize = norm(item.size || item.selectedSize || '');
                         const nColor = norm(item.color || item.selectedColor || '');
                         if (nSize || nColor) {
@@ -1799,7 +1944,15 @@ var transferItemsBatch = window.transferItemsBatch;
                 }
             });
 
-            await saveData();
+            if (typeof window.saveTransactionChanges === 'function') {
+                await window.saveTransactionChanges({
+                    newTransactions: transItems,
+                    modifiedProducts: affectedProducts,
+                    modifiedAccounts: []
+                });
+            } else {
+                await saveData();
+            }
             if (typeof invalidateStockCache === 'function') invalidateStockCache();
 
             // إشعار السيرفر المحلي
@@ -1858,7 +2011,15 @@ var transferItemsBatch = window.transferItemsBatch;
                 item.rejectedAt = nowFull;
             });
 
-            await saveData();
+            if (typeof window.saveTransactionChanges === 'function') {
+                await window.saveTransactionChanges({
+                    newTransactions: transItems,
+                    modifiedProducts: [],
+                    modifiedAccounts: []
+                });
+            } else {
+                await saveData();
+            }
             if (typeof invalidateStockCache === 'function') invalidateStockCache();
 
             const sUrl = (window.BayanNetworkHub && window.BayanNetworkHub.serverUrl) ? window.BayanNetworkHub.serverUrl : '';

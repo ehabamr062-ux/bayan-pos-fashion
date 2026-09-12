@@ -815,9 +815,11 @@ async function saveAdjustment() {
         const itemsToProcess = [...(window.adjCart || [])];
         window.adjCart = []; // تفريغ فوري لمنع المعالجة المكررة
 
+        const affectedProducts = [];
         itemsToProcess.forEach(item => {
             const p = productsDB.find(x => x.id === item.id || x.name === item.name);
             if (p) {
+                if (!affectedProducts.includes(p)) affectedProducts.push(p);
                 const factor = parseFloat(item.unitFactor) || 1;
                 const countedBase = (parseFloat(item.qty) || 0) * factor;
                 const stockBefore = parseFloat(item.stock) || 0;
@@ -907,7 +909,16 @@ async function saveAdjustment() {
             editDate: '-'
         });
 
-        if (typeof saveData === 'function') await saveData();
+        const newAdjRows = transactions.filter(t => String(t.invoiceId) === String(adjId));
+        if (typeof window.saveTransactionChanges === 'function') {
+            await window.saveTransactionChanges({
+                newTransactions: newAdjRows,
+                modifiedProducts: affectedProducts,
+                modifiedAccounts: []
+            });
+        } else if (typeof saveData === 'function') {
+            await saveData();
+        }
 
         // إبطال كاش الأرصدة وحركات المخزون لضمان انعكاس التسوية فوراً في أرصدة المخازن وحركة الصنف
         if (typeof invalidateStockCache === 'function') invalidateStockCache();
@@ -2076,8 +2087,8 @@ async function saveFashionVariantsPrice() {
                 if (mIdx !== -1) productsDB[mIdx] = pInDB;
             }
 
-            if (typeof saveData === 'function') {
-                await saveData();
+            if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
+                window.BayanNetworkHub.onDataSaved();
             }
 
             // تحديث كائن الصنف في نافذة تعديل الأسعار الرئيسية
@@ -2297,7 +2308,7 @@ async function savePriceAdjustments() {
         const dataToSave = [...window.priceAdjData];
         if (!Array.isArray(productsDB)) productsDB = [];
 
-        // 1. تحديث الذاكرة المركزية فورياً لكافة الأصناف والتشكيلات
+        const touchedProducts = [];
         dataToSave.forEach(item => {
             const p = productsDB.find(x => 
                 (item.id !== undefined && item.id !== null && String(x.id) === String(item.id)) ||
@@ -2307,6 +2318,7 @@ async function savePriceAdjustments() {
             );
 
             if (p) {
+                if (!touchedProducts.includes(p)) touchedProducts.push(p);
                 p.price = parseFloat(item.retail) || 0;
                 p.wholesale = parseFloat(item.wholesale) || 0;
                 p.cost = parseFloat(item.avgBuyPrice) || 0;
@@ -2333,11 +2345,15 @@ async function savePriceAdjustments() {
 
         window.productsDB = productsDB;
 
-        // 2. الحفظ الذري المباشر والسريع عبر دالة النظام المركزية
-        if (typeof saveData === 'function') {
+        // 2. الحفظ الذري المباشر والسريع للأصناف المعدلة فقط
+        if (typeof db !== 'undefined' && db && db.products && touchedProducts.length > 0) {
+            await db.products.bulkPut(touchedProducts);
+        } else if (typeof saveData === 'function') {
             await saveData();
-        } else if (typeof db !== 'undefined' && db.products) {
-            await db.products.bulkPut(productsDB);
+        }
+
+        if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
+            window.BayanNetworkHub.onDataSaved();
         }
 
         if (typeof showToast === 'function') {

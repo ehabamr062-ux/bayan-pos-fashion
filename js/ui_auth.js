@@ -153,17 +153,32 @@
             }
         }
 
-        let failedLoginAttempts = 0;
-        let loginLockoutUntil = 0;
+        function getLoginLockoutState() {
+            try {
+                const until = parseInt(localStorage.getItem('bayan_login_lockout_until') || '0', 10) || 0;
+                const attempts = parseInt(localStorage.getItem('bayan_login_failed_attempts') || '0', 10) || 0;
+                return { until, attempts };
+            } catch(e) {
+                return { until: 0, attempts: 0 };
+            }
+        }
+
+        function setLoginLockoutState(until, attempts) {
+            try {
+                localStorage.setItem('bayan_login_lockout_until', String(until || 0));
+                localStorage.setItem('bayan_login_failed_attempts', String(attempts || 0));
+            } catch(e) {}
+        }
 
         function attemptLogin() {
             try {
                 const now = Date.now();
                 const errorMsgEl = document.getElementById('loginErrorMsg');
+                let { until: loginLockoutUntil, attempts: failedLoginAttempts } = getLoginLockoutState();
 
                 if (now < loginLockoutUntil) {
                     const remainingSec = Math.ceil((loginLockoutUntil - now) / 1000);
-                    const lockMsg = `⏳ تسجيل الدخول مقفل مؤقتاً بسبب تكرار المحاولات الخاطئة. يرجى الانتظار (${remainingSec}) ثانية.`;
+                    const lockMsg = `⏳ تسجيل الدخول مقفل مؤقتاً لحماية النظام بسبب تكرار المحاولات الخاطئة. يرجى الانتظار (${remainingSec}) ثانية.`;
                     if (errorMsgEl) {
                         errorMsgEl.innerText = lockMsg;
                         errorMsgEl.style.display = 'block';
@@ -222,10 +237,15 @@
                     return;
                 }
 
-                if (pin === foundUser.pin) {
-                    // نجاح الدخول: إعادة تعيين عداد المحاولات الخاطئة
-                    failedLoginAttempts = 0;
-                    loginLockoutUntil = 0;
+                const expectedPin = (window.BayanSecurity && typeof window.BayanSecurity.decryptPin === 'function')
+                    ? window.BayanSecurity.decryptPin(foundUser.pin)
+                    : foundUser.pin;
+
+                const isPinValid = (pin === foundUser.pin || pin === expectedPin || (window.BayanSecurity && typeof window.BayanSecurity.verifyPin === 'function' && window.BayanSecurity.verifyPin(pin, foundUser.pin)));
+
+                if (isPinValid) {
+                    // نجاح الدخول: إعادة تعيين عداد المحاولات الخاطئة وحفظها دائماً
+                    setLoginLockoutState(0, 0);
 
                     let whName = document.getElementById('loginWarehouseSelect').value || 'المخزن الرئيسي';
                     // ✅ أمان صارم: فرض المخزن المصرح به للموظف بناءً على إعدادات المدير
@@ -240,9 +260,12 @@
 
                     // ✅ أمان: نحفظ في IndexedDB حصراً - الدور والصلاحيات تُحمَّل من DB
                     currentUser = { ...foundUser, warehouseName: whName };
-                    // نحفظ فقط pin + warehouseName في IndexedDB (لا نحفظ role أو permissions)
+                    // 🔒 تشفير رمز PIN قبل حفظه في الجلسة المحلية لمنع ظهوره كنص صريح
+                    const encPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                        ? window.BayanSecurity.encryptPin(foundUser.pin)
+                        : foundUser.pin;
                     if (typeof setStore === 'function') {
-                        setStore('pos_session_user', JSON.stringify({ pin: foundUser.pin, warehouseName: whName }));
+                        setStore('pos_session_user', JSON.stringify({ pin: encPin, warehouseName: whName }));
                     }
 
                     document.getElementById('loginModal').classList.add('hidden');
@@ -280,9 +303,9 @@
                 } else {
                     failedLoginAttempts++;
                     if (failedLoginAttempts >= 5) {
-                        loginLockoutUntil = Date.now() + 30000; // قفل مؤقت 30 ثانية
-                        failedLoginAttempts = 0;
-                        const lockoutMsg = "⏳ تم قفل محاولات الدخول مؤقتاً لمدة 30 ثانية بسبب إدخال رمز PIN غير صحيح 5 مرات متتالية!";
+                        const lockoutUntil = Date.now() + 45000; // قفل مؤقت 45 ثانية وحفظه بالقرص
+                        setLoginLockoutState(lockoutUntil, 0);
+                        const lockoutMsg = "⏳ تم قفل محاولات الدخول مؤقتاً لمدة 45 ثانية بسبب إدخال رمز PIN غير صحيح 5 مرات متتالية!";
                         if (errorMsgEl) {
                             errorMsgEl.innerText = lockoutMsg;
                             errorMsgEl.style.display = 'block';
@@ -290,6 +313,7 @@
                             alert(lockoutMsg);
                         }
                     } else {
+                        setLoginLockoutState(0, failedLoginAttempts);
                         const remaining = 5 - failedLoginAttempts;
                         const failMsg = `❌ رمز المرور غير صحيح! (متبقي ${remaining} محاولات قبل القفل المؤقت)`;
                         if (errorMsgEl) {
@@ -439,8 +463,11 @@
             }
 
             currentUser = { ...foundUser, warehouseName: whName };
+            const encNfcPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                ? window.BayanSecurity.encryptPin(foundUser.pin)
+                : foundUser.pin;
             if (typeof setStore === 'function') {
-                setStore('pos_session_user', JSON.stringify({ pin: foundUser.pin, warehouseName: whName }));
+                setStore('pos_session_user', JSON.stringify({ pin: encNfcPin, warehouseName: whName }));
             }
 
             const loginModal = document.getElementById('loginModal');
@@ -826,14 +853,18 @@
 
                 setStore('pos_settings', JSON.stringify(posSettings));
 
-                // إضافة المستخدم الأول كأدمن
-                const newUser = { id: 1, name: name, pin: pin, role: 'admin' };
-                await db.users.add(newUser);
-                users.push(newUser);
+                // إضافة المستخدم الأول كأدمن مع تشفير PIN في قاعدة البيانات
+                const encPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                    ? window.BayanSecurity.encryptPin(pin)
+                    : pin;
+                const dbUser = { id: 1, name: name, pin: encPin, role: 'admin' };
+                await db.users.add(dbUser);
+                const memUser = { id: 1, name: name, pin: pin, role: 'admin' };
+                users.push(memUser);
 
                 // إتمام تسجيل الدخول للمستخدم الجديد
-                currentUser = { ...newUser, warehouseName: 'المخزن الرئيسي' };
-                setStore('pos_session_user', JSON.stringify({ pin: newUser.pin, warehouseName: 'المخزن الرئيسي' }));
+                currentUser = { ...memUser, warehouseName: 'المخزن الرئيسي' };
+                setStore('pos_session_user', JSON.stringify({ pin: encPin, warehouseName: 'المخزن الرئيسي' }));
 
                 // تعبئة بيانات كارت النجاح
                 document.getElementById('displayAdminName').innerText = name;
@@ -987,7 +1018,7 @@
                 ctx.fillStyle = '#64748b';
                 ctx.font = 'bold 13px "Cairo", "Segoe UI", Tahoma, sans-serif';
                 const todayStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
-                ctx.fillText(`⚡ نظام بَيَان POS (Fashion Edition v${window.appVersion || '1.0.5'}) | تاريخ التفعيل: ${todayStr}`, 340, 460);
+                ctx.fillText(`⚡ نظام بَيَان POS (Fashion Edition v${window.appVersion || '1.0.6'}) | تاريخ التفعيل: ${todayStr}`, 340, 460);
 
                 ctx.fillStyle = '#f59e0b';
                 ctx.font = 'bold 12px "Cairo", "Segoe UI", Tahoma, sans-serif';

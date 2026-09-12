@@ -368,7 +368,9 @@ async function addTreasuryAuditRecord() {
             }
             console.log("💾 تم حفظ عملية الخزينة بنجاح في IndexedDB.");
             window.treasuryAudit = window.treasuryAuditRecords;
-            if (typeof saveData === 'function') await saveData();
+            if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
+                window.BayanNetworkHub.onDataSaved();
+            }
         } catch (e) {
             console.warn("⚠️ حفظ تلقائي للعملية بالذاكرة والسجلات...", e);
         }

@@ -128,7 +128,7 @@
 
                 // تسجيل الحركة في السجل العام
 
-                transactions.push({
+                const newVoucherRow = {
 
                     date: dt.full,
 
@@ -166,9 +166,14 @@
 
                     editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل بواسطة: ${currentUser ? currentUser.name : 'مجهول'})` : '-'
 
-                });
+                };
+                transactions.push(newVoucherRow);
 
-                await saveData();
+                if (typeof window.saveTransactionChanges === 'function') {
+                    await window.saveTransactionChanges({ newTransactions: [newVoucherRow] });
+                } else {
+                    await saveData();
+                }
 
                 if (typeof logAuditAction === 'function') {
                     const auditAction = isEditMode ? 'تحديث سند قبض' : 'حفظ سند قبض جديد';
@@ -390,7 +395,7 @@
 
                 // تسجيل الحركة في السجل العام
 
-                transactions.push({
+                const newDisburseRow = {
 
                     date: dt.full,
 
@@ -428,9 +433,14 @@
 
                     editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل بواسطة: ${currentUser ? currentUser.name : 'مجهول'})` : '-'
 
-                });
+                };
+                transactions.push(newDisburseRow);
 
-                await saveData();
+                if (typeof window.saveTransactionChanges === 'function') {
+                    await window.saveTransactionChanges({ newTransactions: [newDisburseRow] });
+                } else {
+                    await saveData();
+                }
 
                 if (typeof logAuditAction === 'function') {
                     const auditAction = isEditMode ? 'تحديث سند صرف' : 'حفظ سند صرف جديد';

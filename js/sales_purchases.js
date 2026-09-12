@@ -289,40 +289,51 @@ async function handlePurchaseSearch(query) {
         return; 
     }
 
-    // 1. البحث الحي الموحد بالاسم أو الباركود أو الكود (Live Search)
+    // 1. البحث الحي الموحد بالاسم أو الباركود أو الكود مع تطبيع الحروف العربية
+    const cleanNorm = (s) => String(s || '').trim().toLowerCase()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/[ىي]/g, 'ي')
+        .replace(/\s+/g, ' ');
+
+    const queryClean = cleanNorm(query);
     const queryLower = query.trim().toLowerCase();
 
-    const filtered = productsDB.filter(p =>
-        (p.name && p.name.toLowerCase().includes(queryLower)) ||
-        (p.barcode && String(p.barcode).toLowerCase().includes(queryLower)) ||
-        (p.code && String(p.code).toLowerCase().includes(queryLower)) ||
-        (p.units && p.units.some(u => u.unitBarcode && String(u.unitBarcode).toLowerCase().includes(queryLower)))
-    ).slice(0, 10);
+    const filtered = (productsDB || []).filter(p => {
+        const pNameClean = cleanNorm(p.name);
+        const pBarcode = String(p.barcode || '').toLowerCase();
+        const pCode = String(p.code || '').toLowerCase();
+        const unitsMatch = p.units && p.units.some(u => u.unitBarcode && String(u.unitBarcode).toLowerCase().includes(queryLower));
+        return pNameClean.includes(queryClean) || pBarcode.includes(queryLower) || pCode.includes(queryLower) || unitsMatch;
+    }).slice(0, 12);
 
     if (filtered.length > 0) {
         resultsDiv.innerHTML = `
-            <div class="pos-search-panel" style="width: calc(100% + 340px); max-width: 580px; min-width: 320px; position: absolute; top: 100%; left: 50%; transform: translateX(50%); z-index: 99999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); border: 1px solid #cbd5e1; direction: rtl; text-align: right; margin-top: 6px; animation: modalFadeIn 0.2s ease-out;">
+            <div class="pos-search-panel" style="width: min(580px, calc(100vw - 40px)); min-width: 320px; position: absolute; top: calc(100% + 4px); right: 0; left: auto; z-index: 999999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 1.5px solid #cbd5e1; direction: rtl; text-align: right; animation: modalFadeIn 0.15s ease-out;">
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 14px; border-top-right-radius: 14px;">
                     <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج بحث الشراء (${filtered.length} صنف)</span>
-                    <button onclick="document.getElementById('purchaseSearchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة">❌</button>
+                    <button type="button" onclick="document.getElementById('purchaseSearchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة" style="background:none; border:none; cursor:pointer; font-size:1rem;">❌</button>
                 </div>
                 <div style="max-height: 380px; overflow-y: auto; padding: 6px; scrollbar-gutter: stable;">
                     ${filtered.map(p => {
                         const costVal = parseFloat(p.cost) || 0;
                         const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
                         const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWH) : 0;
+                        const safeName = (window.escapeHtml ? window.escapeHtml(p.name) : p.name);
+                        const safeCode = (window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id));
+                        const safeBarcode = (window.escapeHtml ? window.escapeHtml(p.barcode || '---') : (p.barcode || '---'));
                         return `
-                            <div class="pos-search-row" onclick="selectProductToPurchaseHeader(${p.id});" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 8px;">
-                                <div style="flex: 1.5; min-width: 180px;">
-                                    <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b;">${p.name}</div>
-                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${p.code || p.id}</b> | باركود: <b>${p.barcode || '---'}</b></div>
+                            <div class="pos-search-row" onclick="selectProductToPurchaseHeader(${p.id});" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 10px;">
+                                <div style="flex: 1; min-width: 0; text-align: right;">
+                                    <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b; white-space: normal; word-break: break-word;">${safeName}</div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${safeCode}</b> | باركود: <b>${safeBarcode}</b></div>
                                 </div>
-                                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                                    <div style="text-align: center; background: #f8fafc; padding: 5px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+                                    <div style="text-align: center; background: #f8fafc; padding: 5px 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
                                         <div style="font-size: 0.7rem; color: #64748b;">📦 الرصيد الحالي</div>
                                         <div style="font-weight: 900; font-size: 0.95rem; color: #10b981;">${stockVal} <span style="font-size:0.7rem;">${p.unit || 'قطعة'}</span></div>
                                     </div>
-                                    <div style="text-align: center; background: rgba(59, 130, 246, 0.08); padding: 5px 14px; border-radius: 8px; border: 1.5px solid rgba(59, 130, 246, 0.25);">
+                                    <div style="text-align: center; background: rgba(59, 130, 246, 0.08); padding: 5px 12px; border-radius: 8px; border: 1.5px solid rgba(59, 130, 246, 0.25);">
                                         <div style="font-size: 0.7rem; color: #1d4ed8; font-weight: 800;">💰 سعر التكلفة</div>
                                         <div style="font-weight: 900; font-size: 1rem; color: #1e40af;">${costVal.toFixed(2)} ج.م</div>
                                     </div>
@@ -333,30 +344,38 @@ async function handlePurchaseSearch(query) {
                 </div>
             </div>
         `;
-        resultsDiv.style.display = 'block';
+        resultsDiv.classList.remove('hidden');
+        resultsDiv.style.setProperty('display', 'block', 'important');
     } else {
-
-        resultsDiv.style.display = 'block';
-
+        const safeQuery = (window.escapeHtml ? window.escapeHtml(query) : query);
+        const jsEscapedQuery = String(query || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
         resultsDiv.innerHTML = `
-
-                <div style="display:flex; flex-direction:column; gap:5px; padding:5px;">
-
-                    <button class="result-item fast-add-btn" onclick="fastQuickAddProduct('${query.replace(/'/g, "\\'")}', 'purchase')" 
-
-                        style="width:100%; border: 2px solid var(--main-green); background: rgba(39, 174, 96, 0.1); color: var(--main-green); font-weight: bold; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:10px; padding:12px; cursor:pointer; transition:0.3s; margin:0;">
-
-                        <span style="font-size:1.2rem;">⚡</span>
-
-                        <span>إضافة سريعة ومباشرة: "${query}"</span>
-
-                    </button>
-
-                </div>`;
-
+            <div class="pos-search-panel" style="width: min(450px, calc(100vw - 40px)); position: absolute; top: calc(100% + 4px); right: 0; left: auto; z-index: 999999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 1.5px solid #cbd5e1; direction: rtl; text-align: right; padding: 14px; animation: modalFadeIn 0.15s ease-out;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-weight: 800; font-size: 0.85rem; color: #64748b;">⚠️ لا توجد نتائج مطابقة لـ "${safeQuery}"</span>
+                    <button type="button" onclick="document.getElementById('purchaseSearchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق" style="background:none; border:none; cursor:pointer; font-size:1rem;">❌</button>
+                </div>
+                <button type="button" onclick="document.getElementById('purchaseSearchResults').style.display='none'; fastQuickAddProduct('${jsEscapedQuery}', 'purchase')" 
+                    style="width: 100%; padding: 12px; background: rgba(39, 174, 96, 0.1); border: 2px dashed #27ae60; border-radius: 10px; color: #27ae60; font-weight: 900; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s;">
+                    <span>⚡ إضافة سريعة ومباشرة: "${safeQuery}"</span>
+                </button>
+            </div>
+        `;
+        resultsDiv.classList.remove('hidden');
+        resultsDiv.style.setProperty('display', 'block', 'important');
     }
-
 }
+
+// إغلاق نافذة نتائج بحث المشتريات عند النقر بالخارج
+document.addEventListener('click', function(e) {
+    const pResults = document.getElementById('purchaseSearchResults');
+    const pInput = document.getElementById('purchaseSearch') || document.getElementById('purchaseProductSearch');
+    if (pResults && pResults.style.display !== 'none') {
+        if (!pResults.contains(e.target) && e.target !== pInput) {
+            pResults.style.display = 'none';
+        }
+    }
+});
 
 async function handlePurchaseSearchEnter(query, event, forceAdd = false) {
 
@@ -1399,7 +1418,15 @@ function calculatePurchaseTotals(sub) {
     }
 
     if (document.getElementById('purchaseGrandTotalDisplay')) {
-        const paid = parseFloat(document.getElementById('purchasePaid')?.value || 0);
+        const curMethod = (typeof getSelectedPaymentMethod === 'function') ? getSelectedPaymentMethod('purchase-section') : 'نقدي';
+        const isExplicitCred = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(curMethod, 0, 0, 0) : (curMethod.includes('آجل') || curMethod.includes('اجل'));
+        
+        const purchasePaidInput = document.getElementById('purchasePaid');
+        if (!isExplicitCred && purchasePaidInput) {
+            purchasePaidInput.value = purchaseTotalVal.toFixed(2);
+        }
+        
+        const paid = isExplicitCred ? (parseFloat(purchasePaidInput?.value || 0)) : purchaseTotalVal;
         const newDebt = purchaseTotalVal - paid; // الجزء الآجل غير المدفوع من الفاتورة الحالية
 
         let finalGrandTotal = 0;
@@ -1502,8 +1529,9 @@ async function savePurchase(force = false, accountChecked = false) {
         }
 
         const selectedMethod = (typeof getSelectedPaymentMethod === 'function') ? getSelectedPaymentMethod('purchase-section') : 'نقدي';
+        const isExplicitCreditMethod = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل'));
         const purchasePaidInput = document.getElementById('purchasePaid');
-        const paidAmount = parseFloat(purchasePaidInput ? purchasePaidInput.value : 0) || 0;
+        const paidAmount = isExplicitCreditMethod ? (parseFloat(purchasePaidInput ? purchasePaidInput.value : 0) || 0) : finalTotalInit;
 
         const subTotalInit = purchaseCart.reduce((a, b) => a + (b.price * b.qty), 0);
         const discValInit = parseFloat(document.getElementById('purchaseDiscount')?.value) || 0;
@@ -1617,23 +1645,25 @@ async function savePurchase(force = false, accountChecked = false) {
 
         const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
 
-        const isCash = typeof selectedMethod === 'string' && (selectedMethod.includes('نقدي') || selectedMethod.includes('نقدية') || selectedMethod.includes('كاش'));
+        const isCreditPurchase = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل'));
 
         let purchasePaidAmount = 0;
 
-        if (isCash) {
-
-            purchasePaidAmount = parseFloat(finalTotalVal) || 0; // دفع كامل في الكاش
-
+        if (!isCreditPurchase) {
+            purchasePaidAmount = parseFloat(finalTotalVal) || 0; // دفع كامل في الكاش والبنك والشبكة وكافة الطرق غير الآجلة
+            if (purchasePaidInput) {
+                purchasePaidInput.value = purchasePaidAmount.toFixed(2);
+            }
         } else {
-
             purchasePaidAmount = parseFloat(document.getElementById('purchasePaid')?.value) || 0; // المبلغ المدخل في الآجل
-
         }
 
         if (typeof window.productsDB === 'undefined') window.productsDB = [];
         if (typeof window.transactions === 'undefined') window.transactions = [];
         if (typeof window.accounts === 'undefined') window.accounts = [];
+
+        const newPurchaseRows = [];
+        const affectedProducts = [];
 
         itemsToProcess.forEach((item, idx) => {
             const p = (window.productsDB || []).find(x => x.id === item.id || x.name === item.name);
@@ -1781,13 +1811,17 @@ async function savePurchase(force = false, accountChecked = false) {
 
                 }
 
+                if (!affectedProducts.some(ap => ap.id === p.id)) {
+                    affectedProducts.push(p);
+                }
+
             }
 
             const itemNetTotal = (item.price * item.qty * ratio).toFixed(2);
 
             // تسجيل الحركة في سجل المعاملات
 
-            transactions.push({
+            const newRow = {
 
                 date: safeDate,
 
@@ -1846,12 +1880,16 @@ async function savePurchase(force = false, accountChecked = false) {
 
                 editDate: isEditMode ? `${new Date().toLocaleString('ar-EG')} (تعديل بواسطة: ${(typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'مجهول'})` : '-'
 
-            });
+            };
+
+            transactions.push(newRow);
+            newPurchaseRows.push(newRow);
 
         });
 
         // ضمان وجود حساب المورد في قاعدة البيانات وتوليد كود تلقائي إذا لزم الأمر
 
+        let affectedAccounts = [];
         if (supplier && Array.isArray(accounts) && !accounts.find(a => a.name === supplier)) {
 
             const newAcc = {
@@ -1873,9 +1911,7 @@ async function savePurchase(force = false, accountChecked = false) {
             };
 
             accounts.push(newAcc);
-            if (typeof db !== 'undefined' && db.accounts) {
-                try { await db.accounts.put(newAcc); } catch(e) { console.warn("DB account put:", e); }
-            }
+            affectedAccounts.push(newAcc);
 
         }
 
@@ -1897,7 +1933,14 @@ async function savePurchase(force = false, accountChecked = false) {
 
         if (document.getElementById('purchaseTax')) document.getElementById('purchaseTax').value = 0;
 
-        if (typeof saveData === 'function') {
+        // ⚡ حفظ المعاملة والأصناف المتأثرة فورياً وبدون إعادة كتابة الجداول (جديد وتعديل)
+        if (typeof window.saveTransactionChanges === 'function') {
+            await window.saveTransactionChanges({
+                newTransactions: newPurchaseRows,
+                modifiedProducts: affectedProducts,
+                modifiedAccounts: affectedAccounts
+            });
+        } else if (typeof saveData === 'function') {
             await saveData();
         }
 

@@ -175,14 +175,69 @@
         };
 
         window.accountBalancesCache = {};
+        window._partnerTransactionsIndex = null;
+        window._accountsByNameClean = null;
+        window._cleanArabicCache = new Map();
+
+        // ⚡ دالة تطبيع الحروف العربية فائقة السرعة مع تخزين مؤقت للنتائج
+        function cleanArabicCached(str) {
+            if (!str) return '';
+            let val = window._cleanArabicCache.get(str);
+            if (val !== undefined) return val;
+            val = String(str).trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+            if (window._cleanArabicCache.size > 8000) window._cleanArabicCache.clear();
+            window._cleanArabicCache.set(str, val);
+            return val;
+        }
+        window.cleanArabicCached = cleanArabicCached;
+
+        // ⚡ فهرس ذكي فوري يجمع معاملات كل شريك مرة واحدة O(N) بدلاً من ملايين التكرارات O(N*M)
+        function ensurePartnerTransactionsIndex() {
+            if (window._partnerTransactionsIndex !== null) return window._partnerTransactionsIndex;
+            const index = new Map();
+            const txs = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
+            for (let i = 0; i < txs.length; i++) {
+                const t = txs[i];
+                if (!t || !t.partner) continue;
+                const pClean = cleanArabicCached(t.partner);
+                if (!pClean) continue;
+                let list = index.get(pClean);
+                if (!list) {
+                    list = [];
+                    index.set(pClean, list);
+                }
+                list.push(t);
+            }
+            window._partnerTransactionsIndex = index;
+            return index;
+        }
+
+        // ⚡ جلب الحساب فورياً بالاسم المنظف O(1)
+        function getAccountByNameCached(targetNameClean) {
+            if (!window._accountsByNameClean) {
+                const map = new Map();
+                const accs = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts : [];
+                for (let i = 0; i < accs.length; i++) {
+                    const a = accs[i];
+                    if (a && a.name) {
+                        map.set(cleanArabicCached(a.name), a);
+                    }
+                }
+                window._accountsByNameClean = map;
+            }
+            return window._accountsByNameClean.get(targetNameClean);
+        }
+
         window.invalidateAccountBalancesCache = function() {
             window.accountBalancesCache = {};
+            window._partnerTransactionsIndex = null;
+            window._accountsByNameClean = null;
         };
 
+        // ⚡ دالة حساب رصيد العميل/المورد فائقة السرعة مع الفهرس المباشر
         function getAccountBalance(name, excludeInvoiceId = null) {
             if (!name || (window.isGenericCashPartner && window.isGenericCashPartner(name))) return 0;
-            const cleanArabic = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
-            const targetNameClean = cleanArabic(name);
+            const targetNameClean = cleanArabicCached(name);
             const activeExcludeId = excludeInvoiceId ? String(excludeInvoiceId) : null;
             const cacheKey = targetNameClean + "_" + (activeExcludeId || 'none');
 
@@ -190,22 +245,25 @@
                 return window.accountBalancesCache[cacheKey];
             }
 
-            const acc = (typeof accounts !== 'undefined' ? accounts : []).find(a => cleanArabic(a.name) === targetNameClean);
+            const acc = getAccountByNameCached(targetNameClean);
             if (!acc) return 0;
 
             let initialDebit = parseFloat(acc.debit) || 0;
             let initialCredit = parseFloat(acc.credit) || 0;
             let currentBalance = initialDebit - initialCredit;
 
-            const accTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => 
-                cleanArabic(t.partner) === targetNameClean && 
-                (!activeExcludeId || String(t.invoiceId) !== activeExcludeId)
-            );
+            const partnerIndex = ensurePartnerTransactionsIndex();
+            const partnerAllTxs = partnerIndex.get(targetNameClean) || [];
+
+            const accTrans = activeExcludeId 
+                ? partnerAllTxs.filter(t => String(t.invoiceId) !== activeExcludeId)
+                : partnerAllTxs;
 
             const ivMap = {};
             const singleTrans = [];
 
-            accTrans.forEach(t => {
+            for (let i = 0; i < accTrans.length; i++) {
+                const t = accTrans[i];
                 const isInvoice = (t.type && (t.type.includes('بيع') || t.type.includes('شراء'))) && t.invoiceId;
                 if (isInvoice) {
                     const isReturn = t.type.includes('مرتجع');
@@ -229,9 +287,20 @@
                 } else {
                     singleTrans.push(t);
                 }
-            });
+            }
 
-            Object.values(ivMap).forEach(iv => {
+            const ivs = Object.values(ivMap);
+            for (let i = 0; i < ivs.length; i++) {
+                const iv = ivs[i];
+                if (iv.paid === 0 && iv.total > 0) {
+                    const m = String(iv.method || '').trim();
+                    const isCreditMethod = typeof window.isTransactionCredit === 'function'
+                        ? window.isTransactionCredit(m, 0, 0, 0)
+                        : (m.includes('آجل') || m.includes('اجل') || m.includes('ذمم') || m.includes('credit'));
+                    if (!isCreditMethod) {
+                        iv.paid = iv.total;
+                    }
+                }
                 let debit = 0;
                 let credit = 0;
 
@@ -254,16 +323,17 @@
                 }
 
                 currentBalance += (debit - credit);
-            });
+            }
 
-            singleTrans.forEach(t => {
+            for (let i = 0; i < singleTrans.length; i++) {
+                const t = singleTrans[i];
                 const amount = parseFloat(t.total) || parseFloat(t.price) || 0;
                 if (t.type.includes('قبض') || t.type.includes('مرتجع بيع')) {
                     currentBalance -= amount;
                 } else if (t.type.includes('صرف') || t.type.includes('مرتجع شراء') || t.type.includes('بيع')) {
                     currentBalance += amount;
                 }
-            });
+            }
 
             if (!window.accountBalancesCache) window.accountBalancesCache = {};
             window.accountBalancesCache[cacheKey] = currentBalance;
@@ -276,10 +346,9 @@
         // دالة حساب الرصيد التاريخي للعميل/المورد عند لحظة إصدار فاتورة معينة
         function getHistoricalPartnerBalance(name, invoiceId = null, beforeIndex = null) {
             if (!name || (window.isGenericCashPartner && window.isGenericCashPartner(name))) return 0;
-            const cleanArabic = (str) => (str || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
-            const targetNameClean = cleanArabic(name);
+            const targetNameClean = cleanArabicCached(name);
 
-            const acc = (typeof accounts !== 'undefined' ? accounts : []).find(a => cleanArabic(a.name) === targetNameClean);
+            const acc = getAccountByNameCached(targetNameClean);
             if (!acc) return 0;
 
             let balance = (parseFloat(acc.debit) || 0) - (parseFloat(acc.credit) || 0);
@@ -295,12 +364,19 @@
                 }
             }
 
-            const priorTrans = allTrans.slice(0, cutoffIdx).filter(t => cleanArabic(t.partner) === targetNameClean);
+            const partnerIndex = ensurePartnerTransactionsIndex();
+            const partnerAllTxs = partnerIndex.get(targetNameClean) || [];
+
+            const priorTrans = partnerAllTxs.filter(t => {
+                const origIdx = (t.originalIndex !== undefined) ? t.originalIndex : allTrans.indexOf(t);
+                return origIdx < cutoffIdx;
+            });
 
             const ivMap = {};
             const singleTrans = [];
 
-            priorTrans.forEach(t => {
+            for (let i = 0; i < priorTrans.length; i++) {
+                const t = priorTrans[i];
                 const isInvoice = (t.type && (t.type.includes('بيع') || t.type.includes('شراء'))) && t.invoiceId;
                 if (isInvoice) {
                     const isReturn = t.type.includes('مرتجع');
@@ -324,9 +400,20 @@
                 } else {
                     singleTrans.push(t);
                 }
-            });
+            }
 
-            Object.values(ivMap).forEach(iv => {
+            const ivs = Object.values(ivMap);
+            for (let i = 0; i < ivs.length; i++) {
+                const iv = ivs[i];
+                if (iv.paid === 0 && iv.total > 0) {
+                    const m = String(iv.method || '').trim();
+                    const isCreditMethod = typeof window.isTransactionCredit === 'function'
+                        ? window.isTransactionCredit(m, 0, 0, 0)
+                        : (m.includes('آجل') || m.includes('اجل') || m.includes('ذمم') || m.includes('credit'));
+                    if (!isCreditMethod) {
+                        iv.paid = iv.total;
+                    }
+                }
                 let debit = 0;
                 let credit = 0;
                 if (iv.type.includes('بيع')) {
@@ -347,16 +434,17 @@
                     }
                 }
                 balance += (debit - credit);
-            });
+            }
 
-            singleTrans.forEach(t => {
+            for (let i = 0; i < singleTrans.length; i++) {
+                const t = singleTrans[i];
                 const amount = parseFloat(t.total) || parseFloat(t.price) || 0;
                 if (t.type.includes('قبض') || t.type.includes('مرتجع بيع')) {
                     balance -= amount;
                 } else if (t.type.includes('صرف') || t.type.includes('مرتجع شراء') || t.type.includes('بيع')) {
                     balance += amount;
                 }
-            });
+            }
 
             return balance;
         }
@@ -483,11 +571,13 @@
 
             const toDate = document.getElementById('invoicesDateTo').value;
 
-            // إضافة index أصلي لكل عنصر للتمكن من حذفه أو تعديله
+            // الحفاظ على الفهرس الأصلي للعملية بدون استهلاك الذاكرة أو استنساخ آلاف الكائنات
+            for (let i = 0; i < transactions.length; i++) {
+                transactions[i].originalIndex = i;
+            }
+            let rawData = transactions;
 
-            let rawData = transactions.map((t, i) => ({ ...t, originalIndex: i }));
-
-            const cleanAr = (str) => (str || '').toString().trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+            const cleanAr = (str) => cleanArabicCached(str);
 
             // فلترة التاريخ بمرونة
             if (fromDate) {
@@ -666,23 +756,25 @@
                 const isFinancial = t.type.includes('قبض') || t.type.includes('صرف');
                 const isSalesOrPurchase = t.type.includes('بيع') || t.type.includes('شراء') || t.type.includes('مبيعات') || t.type.includes('مشتريات');
 
+                const esc = (typeof escapeHtml === 'function') ? escapeHtml : (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
                 if (currentInvoicesView === 'operation') {
 
                     if (isFinancial) {
 
-                        displayProduct = `<div title="حركة نقدية لـ: ${t.partner || '-'}"><b>${t.partner || '-'}</b> (حركة نقدية) • <small style="color:#888;">${t.product !== 'أخرى' ? t.product : 'صرف/قبض نقدية'}</small></div>`;
+                        displayProduct = `<div title="حركة نقدية لـ: ${esc(t.partner || '-')}"><b>${esc(t.partner || '-')}</b> (حركة نقدية) • <small style="color:#888;">${esc(t.product !== 'أخرى' ? t.product : 'صرف/قبض نقدية')}</small></div>`;
 
                     } else {
 
-                        displayProduct = `<div title="فاتورة رقم #${t.invoiceId} - اضغط على زر التفاصيل لرؤية الأصناف" style="display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;"><b>${t.partner || '-'}</b> (عدد ${t.itemsCount} أصناف) <button class="tool-btn" style="padding: 2px 6px; font-size: 0.7rem; background: #9b59b6; color:white; border-radius:10px; margin: 0; line-height: 1;" onclick="viewInvoiceItems('${t.invoiceId || -1}', '${t.type}')">📄 التفاصيل</button></div>`;
+                        displayProduct = `<div title="فاتورة رقم #${esc(t.invoiceId)} - اضغط على زر التفاصيل لرؤية الأصناف" style="display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;"><b>${esc(t.partner || '-')}</b> (عدد ${t.itemsCount} أصناف) <button class="tool-btn" style="padding: 2px 6px; font-size: 0.7rem; background: #9b59b6; color:white; border-radius:10px; margin: 0; line-height: 1;" onclick="viewInvoiceItems('${esc(t.invoiceId || -1)}', '${esc(t.type)}')">📄 التفاصيل</button></div>`;
 
                     }
 
                 } else {
 
-                    const hoverTitle = `الصنف: ${t.product || '-'}\nالكمية: ${t.qty || 0}\nالسعر: ${t.price || 0}\nالإجمالي: ${t.total || 0}\nالمخزن: ${t.warehouse || '-'}`;
+                    const hoverTitle = `الصنف: ${esc(t.product || '-')}\nالكمية: ${t.qty || 0}\nالسعر: ${t.price || 0}\nالإجمالي: ${t.total || 0}\nالمخزن: ${esc(t.warehouse || '-')}`;
 
-                    displayProduct = `<span title="${hoverTitle}" style="cursor:help; border-bottom:1px dotted #aaa;">${t.product || '-'} ${(!isFinancial && t.qty) ? '(x' + t.qty + ')' : ''}</span>`;
+                    displayProduct = `<span title="${hoverTitle}" style="cursor:help; border-bottom:1px dotted #aaa;">${esc(t.product || '-')} ${(!isFinancial && t.qty) ? '(x' + t.qty + ')' : ''}</span>`;
 
                 }
 
@@ -792,10 +884,10 @@
                         <td class="col-inv-7" style="font-weight:bold; color:${isRejectedTransfer ? '#94a3b8' : 'var(--main-blue)'}; ${isV(7) ? '' : 'display:none;'}">${displayTotalHtml}</td>
                         <td class="col-inv-8" style="color:${isRejectedTransfer ? '#94a3b8' : 'blue'}; font-weight:bold; ${isV(8) ? '' : 'display:none;'}">${paid}</td>
                         <td class="col-inv-9" style="color:${isRejectedTransfer ? '#94a3b8' : 'red'}; font-weight:bold; ${isV(9) ? '' : 'display:none;'}">${remaining}</td>
-                        <td class="col-inv-10" style="${isV(10) ? '' : 'display:none;'}">${t.partner || '-'}</td>
-                        <td class="col-inv-11" style="font-size:0.8rem; ${isV(11) ? '' : 'display:none;'}">${t.user || '-'}</td>
-                        <td class="col-inv-12" style="font-size:0.8rem; color: #888; ${isV(12) ? '' : 'display:none;'}">${t.editDate || '-'}</td>
-                        <td class="col-inv-13" style="${isV(13) ? '' : 'display:none;'}">${t.notes || '-'}</td>
+                        <td class="col-inv-10" style="${isV(10) ? '' : 'display:none;'}">${esc(t.partner || '-')}</td>
+                        <td class="col-inv-11" style="font-size:0.8rem; ${isV(11) ? '' : 'display:none;'}">${esc(t.user || '-')}</td>
+                        <td class="col-inv-12" style="font-size:0.8rem; color: #888; ${isV(12) ? '' : 'display:none;'}">${esc(t.editDate || '-')}</td>
+                        <td class="col-inv-13" style="${isV(13) ? '' : 'display:none;'}">${esc(t.notes || '-')}</td>
                     </tr>
                 `;
             });
@@ -1012,7 +1104,7 @@
 
             if (!invId) return showToast("❌ لا يمكن تعديل هذه الحركة مباشرة", "error");
 
-            const items = transactions.filter(t => t.invoiceId == invId);
+            const items = transactions.filter(t => String(t.invoiceId) === String(invId));
 
             const isGoods = items.some(it => it.type.includes('بيع') || it.type.includes('شراء') || it.type.includes('تحويل') || it.type.includes('مرتجع'));
 
@@ -1117,7 +1209,7 @@
 
             const newMethod = document.getElementById('advEditMethod').value;
 
-            const oldItems = transactions.filter(t => t.invoiceId == invId);
+            const oldItems = transactions.filter(t => String(t.invoiceId) === String(invId));
             const origHead = oldItems.find(t => t.isInvoiceHead) || oldItems[0];
             const newDate = document.getElementById('advEditDate').value || (origHead ? (origHead.dateISO || origHead.date) : '');
             const newTime = document.getElementById('advEditTime').value || (origHead ? (origHead.timeISO || origHead.time) : '');
@@ -1213,6 +1305,8 @@
 
             let firstRowHeaderProcessed = false;
 
+            const affectedProducts = [];
+            const updatedInvoiceRows = [];
             rows.forEach(row => {
 
                 const originalProductName = row.dataset.product;
@@ -1233,14 +1327,15 @@
                 let transaction = txId ? transactions.find(t => String(t.id) === String(txId)) : null;
                 if (!transaction) {
                     transaction = transactions.find(t => 
-                        t.invoiceId == invId && 
+                        String(t.invoiceId) === String(invId) && 
                         t.product === originalProductName &&
                         (!rowSize || (t.size || t.selectedSize) === rowSize) &&
                         (!rowColor || (t.color || t.selectedColor) === rowColor)
-                    ) || transactions.find(t => t.invoiceId == invId && t.product === originalProductName);
+                    ) || transactions.find(t => String(t.invoiceId) === String(invId) && t.product === originalProductName);
                 }
 
                 if (transaction) {
+                    updatedInvoiceRows.push(transaction);
 
                     transaction.product = newProductName; // تحديث الاسم الجديد
 
@@ -1273,6 +1368,7 @@
                     const p = productsDB.find(x => x.name === newProductName);
 
                     if (p) {
+                        if (!affectedProducts.includes(p)) affectedProducts.push(p);
 
                         let effCost = parseFloat(p.cost) || 0;
                         const sSize = String(transaction.selectedSize || transaction.size || rowSize || '').trim();
@@ -1369,7 +1465,15 @@
 
             });
 
-            await saveData();
+            if (typeof window.saveTransactionChanges === 'function') {
+                await window.saveTransactionChanges({
+                    newTransactions: updatedInvoiceRows,
+                    modifiedProducts: affectedProducts,
+                    modifiedAccounts: []
+                });
+            } else {
+                await saveData();
+            }
 
             closeCustomModal();
 
@@ -2024,28 +2128,31 @@
                         const sSize = String(item.selectedSize || item.size || '').trim();
                         const sColor = String(item.selectedColor || item.color || '').trim();
                         if (sSize || sColor) {
+                            const cleanV = (s) => String(s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                            const cSize = cleanV(sSize);
+                            const cColor = cleanV(sColor);
                             const matchedVar = p.variants.find(v => 
-                                (!sSize || String(v.size || '').trim() === sSize) && 
-                                (!sColor || String(v.color || '').trim() === sColor)
+                                (!cSize || cleanV(v.size) === cSize) && 
+                                (!cColor || cleanV(v.color) === cColor)
                             );
                             if (matchedVar) {
                                 if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
-                                if (item.type && item.type.includes('مرتجع بيع')) {
+                                if (itType.includes('مرتجع بيع')) {
                                     matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                     matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                                } else if (item.type && item.type.includes('مرتجع شراء')) {
+                                } else if (itType.includes('مرتجع شراء')) {
                                     matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
                                     matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
-                                } else if (item.type && item.type.includes('بيع')) {
+                                } else if (itType.includes('بيع')) {
                                     matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
                                     matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
-                                } else if (item.type && item.type.includes('شراء')) {
+                                } else if (itType.includes('شراء')) {
                                     matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                     matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                                } else if (item.type && item.type.includes('تسوية')) {
+                                } else if (itType.includes('تسوية') || itType.includes('جرد') || itType.includes('adj')) {
                                     matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                     matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                                } else if (item.type && item.type.includes('تحويل')) {
+                                } else if (itType.includes('تحويل')) {
                                     if (item.transferStatus === 'received') {
                                         const srcWH = (item.sourceWarehouse || defaultWH || 'المخزن الرئيسي').trim();
                                         const dstWH = (item.warehouse || '').trim();
@@ -2137,10 +2244,10 @@
 
                     try {
 
-                        const invId = t.invoiceId;
+                        const invId = (t.invoiceId != null && t.invoiceId !== '') ? String(t.invoiceId) : null;
 
                         // تصفية السجلات المراد حذفها باستخدام مطابقة دقيقة للنوع لمنع حذف المرتجعات عند حذف المبيعات
-                        const itemsToRemove = invId ? transactions.filter(x => x.invoiceId == invId && window.isMatchingInvoiceType(x.type, t.type)) : [t];
+                        const itemsToRemove = invId ? transactions.filter(x => String(x.invoiceId) === invId && window.isMatchingInvoiceType(x.type, t.type)) : [t];
 
                         // 🗑️ نقل للقمامة قبل الحذف
 
@@ -2148,18 +2255,20 @@
 
                         await trashManager.moveToTrash(itemsToRemove, 'transaction', label);
 
+                        const affectedRevertProducts = [];
                         // 1. عكس المخزن
                         itemsToRemove.forEach(item => {
 
-                            const p = productsDB.find(p => p.name === item.product || p.id === item.productId || p.id === item.product);
+                            const p = productsDB.find(p => p && (p.name === item.product || p.id === item.productId || p.id === item.product));
 
                             if (p) {
+                                if (!affectedRevertProducts.includes(p)) affectedRevertProducts.push(p);
 
                                 let factor = parseFloat(item.unitFactor) || 1;
 
                                 if (item.unit && p.units) {
 
-                                    const u = p.units.find(u => u.unitName === item.unit);
+                                    const u = p.units.find(u => u && u.unitName === item.unit);
 
                                     if (u) factor = parseFloat(u.factor) || 1;
 
@@ -2167,31 +2276,33 @@
 
                                 const baseQty = parseFloat(item.qty) * factor;
 
-                                const activeWH = item.warehouse || item.sourceWarehouse || (t && t.warehouse ? t.warehouse : '') || 'المخزن الرئيسي';
+                                const activeWH = (item.warehouse || item.sourceWarehouse || (t && t.warehouse ? t.warehouse : '') || 'المخزن الرئيسي').trim();
                                 if (!p.warehouseStocks) p.warehouseStocks = {};
 
-                                if (item.type.includes('مرتجع بيع')) {
+                                const itType = String(item.type || (t && t.type) || '');
+
+                                if (itType.includes('مرتجع بيع')) {
                                     p.stock = Math.max(0, (parseFloat(p.stock) || 0) - baseQty);
                                     p.warehouseStocks[activeWH] = Math.max(0, (parseFloat(p.warehouseStocks[activeWH]) || 0) - baseQty);
-                                } else if (item.type.includes('مرتجع شراء')) {
+                                } else if (itType.includes('مرتجع شراء')) {
                                     p.stock = (parseFloat(p.stock) || 0) + baseQty;
                                     p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + baseQty;
-                                } else if (item.type.includes('بيع')) {
+                                } else if (itType.includes('بيع')) {
                                     p.stock = (parseFloat(p.stock) || 0) + baseQty;
                                     p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + baseQty;
-                                } else if (item.type.includes('شراء')) {
+                                } else if (itType.includes('شراء')) {
                                     p.stock = Math.max(0, (parseFloat(p.stock) || 0) - baseQty);
                                     p.warehouseStocks[activeWH] = Math.max(0, (parseFloat(p.warehouseStocks[activeWH]) || 0) - baseQty);
                                     if (item.previousCost !== undefined && item.previousCost !== null && !isNaN(parseFloat(item.previousCost))) {
                                         p.cost = parseFloat(item.previousCost);
                                     }
-                                } else if (item.type.includes('تسوية')) {
+                                } else if (itType.includes('تسوية') || itType.includes('جرد') || itType.includes('adj')) {
                                     p.stock = (parseFloat(p.stock) || 0) - baseQty;
                                     p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) - baseQty;
-                                } else if (item.type.includes('تحويل')) {
+                                } else if (itType.includes('تحويل')) {
                                     if (item.transferStatus === 'received') {
-                                        const srcWH = item.sourceWarehouse || 'المخزن الرئيسي';
-                                        const dstWH = item.warehouse || '';
+                                        const srcWH = (item.sourceWarehouse || 'المخزن الرئيسي').trim();
+                                        const dstWH = (item.warehouse || '').trim();
                                         if (!p.warehouseStocks) p.warehouseStocks = {};
                                         p.warehouseStocks[srcWH] = (parseFloat(p.warehouseStocks[srcWH]) || 0) + baseQty;
                                         if (dstWH) {
@@ -2204,34 +2315,37 @@
 
                                 // عكس رصيد التشكيلة (المقاس واللون) في مصفوفة الصنف عند الحذف
                                 if (p.variants && Array.isArray(p.variants)) {
-                                    const sSize = item.selectedSize || item.size || '';
-                                    const sColor = item.selectedColor || item.color || '';
+                                    const sSize = String(item.selectedSize || item.size || '').trim();
+                                    const sColor = String(item.selectedColor || item.color || '').trim();
                                     if (sSize || sColor) {
+                                        const cleanV = (s) => String(s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                                        const cSize = cleanV(sSize);
+                                        const cColor = cleanV(sColor);
                                         const matchedVar = p.variants.find(v => 
-                                            (!sSize || v.size === sSize) && 
-                                            (!sColor || v.color === sColor)
+                                            (!cSize || cleanV(v.size) === cSize) && 
+                                            (!cColor || cleanV(v.color) === cColor)
                                         );
                                         if (matchedVar) {
-                                            if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
-                                            if (item.type && item.type.includes('مرتجع بيع')) {
+                                            if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
+                                            if (itType.includes('مرتجع بيع')) {
                                                 matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                                 matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                                            } else if (item.type && item.type.includes('مرتجع شراء')) {
+                                            } else if (itType.includes('مرتجع شراء')) {
                                                 matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
                                                 matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
-                                            } else if (item.type && item.type.includes('بيع')) {
+                                            } else if (itType.includes('بيع')) {
                                                 matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
                                                 matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
-                                            } else if (item.type && item.type.includes('شراء')) {
+                                            } else if (itType.includes('شراء')) {
                                                 matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                                 matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                                            } else if (item.type && item.type.includes('تسوية')) {
+                                            } else if (itType.includes('تسوية') || itType.includes('جرد') || itType.includes('adj')) {
                                                 matchedVar.stock = Math.max(0, (parseFloat(matchedVar.stock) || 0) - baseQty);
                                                 matchedVar.warehouseStocks[activeWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) - baseQty);
-                                            } else if (item.type && item.type.includes('تحويل')) {
+                                            } else if (itType.includes('تحويل')) {
                                                 if (item.transferStatus === 'received') {
-                                                    const srcWH = item.sourceWarehouse || 'المخزن الرئيسي';
-                                                    const dstWH = item.warehouse || '';
+                                                    const srcWH = (item.sourceWarehouse || 'المخزن الرئيسي').trim();
+                                                    const dstWH = (item.warehouse || '').trim();
                                                     if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                                                     matchedVar.warehouseStocks[srcWH] = (parseFloat(matchedVar.warehouseStocks[srcWH]) || 0) + baseQty;
                                                     if (dstWH) matchedVar.warehouseStocks[dstWH] = Math.max(0, (parseFloat(matchedVar.warehouseStocks[dstWH]) || 0) - baseQty);
@@ -2264,19 +2378,20 @@
 
                         if (invId) {
 
-                            transactions = transactions.filter(x => !(x.invoiceId == invId && window.isMatchingInvoiceType(x.type, t.type)));
+                            transactions = transactions.filter(x => !(String(x.invoiceId) === invId && window.isMatchingInvoiceType(x.type, t.type)));
 
                             // 🛑 الحذف النهائي من قاعدة البيانات
 
                             const invIdStr = invId.toString();
 
-                            const invIdNum = Number(invId);
+                            const invIdNum = !isNaN(Number(invId)) ? Number(invId) : null;
+                            const searchKeys = invIdNum !== null ? [invIdStr, invIdNum] : [invIdStr];
 
                             // البحث عن المعرفات الفرعية (id) في قاعدة البيانات لهذه السجلات
 
                             const dbItems = await db.transactions
 
-                                .where('invoiceId').anyOf([invIdStr, invIdNum])
+                                .where('invoiceId').anyOf(searchKeys)
 
                                 .toArray();
 
@@ -2328,7 +2443,15 @@
 
                         }
 
-                        await saveData();
+                        if (typeof db !== 'undefined' && db && db.products && affectedRevertProducts.length > 0) {
+                            await db.products.bulkPut(affectedRevertProducts);
+                        } else if (typeof saveData === 'function') {
+                            await saveData();
+                        }
+
+                        if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
+                            window.BayanNetworkHub.onDataSaved();
+                        }
 
                         if (typeof invalidateStockCache === 'function') invalidateStockCache();
                         if (typeof window.invalidateStockCache === 'function') window.invalidateStockCache();

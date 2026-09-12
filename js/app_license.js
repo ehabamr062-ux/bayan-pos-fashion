@@ -276,7 +276,7 @@ async function verifyAndActivateLicense() {
     }
 
     const isClient = (typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer);
-    const mId = (isClient ? getStore('bayan_master_hwid') : null) || getStore('bayan_master_hwid') || getStore('bayan_hwid') || getStore('bayan_machine_id') || '';
+    const mId = (isClient ? getStore('bayan_master_hwid') : null) || (window.getUniqueHWID ? await window.getUniqueHWID() : '') || getStore('bayan_master_hwid') || getStore('bayan_hwid') || getStore('bayan_machine_id') || '';
     const secret = atob("QkFZQU5fUE9TX1NFQ1JFVF9LRVlfMjAyNg=="); // مفتاح مشفر لمنع الفحص النصي البسيط في المتصفح
 
     const plans = [

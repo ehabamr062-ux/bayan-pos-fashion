@@ -14,7 +14,9 @@
             }
             const isElectronOrFile = (typeof require !== 'undefined' && typeof process !== 'undefined' && process.versions && !!process.versions.electron) || 
                             (window.location.protocol === 'file:');
-            return isElectronOrFile ? 'master' : 'client';
+            // إذا كان على المتصفح: يكون Master مستقلاً ما لم يقم المستخدم بإقرانه ككاشير فرعي صراحة
+            const isClientConfigured = (typeof getStore === 'function' && (getStore('bayan_client_is_paired') === 'true' || !!getStore('bayan_local_server_url')));
+            return (isElectronOrFile || !isClientConfigured) ? 'master' : 'client';
         },
         get isMasterServer() {
             return this.getTerminalRole() === 'master';
@@ -281,7 +283,11 @@
                     if (typeof getStore === 'function' && getStore('bayan_dirty_offline') === 'true') {
                         this.hasPendingOfflineSync = true;
                     }
-                    await this.pullMasterDb();
+                    if (this.isPaired) {
+                        try {
+                            await this.pullMasterDb();
+                        } catch(e) {}
+                    }
                 }
 
                 // تحديث شكل ومسمى زر السيرفر في شريط العنوان
@@ -297,11 +303,15 @@
         },
 
         startAutoSyncPolling: function() {
-            // الماستر في بيئة Electron يتلقى التحديثات لحظياً عبر قنوات IPC (0ms) فلا حاجة لإرهاق المعالج بطلب HTTP كل ثانية
-            // للأجهزة الفرعية والتابلت: فحص سلس ومتوازن كل 2.5 ثانية (2500ms) لمنع أي ثقل مع مزامنة لحظية
-            const pollingInterval = (this.isMasterServer && typeof require !== 'undefined') ? 10000 : 2500;
+            // الماستر أو المتصفح المستقل غير المقترن لا يحتاج فحص دوري مطلقاً لتوفير الرامات والمعالج 100%
+            if (this.isMasterServer || !this.isPaired) {
+                return;
+            }
+
+            const pollingInterval = 12000; // فحص هادئ كل 12 ثانية بدلاً من إجهاد الشبكة كل 4 ثوانٍ
 
             setInterval(async () => {
+                if (!this.serverUrl || !this.isPaired) return;
                 try {
                     const infoRes = await this.fetchWithTimeout(`${this.serverUrl}/api/server-info`, {}, 1500);
                     const info = await infoRes.json();
@@ -309,7 +319,7 @@
                     if (this.hasPendingOfflineSync) {
                         this.hasPendingOfflineSync = false;
                         await this.pushLocalDbToServer();
-                        return; // تجاوز عملية السحب في هذه الدورة لأننا للتو قمنا بالرفع
+                        return;
                     }
                     
                     if (info && info.lastDbUpdate && info.lastDbUpdate !== this.lastSyncedTimestamp) {
@@ -334,8 +344,118 @@
             }
         },
 
+        onDataSavedDebounceTimer: null,
+
         onDataSaved: function() {
-            this.pushLocalDbToServer();
+            if (this.onDataSavedDebounceTimer) {
+                clearTimeout(this.onDataSavedDebounceTimer);
+            }
+            this.onDataSavedDebounceTimer = setTimeout(() => {
+                this.pushLocalDbToServer();
+            }, 1200);
+        },
+
+        pendingDelta: {
+            transactions: [],
+            products: [],
+            accounts: []
+        },
+        onDeltaDebounceTimer: null,
+
+        // ⚡ المزامنة الجزئية الذكية بعد حفظ الفاتورة (ترسل فقط الفاتورة والأصناف المتأثرة بدلاً من الداتابيز بالكامل)
+        onDeltaSaved: function({ newTransactions = [], modifiedProducts = [], modifiedAccounts = [] } = {}) {
+            if (!this.pendingDelta) {
+                this.pendingDelta = { transactions: [], products: [], accounts: [] };
+            }
+            if (Array.isArray(newTransactions) && newTransactions.length > 0) {
+                this.pendingDelta.transactions.push(...newTransactions);
+            }
+            if (Array.isArray(modifiedProducts) && modifiedProducts.length > 0) {
+                modifiedProducts.forEach(mp => {
+                    if (!mp) return;
+                    const idx = this.pendingDelta.products.findIndex(p => p && (p.id === mp.id || p.name === mp.name));
+                    if (idx !== -1) {
+                        this.pendingDelta.products[idx] = { ...this.pendingDelta.products[idx], ...mp };
+                    } else {
+                        this.pendingDelta.products.push(mp);
+                    }
+                });
+            }
+            if (Array.isArray(modifiedAccounts) && modifiedAccounts.length > 0) {
+                modifiedAccounts.forEach(ma => {
+                    if (!ma) return;
+                    const idx = this.pendingDelta.accounts.findIndex(a => a && (a.id === ma.id || a.name === ma.name));
+                    if (idx !== -1) {
+                        this.pendingDelta.accounts[idx] = { ...this.pendingDelta.accounts[idx], ...ma };
+                    } else {
+                        this.pendingDelta.accounts.push(ma);
+                    }
+                });
+            }
+
+            if (this.onDeltaDebounceTimer) {
+                clearTimeout(this.onDeltaDebounceTimer);
+            }
+            // إرسال خفيف جداً بعد 800 مللي ثانية دون أي ثقل
+            this.onDeltaDebounceTimer = setTimeout(() => {
+                this.pushDeltaDbToServer();
+            }, 800);
+        },
+
+        pushDeltaDbToServer: async function() {
+            try {
+                if (!this.pendingDelta) return;
+                const txs = this.pendingDelta.transactions || [];
+                const prods = this.pendingDelta.products || [];
+                const accs = this.pendingDelta.accounts || [];
+
+                if (txs.length === 0 && prods.length === 0 && accs.length === 0) {
+                    return;
+                }
+
+                // تجهيز الحمولة الجزئية الفائقة الخفة (حجمها أقل من 2 كيلوبايت)
+                const deltaPayload = {
+                    syncMode: 'delta',
+                    isDelta: true,
+                    transactions: txs,
+                    products: prods,
+                    accounts: accs,
+                    isMasterServer: !!this.isMasterServer
+                };
+
+                // تصفير الطابور فوراً لمنع التكرار
+                this.pendingDelta = { transactions: [], products: [], accounts: [] };
+
+                let masterIpcSuccess = false;
+                if (this.isMasterServer && typeof require !== 'undefined') {
+                    try {
+                        const { ipcRenderer } = require('electron');
+                        await ipcRenderer.invoke('sync-master-db', deltaPayload);
+                        masterIpcSuccess = true;
+                    } catch(ipcErr) {}
+                }
+
+                if (!masterIpcSuccess && this.serverUrl) {
+                    const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/push`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            db: deltaPayload, 
+                            sourceDeviceId: this.isMasterServer ? 'DEV-HOST' : (this.deviceId || 'DEV-CLIENT'),
+                            isMasterServer: !!this.isMasterServer
+                        })
+                    });
+                    const data = await res.json();
+                    if (data && data.lastUpdated) {
+                        this.lastSyncedTimestamp = data.lastUpdated;
+                        this.hasPendingOfflineSync = false;
+                    }
+                }
+            } catch (e) {
+                // إذا انقطع الاتصال، نؤشر للمزامنة الكاملة عند عودة الشبكة
+                this.hasPendingOfflineSync = true;
+                if (typeof setStore === 'function') setStore('bayan_dirty_offline', 'true');
+            }
         },
 
         DEVICE_LOCAL_SETTINGS_KEYS: new Set([
@@ -395,7 +515,12 @@
                     products: window.productsDB || [],
                     accounts: window.accounts || [],
                     transactions: window.transactions || [],
-                    users: window.users || [],
+                    users: (window.users || []).map(u => ({
+                        ...u,
+                        pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                            ? window.BayanSecurity.encryptPin(u.pin)
+                            : u.pin
+                    })),
                     warehouses: window.warehouses || [],
                     trash: (window.trashBin && Array.isArray(window.trashBin) && window.trashBin.length > 0) ? window.trashBin : (Array.isArray(window.trash) ? window.trash : []),
                     purgedTrashIds: window.purgedTrashIds || [],
@@ -405,15 +530,17 @@
                 };
 
                 // إرسال عبر IPC إذا كان في بيئة Electron وكان هذا الجهاز ماستر
+                let masterIpcSuccess = false;
                 if (this.isMasterServer && typeof require !== 'undefined') {
                     try {
                         const { ipcRenderer } = require('electron');
                         await ipcRenderer.invoke('sync-master-db', dbPayload);
+                        masterIpcSuccess = true;
                     } catch(ipcErr) {}
                 }
 
-                // إرسال عبر HTTP POST دائماً إلى سيرفر الشبكة المحلي
-                if (Array.isArray(dbPayload.products)) {
+                // إرسال عبر HTTP POST فقط إذا لم نكن الماستر في Electron أو إذا فشل IPC
+                if (!masterIpcSuccess && Array.isArray(dbPayload.products) && this.serverUrl) {
                     const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/push`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -439,6 +566,25 @@
             }
         },
 
+        getTerminalKey: function(t) {
+            if (!t) return 'HOST';
+            return String(t.terminalId || t.terminalLetter || t.terminal || 'HOST').trim();
+        },
+
+        getDetailedInvoiceType: function(typeStr) {
+            const s = String(typeStr || '').toLowerCase();
+            if (s.includes('مرتجع شراء') || s.includes('purchase_return')) return 'purchase_return';
+            if (s.includes('مرتجع') || s.includes('sales_return') || s.includes('return')) return 'sales_return';
+            if (s.includes('شراء') || s.includes('purchase')) return 'purchase';
+            if (s.includes('بيع') || s.includes('sale')) return 'sale';
+            if (s.includes('قبض') || s.includes('receipt')) return 'receipt';
+            if (s.includes('صرف') || s.includes('payment') || s.includes('disbursement')) return 'disbursement';
+            if (s.includes('تحويل') || s.includes('transfer')) return 'transfer';
+            if (s.includes('تسوية') || s.includes('adjustment')) return 'adjustment';
+            if (s.includes('رصيد اول') || s.includes('opening')) return 'opening';
+            return s.trim() || 'other';
+        },
+
         getTrashedTransactionKeys: function(trashList = []) {
             const keySet = new Set();
             const invIdSet = new Set();
@@ -452,13 +598,18 @@
                     const items = Array.isArray(data) ? data : (data.items ? data.items : [data]);
                     items.forEach(it => {
                         if (!it) return;
+                        const term = this.getTerminalKey(it);
+                        const dType = this.getDetailedInvoiceType(it.type);
                         if (it.id) {
+                            keySet.add(`term_${term}_id_${it.id}`);
                             keySet.add(`id_${it.id}`);
                             keySet.add(String(it.id));
                         }
                         if (it.invoiceId != null && it.invoiceId !== '') {
-                            invIdSet.add(String(it.invoiceId));
-                            invIdSet.add(Number(it.invoiceId));
+                            invIdSet.add(`${term}__${dType}__${it.invoiceId}`);
+                            if (!it.terminalId && !it.terminalLetter) {
+                                invIdSet.add(`${dType}__${it.invoiceId}`);
+                            }
                         }
                         const inv = it.invoiceId || '';
                         const prod = it.product || it.productName || '';
@@ -468,6 +619,7 @@
                         const tm = it.timeISO || it.time || '';
                         const wh = it.warehouse || '';
                         const qty = it.qty || 0;
+                        keySet.add(`tx_${term}_${dType}_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`);
                         keySet.add(`tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`);
                     });
                 }
@@ -550,8 +702,14 @@
 
             const isTrashed = (t) => {
                 if (!t) return true;
-                if (t.id && (trashedKeys.has(`id_${t.id}`) || trashedKeys.has(String(t.id)))) return true;
-                if (t.invoiceId != null && (trashedInvIds.has(String(t.invoiceId)) || trashedInvIds.has(Number(t.invoiceId)))) return true;
+                const term = this.getTerminalKey(t);
+                const dType = this.getDetailedInvoiceType(t.type);
+                if (t.id && (trashedKeys.has(`term_${term}_id_${t.id}`) || trashedKeys.has(`id_${t.id}`) || trashedKeys.has(String(t.id)))) return true;
+                if (t.invoiceId != null && t.invoiceId !== '') {
+                    if (trashedInvIds.has(`${term}__${dType}__${t.invoiceId}`) || trashedInvIds.has(`${dType}__${t.invoiceId}`)) {
+                        return true;
+                    }
+                }
                 const inv = t.invoiceId || '';
                 const prod = t.product || t.productName || '';
                 const s = t.size || t.selectedSize || '';
@@ -560,8 +718,9 @@
                 const tm = t.timeISO || t.time || '';
                 const wh = t.warehouse || '';
                 const qty = t.qty || 0;
-                const compKey = `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
-                return trashedKeys.has(compKey);
+                const compKey = `tx_${term}_${dType}_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+                const legacyCompKey = `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+                return trashedKeys.has(compKey) || trashedKeys.has(legacyCompKey);
             };
 
             const cleanExisting = (Array.isArray(existingList) ? existingList : []).filter(t => !isTrashed(t));
@@ -570,20 +729,27 @@
             if (cleanExisting.length === 0) return cleanIncoming;
             if (cleanIncoming.length === 0) return cleanExisting;
 
-            // تحديد الفواتير الواردة لحذف بنودها القديمة واستبدالها بالبنود الحديثة (منع دبلرة الفواتير المعدلة)
+            // 1. تحديد أرقام الفواتير الواردة مفصولة بالجهاز ونوع الفاتورة الدقيق
             const incomingInvoiceKeys = new Set();
             cleanIncoming.forEach(t => {
                 if (t && t.invoiceId != null && t.invoiceId !== '') {
-                    const cleanType = String(t.type || '').includes('مرتجع') ? 'return' : 'normal';
-                    incomingInvoiceKeys.add(`${t.invoiceId}_${cleanType}`);
+                    const term = this.getTerminalKey(t);
+                    const dType = this.getDetailedInvoiceType(t.type);
+                    incomingInvoiceKeys.add(`${term}__${dType}__${t.invoiceId}`);
                 }
             });
 
             const map = new Map();
             const getKey = (t) => {
                 if (!t) return '';
-                if (t.id && t.invoiceId) return `inv_${t.invoiceId}_id_${t.id}`;
-                if (t.id) return `id_${t.id}_type_${t.type}`;
+                const term = this.getTerminalKey(t);
+                const dType = this.getDetailedInvoiceType(t.type);
+                if (t.id && t.invoiceId != null && t.invoiceId !== '') {
+                    return `term_${term}_type_${dType}_inv_${t.invoiceId}_id_${t.id}`;
+                }
+                if (t.id) {
+                    return `term_${term}_type_${dType}_id_${t.id}`;
+                }
                 const inv = t.invoiceId || '';
                 const prod = t.product || t.productName || '';
                 const s = t.size || t.selectedSize || '';
@@ -592,21 +758,24 @@
                 const tm = t.timeISO || t.time || '';
                 const wh = t.warehouse || '';
                 const qty = t.qty || 0;
-                return `tx_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
+                return `tx_${term}_${dType}_${inv}_${prod}_${s}_${c}_${d}_${tm}_${wh}_${qty}`;
             };
 
+            // 2. إضافة حركات القائمة السابقة مع استبعاد النسخ القديمة لنفس الفاتورة من نفس الجهاز ونفس النوع
             cleanExisting.forEach(t => {
                 if (!t) return;
                 if (t.invoiceId != null && t.invoiceId !== '') {
-                    const cleanType = String(t.type || '').includes('مرتجع') ? 'return' : 'normal';
-                    if (incomingInvoiceKeys.has(`${t.invoiceId}_${cleanType}`)) {
-                        return; // استبعاد النسخة القديمة من الفاتورة لصالح النسخة الواردة
+                    const term = this.getTerminalKey(t);
+                    const dType = this.getDetailedInvoiceType(t.type);
+                    if (incomingInvoiceKeys.has(`${term}__${dType}__${t.invoiceId}`)) {
+                        return; // استبعاد النسخة القديمة لصالح الأحدث
                     }
                 }
                 const k = getKey(t);
                 if (k) map.set(k, t);
             });
 
+            // 3. إضافة كافة الحركات الواردة
             cleanIncoming.forEach(t => {
                 const k = getKey(t);
                 if (!k) return;
@@ -692,13 +861,22 @@
                         ? Object.values(mergedWhStocks).reduce((sum, q) => sum + (parseFloat(q) || 0), 0)
                         : (p.stock !== undefined ? p.stock : existing.stock);
 
-                    map.set(sKey, {
-                        ...existing,
-                        ...p,
-                        stock: totalStock,
-                        warehouseStocks: mergedWhStocks,
-                        variants: mergedVariants
-                    });
+                    if (this.isMasterServer) {
+                        map.set(sKey, {
+                            ...existing,
+                            ...p,
+                            stock: totalStock,
+                            warehouseStocks: mergedWhStocks,
+                            variants: mergedVariants
+                        });
+                    } else {
+                        map.set(sKey, {
+                            ...existing,
+                            stock: totalStock,
+                            warehouseStocks: mergedWhStocks,
+                            variants: mergedVariants
+                        });
+                    }
                 }
             });
 
@@ -977,12 +1155,24 @@
 
                     // 7. تحديث المستخدمين وقائمة تسجيل الدخول
                     if (Array.isArray(db.users) && db.users.length > 0) {
-                        window.users = this.mergeUsers(window.users || [], db.users, mergedTrash);
+                        const normalizedUsers = db.users.map(u => ({
+                            ...u,
+                            pin: (window.BayanSecurity && typeof window.BayanSecurity.decryptPin === 'function')
+                                ? window.BayanSecurity.decryptPin(u.pin)
+                                : u.pin
+                        }));
+                        window.users = this.mergeUsers(window.users || [], normalizedUsers, mergedTrash);
                         if (typeof users !== 'undefined') users = window.users;
                         if (window.bayanDB && window.bayanDB.users) {
                             try {
                                 await window.bayanDB.users.clear();
-                                await window.bayanDB.users.bulkPut(window.users);
+                                const secureUsers = window.users.map(u => ({
+                                    ...u,
+                                    pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                                        ? window.BayanSecurity.encryptPin(u.pin)
+                                        : u.pin
+                                }));
+                                await window.bayanDB.users.bulkPut(secureUsers);
                             } catch(e) {}
                         }
                         if (!window.currentUser && typeof initLogin === 'function') {
@@ -1063,20 +1253,23 @@
 
         setupMasterListeners: function() {
             if (this.isMasterServer && typeof require === 'undefined') {
-                // فحص دوري لطلبات الإقران المعلقة من شاشة المتصفح على اللاب توب بدون تكرار
-                setInterval(async () => {
-                    try {
-                        const res = await fetch(`${this.serverUrl}/api/pair-requests/pending`);
-                        const data = await res.json();
-                        if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
-                            data.requests.forEach(req => {
-                                if (!this.shownPairingRequestIds.has(req.id) && !document.getElementById('masterPairingAlertModal')) {
-                                    this.showMasterPairingAlert(req);
-                                }
-                            });
-                        }
-                    } catch(e) {}
-                }, 4000);
+                // فحص دوري لطلبات الإقران المعلقة فقط إذا كان المتصفح يعمل عبر السيرفر المحلي الفعلي
+                const isHostedOnServer = window.location.origin.includes(':4545') || window.location.hostname.match(/^\d+\.\d+\.\d+\.\d+$/);
+                if (isHostedOnServer) {
+                    setInterval(async () => {
+                        try {
+                            const res = await fetch(`${this.serverUrl}/api/pair-requests/pending`);
+                            const data = await res.json();
+                            if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
+                                data.requests.forEach(req => {
+                                    if (!this.shownPairingRequestIds.has(req.id) && !document.getElementById('masterPairingAlertModal')) {
+                                        this.showMasterPairingAlert(req);
+                                    }
+                                });
+                            }
+                        } catch(e) {}
+                    }, 8000);
+                }
             }
 
             if (!this.isMasterServer || typeof require === 'undefined') return;
@@ -1158,7 +1351,13 @@
                                 }
                                 if (window.users && window.users.length > 0) {
                                     await window.bayanDB.users.clear();
-                                    await window.bayanDB.users.bulkPut(window.users);
+                                    const secureUsers = window.users.map(u => ({
+                                        ...u,
+                                        pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                                            ? window.BayanSecurity.encryptPin(u.pin)
+                                            : u.pin
+                                    }));
+                                    await window.bayanDB.users.bulkPut(secureUsers);
                                 }
                                 if (db.treasuryAudit && db.treasuryAudit.length > 0) await window.bayanDB.treasuryAudit.bulkPut(db.treasuryAudit);
                                 if (window.bayanDB.trash) {
@@ -1353,7 +1552,7 @@
                     this.showClientPinInputModal();
                 }
             } catch (err) {
-                console.warn('[NetworkHub] Could not connect to Master Server:', err.message);
+                // طبيعي جداً في حالة العمل كجهاز مستقل أوفلاين دون تشغيل سيرفر فرعي
             }
         },
 
@@ -1458,10 +1657,10 @@
         },
 
         startPendingTransfersPolling: function() {
-            // جلب أذونات التحويل المعلقة كل 10 ثوانٍ
+            // جلب أذونات التحويل المعلقة بهدوء دون استهلاك موارد
             setInterval(async () => {
                 await this.fetchPendingTransfers();
-            }, 10000);
+            }, 20000);
             this.fetchPendingTransfers();
         },
 

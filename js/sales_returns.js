@@ -565,8 +565,11 @@ async function saveSalesReturn(force = false, accountChecked = false) {
         if (partner === '---') partner = '';
         partner = partner.trim();
 
-        const method = getSelectedPaymentMethod('sales-return-section');
-        const isCredit = window.isTransactionCredit(method, 1, 0, 1);
+        const selectedMethod = (typeof getSelectedPaymentMethod === 'function') 
+            ? getSelectedPaymentMethod('sales-return-section') 
+            : (document.getElementById('sales-return-sectionPaymentMethodSelect')?.value || 'نقدي');
+        const method = selectedMethod;
+        const isCredit = (typeof window.isTransactionCredit === 'function') ? window.isTransactionCredit(method, 1, 0, 1) : false;
 
         if (!accountChecked) {
             const ok = await window.ensurePartnerAccountExists(partner, 'عميل', isCredit, () => {
@@ -773,6 +776,9 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
         }
 
+        const newReturnRows = [];
+        const affectedProducts = [];
+
         returnCart.forEach((item, idx) => {
 
             const p = productsDB.find(x => x && (x.name === item.name || x.id === item.id));
@@ -788,18 +794,25 @@ async function saveSalesReturn(force = false, accountChecked = false) {
             const origMatch = originalInvoiceId ? (transactions.find(t => 
                 String(t.invoiceId) === String(originalInvoiceId) && 
                 (t.product === item.name || t.productName === item.name) &&
-                (!sSize || String(t.size || t.selectedSize || '').trim() === sSize) &&
-                (!sColor || String(t.color || t.selectedColor || '').trim() === sColor)
-            ) || transactions.find(t => String(t.invoiceId) === String(originalInvoiceId) && (t.product === item.name || t.productName === item.name))) : null;
+                (!sSize || (t.size || t.selectedSize || '').trim() === sSize) &&
+                (!sColor || (t.color || t.selectedColor || '').trim() === sColor) &&
+                t.type && t.type.includes('بيع') && !t.type.includes('مرتجع')
+            ) || transactions.find(t => 
+                String(t.invoiceId) === String(originalInvoiceId) && 
+                (t.product === item.name || t.productName === item.name) &&
+                t.type && t.type.includes('بيع') && !t.type.includes('مرتجع')
+            )) : null;
 
-            const activeWH = (item.warehouse || (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) || (origMatch && origMatch.warehouse) || 'المخزن الرئيسي').trim();
+            const activeWH = (item.warehouse && item.warehouse.trim() !== '')
+                ? item.warehouse.trim()
+                : (((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : (origMatch ? origMatch.warehouse : 'المخزن الرئيسي')) || 'المخزن الرئيسي').trim();
 
             if (p) {
                 p.stock = (parseFloat(p.stock) || 0) + baseQty;
-                if (!p.warehouseStocks || typeof p.warehouseStocks !== 'object') p.warehouseStocks = {};
+                if (!p.warehouseStocks) p.warehouseStocks = {};
                 p.warehouseStocks[activeWH] = (parseFloat(p.warehouseStocks[activeWH]) || 0) + baseQty;
 
-                // تحديث رصيد التشكيلة (المقاس واللون) في مصفوفة الصنف عند مرتجع البيع بدقة وتطابق تام
+                // تحديث رصيد التشكيلة (المقاس واللون) في مصفوفة الصنف بدقة وتطابق تام
                 if (p.variants && Array.isArray(p.variants)) {
                     if (sSize || sColor) {
                         const cleanV = (s) => String(s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
@@ -811,7 +824,7 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                         );
                         if (matchedVar) {
                             matchedVar.stock = (parseFloat(matchedVar.stock) || 0) + baseQty;
-                            if (!matchedVar.warehouseStocks || typeof matchedVar.warehouseStocks !== 'object') matchedVar.warehouseStocks = {};
+                            if (!matchedVar.warehouseStocks) matchedVar.warehouseStocks = {};
                             matchedVar.warehouseStocks[activeWH] = (parseFloat(matchedVar.warehouseStocks[activeWH]) || 0) + baseQty;
                         }
                     }
@@ -825,6 +838,10 @@ async function saveSalesReturn(force = false, accountChecked = false) {
                             return sum + vWh;
                         }, 0);
                     }
+                }
+
+                if (!affectedProducts.some(ap => ap.id === p.id)) {
+                    affectedProducts.push(p);
                 }
             }
 
@@ -867,7 +884,7 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
             // الحساب المختار حالياً (مأخوذ من النطاق الخارجي finalPartner)
 
-            transactions.push({
+            const newReturnRow = {
 
                 date: dt.full,
 
@@ -875,13 +892,13 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
                 timeISO: dt.time,
 
-                type: 'مرتجع بيع ↩️',
+                type: 'مرتجع بيع 🔄',
 
-                method: isCash ? 'نقدي (من الخزنة)' : 'خصم من حساب العميل',
+                method: selectedMethod,
 
                 invoiceId: returnInvoiceId,
 
-                originalInvoiceId: originalInvoiceId, // ربط بالصورة الأصلية
+                originalInvoiceId: originalInvoiceId || '-',
 
                 originalDate: originalDate,
 
@@ -925,7 +942,10 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
                 editDate: isEditMode ? new Date().toLocaleString('ar-EG') : '-'
 
-            });
+            };
+
+            transactions.push(newReturnRow);
+            newReturnRows.push(newReturnRow);
 
         });
 
@@ -943,7 +963,21 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
         }
 
-        await saveData();
+        // ⚡ حفظ فائق السرعة للمعاملات والأصناف المتأثرة (جديد وتعديل)
+        if (typeof window.saveTransactionChanges === 'function') {
+            const affectedAccountsList = [];
+            if (!isCash && finalPartner && Array.isArray(accounts)) {
+                const targetAcc = accounts.find(a => a.name === finalPartner);
+                if (targetAcc) affectedAccountsList.push(targetAcc);
+            }
+            await window.saveTransactionChanges({
+                newTransactions: newReturnRows,
+                modifiedProducts: affectedProducts,
+                modifiedAccounts: affectedAccountsList
+            });
+        } else {
+            await saveData();
+        }
         if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
         window.accountBalancesCache = {};
 
@@ -1260,8 +1294,11 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
         const dt = getTransactionDateTime('purReturnDate', 'purReturnTime');
 
-        const method = getSelectedPaymentMethod('purchase-return-section');
-        const isCredit = window.isTransactionCredit(method, 1, 0, 1);
+        const selectedMethod = (typeof getSelectedPaymentMethod === 'function') 
+            ? getSelectedPaymentMethod('purchase-return-section') 
+            : (document.getElementById('purchase-return-sectionPaymentMethodSelect')?.value || 'نقدي (إلى الخزنة)');
+        const method = selectedMethod;
+        const isCredit = (typeof window.isTransactionCredit === 'function') ? window.isTransactionCredit(method, 1, 0, 1) : false;
 
         if (!accountChecked) {
             const ok = await window.ensurePartnerAccountExists(partner, 'مورد', isCredit, () => {
@@ -1440,6 +1477,9 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
             return false;
         }
 
+        const newPurReturnRows = [];
+        const affectedProducts = [];
+
         purReturnCart.forEach((item, idx) => {
 
             const p = productsDB.find(x => x && (x.name === item.name || x.id === item.id));
@@ -1486,6 +1526,10 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                         }, 0);
                     }
                 }
+
+                if (!affectedProducts.some(ap => ap.id === p.id)) {
+                    affectedProducts.push(p);
+                }
             }
 
             const itemNetTotal = parseFloat((item.price * item.qty * ratio).toFixed(2));
@@ -1502,7 +1546,7 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
             // الحساب المختار حالياً (مأخوذ من النطاق الخارجي finalPartner)
 
-            transactions.push({
+            const newPurReturnRow = {
 
                 date: dt.full,
 
@@ -1512,11 +1556,11 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
                 type: 'مرتجع شراء 📤',
 
-                method: isCash ? 'نقدي (استرداد للخزنة)' : 'خصم من حساب المورد',
+                method: isCash ? (selectedMethod || 'نقدي (استرداد للخزنة)') : (selectedMethod || 'خصم من حساب المورد'),
 
                 invoiceId: returnInvoiceId,
 
-                originalInvoiceId: originalInvoiceId,
+                originalInvoiceId: originalInvoiceId || '-',
 
                 originalDate: originalDate,
 
@@ -1560,7 +1604,10 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
                 editDate: isEditMode ? new Date().toLocaleString('ar-EG') : '-'
 
-            });
+            };
+
+            transactions.push(newPurReturnRow);
+            newPurReturnRows.push(newPurReturnRow);
 
         });
 
@@ -1578,7 +1625,15 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
         }
 
-        await saveData();
+        // ⚡ حفظ فائق السرعة للمعاملات والأصناف المتأثرة (جديد وتعديل)
+        if (typeof window.saveTransactionChanges === 'function') {
+            await window.saveTransactionChanges({
+                newTransactions: newPurReturnRows,
+                modifiedProducts: affectedProducts
+            });
+        } else {
+            await saveData();
+        }
         if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
         window.accountBalancesCache = {};
 
@@ -2061,6 +2116,7 @@ function filterPurReturnCartItems(query) {
 // ================= نظام السرعة والتركيز العالمي (Universal POS Speed Kit) =================
 
 document.addEventListener('keydown', (e) => {
+    if (!e || typeof e.key !== 'string') return;
 
     const currentTab = openTabs.find(t => t.id === activeTabId);
 
@@ -2127,6 +2183,7 @@ document.addEventListener('keydown', (e) => {
 let universalSelectedIndex = -1;
 
 document.addEventListener('keydown', function (e) {
+    if (!e || typeof e.key !== 'string') return;
 
     const currentTab = openTabs.find(t => t.id === activeTabId);
 
