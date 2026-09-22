@@ -463,23 +463,24 @@
                                             </thead>
                                             <tbody>
                                                 ${receiptLog.map((log) => {
+                                                    const isTransferRejected = log.type === 'transfer' && (log.isRejected || log.status === 'rejected');
                                                     const badgeColor = (log.type === 'low-stock') ? '#ef4444' 
                                                         : (log.type === 'expiry' ? '#d97706' 
                                                         : (log.type === 'debt' ? '#2563eb' 
                                                         : (log.type === 'delayed' ? '#b45309' 
-                                                        : (log.type === 'transfer' ? '#059669' : '#8b5cf6'))));
+                                                        : (log.type === 'transfer' ? (isTransferRejected ? '#dc2626' : '#059669') : '#8b5cf6'))));
                                                     
                                                     const badgeBg = (log.type === 'low-stock') ? '#fee2e2' 
                                                         : (log.type === 'expiry' ? '#fef3c7' 
                                                         : (log.type === 'debt' ? '#eff6ff' 
                                                         : (log.type === 'delayed' ? '#fffbeb' 
-                                                        : (log.type === 'transfer' ? '#ecfdf5' : '#f5f3ff'))));
+                                                        : (log.type === 'transfer' ? (isTransferRejected ? '#fee2e2' : '#ecfdf5') : '#f5f3ff'))));
 
                                                     const icon = (log.type === 'low-stock') ? '📦' 
                                                         : (log.type === 'expiry' ? '📅' 
                                                         : (log.type === 'debt' ? '💳' 
                                                         : (log.type === 'delayed' ? '⚠️' 
-                                                        : (log.type === 'transfer' ? '🚚' : '☁️'))));
+                                                        : (log.type === 'transfer' ? (isTransferRejected ? '❌' : '🚚') : '☁️'))));
 
                                                     return `
                                                     <tr style="border-bottom: 1px solid #f1f5f9; transition: 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
@@ -505,13 +506,19 @@
                                                             <div style="color:#0f172a;">${escapeStr(log.time || '')}</div>
                                                         </td>
                                                         <td style="padding: 10px 12px; text-align:center;">
-                                                            <button onclick="window.unacknowledgeNotification('${escapeStr(log.type)}', '${escapeStr(log.targetId)}', '${escapeStr(log.logId)}')" 
-                                                                style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:8px; padding:4px 10px; font-size:0.75rem; font-weight:900; cursor:pointer; display:inline-flex; align-items:center; gap:4px; transition:0.2s;"
-                                                                onmouseover="this.style.background='#fee2e2'; this.style.color='#dc2626'; this.style.borderColor='#fca5a5';"
-                                                                onmouseout="this.style.background='#f1f5f9'; this.style.color='#475569'; this.style.borderColor='#cbd5e1';"
-                                                                title="استعادة هذا التنبيه وإلغاء استلامه وإرجاعه للقائمة النشطة">
-                                                                <span>🔄</span> استعادة
-                                                            </button>
+                                                            ${log.type === 'transfer' ? `
+                                                                <span style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:10px; font-weight:900; font-size:0.75rem; ${isTransferRejected ? 'background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5;' : 'background:#ecfdf5; color:#047857; border:1px solid #a7f3d0;'}">
+                                                                    ${isTransferRejected ? '❌ مرفوض نهائياً' : '🔒 معتمد نهائياً'}
+                                                                </span>
+                                                            ` : `
+                                                                <button onclick="window.unacknowledgeNotification('${escapeStr(log.type)}', '${escapeStr(log.targetId)}', '${escapeStr(log.logId)}')" 
+                                                                    style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:8px; padding:4px 10px; font-size:0.75rem; font-weight:900; cursor:pointer; display:inline-flex; align-items:center; gap:4px; transition:0.2s;"
+                                                                    onmouseover="this.style.background='#fee2e2'; this.style.color='#dc2626'; this.style.borderColor='#fca5a5';"
+                                                                    onmouseout="this.style.background='#f1f5f9'; this.style.color='#475569'; this.style.borderColor='#cbd5e1';"
+                                                                    title="استعادة هذا التنبيه وإلغاء استلامه وإرجاعه للقائمة النشطة">
+                                                                    <span>🔄</span> استعادة
+                                                                </button>
+                                                            `}
                                                         </td>
                                                     </tr>`;
                                                 }).join('')}
@@ -856,7 +863,7 @@
                 printInvoice({
                     invoiceNumber: head.invoiceId || head.id,
                     invoiceType: isRet ? (isPur ? 'مرتجع مشتريات' : 'مرتجع مبيعات') : (head.type || 'بيع'),
-                    paymentMethod: head.method || head.paymentMethod || 'نقدي',
+                    paymentMethod: (typeof window.formatPaymentMethodDisplay === 'function') ? window.formatPaymentMethodDisplay(head) : (head.method || head.paymentMethod || 'نقدي'),
                     isReturn: isRet,
                     isPurchase: isPur,
                     docTitle: pDocTitle,
@@ -1149,18 +1156,25 @@
             if (isNaN(paidVal)) paidVal = 0;
             
             // التحقق من الآجل سواء من اسم طريقة الدفع أو من وجود دين ومتبقي حقيقي
-            let isDeferred = methodVal.includes('آجل') || methodVal.includes('أجل') || methodVal.includes('ذمم') || methodVal.includes('deferred') || methodVal.includes('credit');
+            let isDeferred = methodVal.includes('آجل') || methodVal.includes('أجل') || methodVal.includes('ذمم') || methodVal.includes('deferred') || methodVal.includes('credit') || methodVal.includes('تقسيط');
             let remainingVal = 0;
 
             if (isDeferred) {
-                remainingVal = parseFloat(tx.deferred != null ? tx.deferred : (tx.remaining != null ? tx.remaining : (invoiceFinalTotal - paidVal)));
+                // في الفواتير الآجلة: المتبقي هو صافي الفاتورة ناقص المدفوع بدقة
+                if (tx.deferred != null && !isNaN(parseFloat(tx.deferred)) && parseFloat(tx.deferred) > 0.001) {
+                    remainingVal = parseFloat(tx.deferred);
+                } else if (tx.remaining != null && !isNaN(parseFloat(tx.remaining)) && parseFloat(tx.remaining) > 0.001) {
+                    remainingVal = parseFloat(tx.remaining);
+                } else {
+                    remainingVal = Math.max(0, invoiceFinalTotal - paidVal);
+                }
                 if (isNaN(remainingVal) || remainingVal < 0) remainingVal = Math.max(0, invoiceFinalTotal - paidVal);
             } else {
                 let recordedRemaining = parseFloat(tx.deferred != null ? tx.deferred : (tx.remaining != null ? tx.remaining : 0));
-                if (recordedRemaining > 0.001) {
+                if (!isNaN(recordedRemaining) && recordedRemaining > 0.001) {
                     isDeferred = true;
                     remainingVal = recordedRemaining;
-                } else if (paidVal > 0 && invoiceFinalTotal > paidVal && (invoiceFinalTotal - paidVal) > 0.001) {
+                } else if (paidVal >= 0 && invoiceFinalTotal > paidVal && (invoiceFinalTotal - paidVal) > 0.001) {
                     isDeferred = true;
                     remainingVal = invoiceFinalTotal - paidVal;
                 } else {
@@ -1169,20 +1183,9 @@
                 }
             }
 
-            let displayMethod = '';
-            if (isDeferred) {
-                if (paidVal > 0.001 && remainingVal > 0.001) {
-                    displayMethod = '⏳ آجل (سداد جزئي)';
-                } else {
-                    displayMethod = '⏳ آجل (ذمم)';
-                }
-            } else if (methodVal.includes('حساب') || methodVal.includes('خصم من حساب') || methodVal.includes('رصيد')) {
-                displayMethod = '👤 خصم من الحساب';
-            } else if (methodVal.includes('تحويل') || methodVal.includes('بنك') || methodVal.includes('شبكة') || methodVal.includes('فيزا') || methodVal.includes('شيك')) {
-                displayMethod = methodVal.includes('شيك') ? '🏦 شيك بنكي' : '🏦 بنك / تحويل';
-            } else {
-                displayMethod = '💵 نقدي (كاش)';
-            }
+            let displayMethod = (typeof window.formatPaymentMethodDisplay === 'function')
+                ? window.formatPaymentMethodDisplay(tx, { paidVal, remainingVal, isDeferred })
+                : (isDeferred ? '⏳ آجل (ذمم)' : (methodVal || '💵 نقدي (كاش)'));
             
             let modalWidth = hasVariants ? '880px' : '780px';
             let modalContent = `
@@ -1292,7 +1295,7 @@
                                         <span style="font-size:0.75rem; color:#059669; font-weight:bold;">${isReturn ? 'المبلغ المرتجع:' : 'المدفوع:'}</span>
                                         <div style="font-size:1.25rem; font-weight:900; color:#059669;">${paidVal.toFixed(2)} ج.م</div>
                                     </div>
-                                    ${!isReturn && isDeferred ? `
+                                    ${!isReturn && (isDeferred || remainingVal > 0.001) ? `
                                         <div style="text-align:center;">
                                             <span style="font-size:0.75rem; color:#dc2626; font-weight:bold;">المتبقي:</span>
                                             <div style="font-size:1.25rem; font-weight:900; color:#dc2626;">${remainingVal.toFixed(2)} ج.م</div>
@@ -1775,7 +1778,7 @@
                         printInvoice({
                             invoiceNumber: tx.invoiceId || tx.invoiceNumber || tx.id,
                             invoiceType: isReturn ? (isPurchase ? 'مرتجع مشتريات' : 'مرتجع مبيعات') : printType,
-                            paymentMethod: tx.method || tx.paymentMethod || 'نقدي',
+                            paymentMethod: (typeof window.formatPaymentMethodDisplay === 'function') ? window.formatPaymentMethodDisplay(tx) : (tx.method || tx.paymentMethod || 'نقدي'),
                             isReturn: isReturn,
                             isPurchase: isPurchase,
                             docTitle: printDocTitle,
@@ -1864,11 +1867,16 @@
             }
 
             const t = transactions[activeIdx];
-            const text = `📄 تفاصيل ${t.type}\n🔢 رقم العملية: ${t.invoiceId || '-'}\n📅 التاريخ: ${t.date}\n👤 الطرف: ${t.partner || 'بدون'}\n💰 المبلغ: ${parseFloat(t.total || t.price || 0).toFixed(2)} ج.م\n📝 البيان: ${t.product || '-'}\n\nتم الإرسال عبر تطبيق بيان POS ✨`;
+            const pmText = (typeof window.formatPaymentMethodDisplay === 'function') ? window.formatPaymentMethodDisplay(t) : (t.method || 'نقدي');
+            const text = `📄 تفاصيل ${t.type}\n🔢 رقم العملية: ${t.invoiceId || '-'}\n📅 التاريخ: ${t.date}\n👤 الطرف: ${t.partner || 'بدون'}\n💳 طريقة الدفع: ${pmText}\n💰 المبلغ: ${parseFloat(t.total || t.price || 0).toFixed(2)} ج.م\n📝 البيان: ${t.product || '-'}\n\nتم الإرسال عبر تطبيق بيان POS ✨`;
 
             let url = '';
             if (platform === 'wa') {
-                url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+                let cleanPhone = '';
+                if (typeof getPartnerPhone === 'function' && typeof formatPhoneForWhatsApp === 'function') {
+                    cleanPhone = formatPhoneForWhatsApp(getPartnerPhone(t.partner));
+                }
+                url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
             } else if (platform === 'tg') {
                 url = `https://t.me/share/url?url=${encodeURIComponent('https://t.me')}&text=${encodeURIComponent(text)}`;
             }

@@ -289,44 +289,42 @@ async function handlePurchaseSearch(query) {
         return; 
     }
 
-    // 1. البحث الحي الموحد بالاسم أو الباركود أو الكود مع تطبيع الحروف العربية
-    const cleanNorm = (s) => String(s || '').trim().toLowerCase()
-        .replace(/[أإآ]/g, 'ا')
-        .replace(/ة/g, 'ه')
-        .replace(/[ىي]/g, 'ي')
-        .replace(/\s+/g, ' ');
-
-    const queryClean = cleanNorm(query);
-    const queryLower = query.trim().toLowerCase();
-
-    const filtered = (productsDB || []).filter(p => {
-        const pNameClean = cleanNorm(p.name);
-        const pBarcode = String(p.barcode || '').toLowerCase();
-        const pCode = String(p.code || '').toLowerCase();
-        const unitsMatch = p.units && p.units.some(u => u.unitBarcode && String(u.unitBarcode).toLowerCase().includes(queryLower));
-        return pNameClean.includes(queryClean) || pBarcode.includes(queryLower) || pCode.includes(queryLower) || unitsMatch;
-    }).slice(0, 12);
+    // 1. البحث الحي الموحد بالاسم أو الباركود أو الكود أو المقاس عبر محرك البحث المرتب والذكي
+    const filtered = (typeof window.searchProductsRanked === 'function')
+        ? window.searchProductsRanked(query)
+        : (productsDB || []).filter(p => (p.name && p.name.includes(query)) || (p.barcode && String(p.barcode).includes(query)));
 
     if (filtered.length > 0) {
+        const totalMatches = filtered.length;
+        const displayFiltered = filtered.slice(0, 40);
         resultsDiv.innerHTML = `
             <div class="pos-search-panel" style="width: min(580px, calc(100vw - 40px)); min-width: 320px; position: absolute; top: calc(100% + 4px); right: 0; left: auto; z-index: 999999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 1.5px solid #cbd5e1; direction: rtl; text-align: right; animation: modalFadeIn 0.15s ease-out;">
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 14px; border-top-right-radius: 14px;">
-                    <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج بحث الشراء (${filtered.length} صنف)</span>
+                    <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج بحث الشراء (${totalMatches} صنف${totalMatches > 40 ? ' - معروض أول 40' : ''})</span>
                     <button type="button" onclick="document.getElementById('purchaseSearchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة" style="background:none; border:none; cursor:pointer; font-size:1rem;">❌</button>
                 </div>
                 <div style="max-height: 380px; overflow-y: auto; padding: 6px; scrollbar-gutter: stable;">
-                    ${filtered.map(p => {
+                    ${displayFiltered.map(p => {
                         const costVal = parseFloat(p.cost) || 0;
                         const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
                         const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWH) : 0;
                         const safeName = (window.escapeHtml ? window.escapeHtml(p.name) : p.name);
                         const safeCode = (window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id));
                         const safeBarcode = (window.escapeHtml ? window.escapeHtml(p.barcode || '---') : (p.barcode || '---'));
+                        const sizesList = (p.variants && Array.isArray(p.variants)) 
+                            ? [...new Set(p.variants.map(v => String(v.size || '').trim()).filter(s => s && s !== '-' && s !== 'موحد' && s !== 'قياسي'))] 
+                            : [];
+                        const sizesHtml = sizesList.length > 0 
+                            ? `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; border: 1px solid #bae6fd;">📏 مقاسات: ${sizesList.slice(0, 5).join(', ')}${sizesList.length > 5 ? '...' : ''}</span>`
+                            : '';
                         return `
                             <div class="pos-search-row" onclick="selectProductToPurchaseHeader(${p.id});" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 10px;">
                                 <div style="flex: 1; min-width: 0; text-align: right;">
                                     <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b; white-space: normal; word-break: break-word;">${safeName}</div>
-                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${safeCode}</b> | باركود: <b>${safeBarcode}</b></div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+                                        <span>🏷️ كود: <b style="color:#5e3370;">${safeCode}</b> | باركود: <b>${safeBarcode}</b></span>
+                                        ${sizesHtml}
+                                    </div>
                                 </div>
                                 <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
                                     <div style="text-align: center; background: #f8fafc; padding: 5px 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
@@ -461,7 +459,20 @@ async function handlePurchaseSearchEnter(query, event, forceAdd = false) {
         return;
     }
 
-    // 2. البحث بالباركود الأساسي أو الكود
+    // 2. البحث المطابق الدقيق بالاسم التام أولاً أو الباركود الأساسي أو الكود
+    if (!pMatch) {
+        const normClean = (typeof window.normalizeSearchQuery === 'function')
+            ? window.normalizeSearchQuery(cleanQuery)
+            : cleanQuery.trim().toLowerCase();
+
+        pMatch = productsDB.find(p => {
+            const pNorm = (typeof window.normalizeSearchQuery === 'function')
+                ? window.normalizeSearchQuery(p.name)
+                : String(p.name || '').trim().toLowerCase();
+            return pNorm === normClean;
+        });
+    }
+
     if (!pMatch) {
         pMatch = productsDB.find(p => String(p.barcode || '').trim() === cleanQuery || String(p.code || '').trim() === cleanQuery);
     }
@@ -471,17 +482,15 @@ async function handlePurchaseSearchEnter(query, event, forceAdd = false) {
         pMatch = productsDB.find(p => p.units && p.units.some(u => String(u.unitBarcode || '').trim() === cleanQuery));
     }
 
-    // 3. البحث بالاسم الجزئي كحل أخير
+    // 4. البحث عبر محرك البحث المرتب إذا لم نجد تطابقاً كاملاً
     if (!pMatch) {
-        const queryLower = cleanQuery.toLowerCase();
-        const matches = productsDB.filter(p =>
-            (p.name && p.name.toLowerCase().includes(queryLower))
-        );
+        const matches = (typeof window.searchProductsRanked === 'function')
+            ? window.searchProductsRanked(cleanQuery, { limit: 10 })
+            : productsDB.filter(p => (p.name && p.name.toLowerCase().includes(cleanQuery.toLowerCase())));
         
         if (matches.length === 1) {
             pMatch = matches[0];
         } else if (matches.length > 1) {
-            // أكثر من منتج يتطابق مع كلمة عامة مثل "جزمه"، ننتظر المستخدم ليختار
             return;
         }
     }
@@ -690,18 +699,35 @@ function completeAddToPurchaseCart(product, selectedUnit, manualQty = null, manu
     const effVariant = selectedVariant || window._pendingPurchaseVariant || null;
     const vSize = effVariant ? (effVariant.size || '') : '';
     const vColor = effVariant ? (effVariant.color || '') : '';
+    const vBarcode = effVariant && effVariant.barcode ? String(effVariant.barcode).trim() : '';
 
-    const existing = purchaseCart.find(item =>
+    const cleanAttr = (val) => {
+        const s = String(val || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+        if (!s || s === 'قياسي' || s === 'موحد' || s === 'عام' || s === '-') return '';
+        return s;
+    };
+    const cSize = cleanAttr(vSize);
+    const cColor = cleanAttr(vColor);
 
-        item.id === product.id &&
+    const existing = purchaseCart.find(item => {
+        // 1. الأولوية المطلقة لتطابق الباركود الفريد للتشكيلة
+        if (vBarcode) {
+            const itemCode = String(item.code || '').trim();
+            const itemVarBarcode = (item.selectedVariant && item.selectedVariant.barcode) ? String(item.selectedVariant.barcode).trim() : '';
+            if (itemCode === vBarcode || itemVarBarcode === vBarcode) return true;
+        }
+        // 2. التطابق برقم الصنف مع معايرة المقاس واللون والوحدة
+        const isSame = (item.id === product.id || String(item.id) === String(product.id) || item.name === product.name);
+        if (!isSame) return false;
 
-        ((!item.selectedUnit && !selectedUnit) || (item.selectedUnit && selectedUnit && item.selectedUnit.unitName === selectedUnit.unitName)) &&
+        const itUnitName = item.selectedUnit ? (item.selectedUnit.unitName || item.selectedUnit) : (product.unit || 'قطعة');
+        const selUnitName = selectedUnit ? (selectedUnit.unitName || selectedUnit) : (product.unit || 'قطعة');
+        if (itUnitName !== selUnitName) return false;
 
-        ((item.selectedSize || '') === vSize) &&
-
-        ((item.selectedColor || '') === vColor)
-
-    );
+        const itSize = cleanAttr(item.selectedSize || item.size || (item.selectedVariant ? item.selectedVariant.size : ''));
+        const itColor = cleanAttr(item.selectedColor || item.color || (item.selectedVariant ? item.selectedVariant.color : ''));
+        return itSize === cSize && itColor === cColor;
+    });
 
     // استخدام الوحدة المختارة من المتغير العالمي إذا لم يتم تمرير واحدة
 
@@ -1574,13 +1600,19 @@ async function savePurchase(force = false, accountChecked = false) {
 
         } else {
 
-            const badgeEl = document.getElementById('purchaseBadgeID');
-            purchaseId = badgeEl ? badgeEl.innerText.trim() : (typeof getNextSequence === 'function' ? getNextSequence('شراء') : 1);
+            purchaseId = typeof getNextSequence === 'function' ? getNextSequence('شراء') : 1;
 
         }
 
-        const dt = (isEditMode && editingOriginalDate && typeof editingOriginalDate === 'object' && editingOriginalDate.full)
+        const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
             ? editingOriginalDate
+            : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+        const inputDateVal = document.getElementById('purchaseDate')?.value;
+        const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+        const dt = (isEditMode && origDt && !isDateManuallyChanged)
+            ? origDt
             : (typeof getTransactionDateTime === 'function'
                 ? getTransactionDateTime('purchaseDate', 'purchaseTime')
                 : {
@@ -1864,7 +1896,8 @@ async function savePurchase(force = false, accountChecked = false) {
                 notes: document.getElementById('purchaseNotes') ? document.getElementById('purchaseNotes').value.trim() : '',
 
                 paidAmount: (idx === 0) ? purchasePaidAmount : 0,
-
+                remaining: (idx === 0) ? (isCreditPurchase ? Math.max(0, finalTotalVal - purchasePaidAmount) : 0) : 0,
+                deferred: (idx === 0) ? (isCreditPurchase ? Math.max(0, finalTotalVal - purchasePaidAmount) : 0) : 0,
                 isInvoiceHead: (idx === 0),
 
                 invoiceDiscount: (idx === 0) ? (parseFloat(document.getElementById('purchaseDiscount')?.value) || 0) : 0,
@@ -1948,6 +1981,10 @@ async function savePurchase(force = false, accountChecked = false) {
             window.registerTrialInvoiceCreation();
         }
 
+        if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
+            window.updateLastSavedSequence('شراء', purchaseId);
+        }
+
         if (typeof logAuditAction === 'function') {
             const auditAction = isEditMode ? 'تحديث فاتورة شراء' : 'حفظ فاتورة شراء جديدة';
             logAuditAction(auditAction, `فاتورة شراء رقم #${purchaseId}, الإجمالي: ${finalTotalVal.toFixed(2)} ج.م, المورد: ${finalPartner}, طريقة الدفع: ${selectedMethod}`);
@@ -1973,15 +2010,24 @@ async function savePurchase(force = false, accountChecked = false) {
 
         resetPurchase();
 
+        if (typeof window.clearRevertedInvoiceBackup === 'function') {
+            window.clearRevertedInvoiceBackup();
+        }
+
         return true;
 
     } catch (err) {
         console.error("❌ خطأ أثناء حفظ فاتورة الشراء:", err);
+        if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+            await window.rollbackLastRevertedInvoice();
+        }
         if (typeof showCustomAlert === 'function') {
             showCustomAlert({
                 type: 'error',
-                titleText: '❌ خطأ أثناء الحفظ',
-                msg: 'حدث خطأ غير متوقع أثناء حفظ فاتورة الشراء:\n' + (err.message || err)
+                titleText: isEditMode ? '⚠️ تعذر حفظ التعديل' : '❌ خطأ أثناء الحفظ',
+                msg: isEditMode 
+                    ? ('حدث خطأ أثناء حفظ التعديل، وتم الحفاظ على فاتورة الشراء الأصلية واستعادتها بالكامل دون أي فقدان للبيانات.\n\nتفاصيل الخطأ: ' + (err.message || err))
+                    : ('حدث خطأ غير متوقع أثناء حفظ فاتورة الشراء:\n' + (err.message || err))
             });
         } else {
             alert('❌ خطأ أثناء حفظ فاتورة الشراء: ' + (err.message || err));
@@ -2007,12 +2053,16 @@ function resetPurchase() {
     // إنهاء وضع التعديل إذا كان نشطاً
 
     isEditMode = false;
+    window.isEditMode = false;
 
     editingInvoiceId = null;
+    window.editingInvoiceId = null;
 
     editingOriginalDate = null;
+    window.editingOriginalDate = null;
 
     editingInvoiceType = null;
+    window.editingInvoiceType = null;
 
     const mainSaveBtn = document.querySelector('#purchase-section .btn-save');
 

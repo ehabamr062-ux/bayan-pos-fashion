@@ -364,73 +364,44 @@ async function handleSearch(query) {
         return;
     }
 
-    // 2. البحث الحي الموحد بالاسم أو الباركود أو الكود مع تطبيع الحروف العربية
-    const cleanNorm = (s) => String(s || '').trim().toLowerCase()
-        .replace(/[أإآ]/g, 'ا')
-        .replace(/ة/g, 'ه')
-        .replace(/[ىي]/g, 'ي')
-        .replace(/\s+/g, ' ');
-
-    const queryClean = cleanNorm(query);
-    const queryLower = query.trim().toLowerCase();
-
-    const filtered = [];
-    const list = (typeof productsDB !== 'undefined' && Array.isArray(productsDB) && productsDB.length > 0)
-        ? productsDB 
-        : (window.productsDB || []);
-
-    for (let i = 0; i < list.length; i++) {
-        const p = list[i];
-        const pNameClean = cleanNorm(p.name);
-        const pBarcode = String(p.barcode || '').toLowerCase();
-        const pCode = String(p.code || '').toLowerCase();
-
-        let hasVariantMatch = false;
-        if (p.variants && Array.isArray(p.variants)) {
-            hasVariantMatch = p.variants.some(v => 
-                (v.barcode && String(v.barcode).toLowerCase().includes(queryLower)) ||
-                (v.size && cleanNorm(v.size).includes(queryClean)) ||
-                (v.color && cleanNorm(v.color).includes(queryClean))
-            );
-        }
-
-        let hasUnitMatch = false;
-        if (p.units && Array.isArray(p.units)) {
-            hasUnitMatch = p.units.some(u => u.unitBarcode && String(u.unitBarcode).toLowerCase().includes(queryLower));
-        }
-
-        if (
-            pNameClean.includes(queryClean) ||
-            pBarcode.includes(queryLower) ||
-            pCode.includes(queryLower) ||
-            hasVariantMatch ||
-            hasUnitMatch
-        ) {
-            filtered.push(p);
-            if (filtered.length >= 12) break;
-        }
-    }
+    // 2. البحث الحي الموحد بالاسم أو الباركود أو الكود أو المقاس عبر محرك البحث المرتب والذكي
+    const filtered = (typeof window.searchProductsRanked === 'function')
+        ? window.searchProductsRanked(query)
+        : (productsDB || []).filter(p => (p.name && p.name.includes(query)) || (p.barcode && String(p.barcode).includes(query)));
 
     if (filtered.length > 0) {
+        const totalMatches = filtered.length;
+        const displayFiltered = filtered.slice(0, 40);
         resultsDiv.innerHTML = `
             <div class="pos-search-panel" style="width: min(580px, calc(100vw - 40px)); min-width: 320px; position: absolute; top: calc(100% + 4px); right: 0; left: auto; z-index: 999999; background: white; border-radius: 14px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); border: 1.5px solid #cbd5e1; direction: rtl; text-align: right; animation: modalFadeIn 0.15s ease-out;">
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 14px; border-top-right-radius: 14px;">
-                    <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج البحث (${filtered.length} صنف)</span>
+                    <span style="font-weight: 800; font-size: 0.88rem; color: #5e3370;">🔍 نتائج البحث (${totalMatches} صنف${totalMatches > 40 ? ' - معروض أول 40' : ''})</span>
                     <button type="button" onclick="document.getElementById('searchResults').style.display='none';" class="pos-search-close-btn" title="إغلاق النافذة" style="background:none; border:none; cursor:pointer; font-size:1rem;">❌</button>
                 </div>
                 <div style="max-height: 380px; overflow-y: auto; padding: 6px; scrollbar-gutter: stable;">
-                    ${filtered.map(p => {
+                    ${displayFiltered.map(p => {
                         const priceVal = parseFloat(p.price) || 0;
                         const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
-                        const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWH) : 0;
+                        const stockVal = (typeof getLiveProductWhStock === 'function')
+                            ? getLiveProductWhStock(p, activeWH)
+                            : (typeof getWarehouseStock === 'function' ? getWarehouseStock(p, activeWH) : 0);
                         const safeName = (window.escapeHtml ? window.escapeHtml(p.name) : p.name);
                         const safeCode = (window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id));
                         const safeBarcode = (window.escapeHtml ? window.escapeHtml(p.barcode || '---') : (p.barcode || '---'));
+                        const sizesList = (p.variants && Array.isArray(p.variants)) 
+                            ? [...new Set(p.variants.map(v => String(v.size || '').trim()).filter(s => s && s !== '-' && s !== 'موحد' && s !== 'قياسي'))] 
+                            : [];
+                        const sizesHtml = sizesList.length > 0 
+                            ? `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; border: 1px solid #bae6fd;">📏 مقاسات: ${sizesList.slice(0, 5).join(', ')}${sizesList.length > 5 ? '...' : ''}</span>`
+                            : '';
                         return `
                             <div class="pos-search-row" onclick="selectProductToHeader(${p.id});" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.15s; border-radius: 10px; gap: 10px;">
                                 <div style="flex: 1; min-width: 0; text-align: right;">
                                     <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b; white-space: normal; word-break: break-word;">${safeName}</div>
-                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#5e3370;">${safeCode}</b> | باركود: <b>${safeBarcode}</b></div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+                                        <span>🏷️ كود: <b style="color:#5e3370;">${safeCode}</b> | باركود: <b>${safeBarcode}</b></span>
+                                        ${sizesHtml}
+                                    </div>
                                 </div>
                                 <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
                                     <div style="text-align: center; background: #f8fafc; padding: 5px 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
@@ -629,8 +600,8 @@ async function handleSearchEnter(query, event, forceAdd = false) {
         });
     }
 
-    // إذا لم نجد في الذاكرة، نبحث مباشرة في IndexedDB لضمان التطابق 100%
-    if (!pInDB && typeof db !== 'undefined' && db.products) {
+    // إذا لم نجد في الذاكرة وكانت الذاكرة غير محملة، نبحث في IndexedDB
+    if (!pInDB && (!productsDB || productsDB.length === 0) && typeof db !== 'undefined' && db.products) {
         try {
             const allDbProds = await db.products.toArray();
             for (const p of allDbProds) {
@@ -662,29 +633,40 @@ async function handleSearchEnter(query, event, forceAdd = false) {
         return;
     }
 
-    // 2. البحث المطابق بالباركود الأساسي أو الكود
+    // 2. البحث المطابق الدقيق بالاسم التام أو الباركود الأساسي أو الكود
     if (!pInDB) {
-        pInDB = productsDB.find(p => String(p.barcode).trim() === cleanQuery || String(p.code).trim() === cleanQuery);
+        const normClean = (typeof window.normalizeSearchQuery === 'function')
+            ? window.normalizeSearchQuery(cleanQuery)
+            : cleanQuery.trim().toLowerCase();
+
+        // فحص تطابق الاسم التام أولاً (مثل صنف اسمه "14")
+        pInDB = productsDB.find(p => {
+            const pNorm = (typeof window.normalizeSearchQuery === 'function')
+                ? window.normalizeSearchQuery(p.name)
+                : String(p.name || '').trim().toLowerCase();
+            return pNorm === normClean;
+        });
+    }
+
+    if (!pInDB) {
+        pInDB = productsDB.find(p => String(p.barcode || '').trim() === cleanQuery || String(p.code || '').trim() === cleanQuery);
     }
 
     // 3. بحث عميق في باركود الوحدات
     if (!pInDB) {
-        pInDB = productsDB.find(p => p.units && p.units.some(u => String(u.unitBarcode).trim() === cleanQuery));
+        pInDB = productsDB.find(p => p.units && p.units.some(u => String(u.unitBarcode || '').trim() === cleanQuery));
     }
 
-    // 4. إذا لم نجد تطابقاً كاملاً، نبحث بالاسم ونأخذ أول نتيجة لملء الخانات
+    // 4. إذا لم نجد تطابقاً كاملاً، نبحث بمحرك البحث المرتب
     if (!pInDB) {
-        const queryLower = cleanQuery.toLowerCase();
-        const matches = productsDB.filter(p =>
-            (p.name && p.name.toLowerCase().includes(queryLower)) ||
-            (p.code && String(p.code).toLowerCase().includes(queryLower))
-        );
+        const matches = (typeof window.searchProductsRanked === 'function')
+            ? window.searchProductsRanked(cleanQuery, { limit: 10 })
+            : productsDB.filter(p => (p.name && p.name.toLowerCase().includes(cleanQuery.toLowerCase())));
         
         if (matches.length === 1) {
             pInDB = matches[0];
         } else if (matches.length > 1) {
-            // يوجد أكثر من منتج يحمل نفس الكلمة (مثلاً "جزمه")، يجب عدم اختيار أول منتج عشوائياً.
-            // نترك المستخدم يختار من القائمة المنسدلة.
+            // يوجد أكثر من منتج يحمل نفس الكلمة (مثلاً "جزمه")، نترك المستخدم يختار من القائمة المنسدلة
             return;
         }
     }
@@ -921,6 +903,10 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
 
     const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
 
+    // توحيد الوحدة الافتراضية إذا لم تكن محددة وكان للمنتج وحدات
+    if (!selectedUnit && product.units && product.units.length > 0) {
+        selectedUnit = product.units.find(u => u.isBaseUnit) || product.units[0];
+    }
     const factor = selectedUnit ? (parseFloat(selectedUnit.factor) || 1) : 1;
     let availBaseStock = 0;
     if (effVariant) {
@@ -949,21 +935,74 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
 
     const maxAvailInUnit = availBaseStock / factor;
 
-    const existingItem = cart.find(item =>
-        item.id === productId &&
-        ((!item.selectedUnit && !selectedUnit) || (item.selectedUnit && selectedUnit && item.selectedUnit.unitName === selectedUnit.unitName)) &&
-        ((item.selectedSize || '') === vSize) &&
-        ((item.selectedColor || '') === vColor)
-    );
+    // دالة مساعدة لمعايرة المقاسات والألوان وتوحيد القيم الافتراضية
+    const cleanAttr = (val) => {
+        const s = String(val || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+        if (!s || s === 'قياسي' || s === 'موحد' || s === 'عام' || s === '-') return '';
+        return s;
+    };
+    const cSize = cleanAttr(vSize);
+    const cColor = cleanAttr(vColor);
+    const vBarcode = effVariant && effVariant.barcode ? String(effVariant.barcode).trim() : '';
 
-    const newTotalQtyInUnit = (existingItem ? existingItem.qty : 0) + hQty;
-    const requestedBaseQty = newTotalQtyInUnit * factor;
+    // البحث الذكي عن الصنف الموجود مسبقاً في السلة (الدمج المباشر)
+    const existingItem = cart.find(item => {
+        // 1. الأولوية المطلقة لتطابق الباركود الفريد للتشكيلة
+        if (vBarcode) {
+            const itemCode = String(item.code || '').trim();
+            const itemVarBarcode = (item.selectedVariant && item.selectedVariant.barcode) ? String(item.selectedVariant.barcode).trim() : '';
+            if (itemCode === vBarcode || itemVarBarcode === vBarcode) {
+                return true;
+            }
+        }
+        // 2. التطابق برقم الصنف مع معايرة المقاس واللون والوحدة
+        const isSameProd = (item.id === productId || String(item.id) === String(productId) || item.name === product.name);
+        if (!isSameProd) return false;
 
-    // 🛑 منع صارم: رفض الإضافة إذا كانت الكمية الإجمالية تتجاوز رصيد المخزن المتاح
-    if (requestedBaseQty > availBaseStock) {
-        const varInfo = effVariant ? ` [${effVariant.size || ''} ${effVariant.color || ''}]` : '';
-        const maxAvailStr = maxAvailInUnit <= 0 ? '0' : maxAvailInUnit.toFixed(3).replace(/\.?0+$/, '');
-        showToast(`🚫 عذراً، الكمية المطلوبة (${newTotalQtyInUnit}) غير متوفرة! المتاح بمخزن (${activeWH}) للصنف (${product.name}${varInfo}) هو (${maxAvailStr}) فقط`, "error");
+        const itUnitName = item.selectedUnit ? (item.selectedUnit.unitName || item.selectedUnit) : (product.unit || 'قطعة');
+        const selUnitName = selectedUnit ? (selectedUnit.unitName || selectedUnit) : (product.unit || 'قطعة');
+        if (itUnitName !== selUnitName) return false;
+
+        const itSize = cleanAttr(item.selectedSize || item.size || (item.selectedVariant ? item.selectedVariant.size : ''));
+        const itColor = cleanAttr(item.selectedColor || item.color || (item.selectedVariant ? item.selectedVariant.color : ''));
+
+        return itSize === cSize && itColor === cColor;
+    });
+
+    // 🛡️ الحراسة التراكمية الفورية للمخزون: حساب إجمالي ما هو موجود بالسلة مسبقاً لهذا الصنف والتشكيلة
+    let currentInCartBaseQty = 0;
+    cart.forEach(item => {
+        let isMatch = false;
+        if (vBarcode) {
+            const itemCode = String(item.code || '').trim();
+            const itemVarBarcode = (item.selectedVariant && item.selectedVariant.barcode) ? String(item.selectedVariant.barcode).trim() : '';
+            if (itemCode === vBarcode || itemVarBarcode === vBarcode) isMatch = true;
+        }
+        if (!isMatch) {
+            const isSameProd = (item.id === productId || String(item.id) === String(productId) || item.name === product.name);
+            if (isSameProd) {
+                const itSize = cleanAttr(item.selectedSize || item.size || (item.selectedVariant ? item.selectedVariant.size : ''));
+                const itColor = cleanAttr(item.selectedColor || item.color || (item.selectedVariant ? item.selectedVariant.color : ''));
+                if (itSize === cSize && itColor === cColor) {
+                    isMatch = true;
+                }
+            }
+        }
+        if (isMatch) {
+            const itFactor = parseFloat(item.unitFactor) || 1;
+            currentInCartBaseQty += (parseFloat(item.qty) || 0) * itFactor;
+        }
+    });
+
+    const newAdditionBaseQty = hQty * factor;
+    const totalRequestedBaseQty = currentInCartBaseQty + newAdditionBaseQty;
+
+    // 🛑 منع صارم: رفض الإضافة فوراً إذا تجاوز الإجمالي التراكمي في السلة رصيد المخزن المتاح
+    if (totalRequestedBaseQty > availBaseStock) {
+        const varInfo = effVariant ? ` [${[effVariant.size, effVariant.color].filter(x => x && x !== 'قياسي' && x !== 'موحد').join(' - ')}]` : '';
+        const maxAvailStr = maxAvailInUnit <= 0 ? '0' : maxAvailInUnit.toFixed(2).replace(/\.?0+$/, '');
+        const currentInCartDisplay = (currentInCartBaseQty / factor).toFixed(2).replace(/\.?0+$/, '');
+        showToast(`🚫 عذراً، الكمية المطلوبة غير متوفرة! المتاح بمخزن (${activeWH}) للصنف (${product.name}${varInfo}) هو (${maxAvailStr}) فقط، وبالسلة حالياً (${currentInCartDisplay})!`, "error", 5000);
         if (typeof BayanBarcode !== 'undefined' && typeof BayanBarcode.playBeep === 'function') {
             BayanBarcode.playBeep(false);
         }
@@ -972,8 +1011,9 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
 
     if (existingItem) {
         existingItem.qty = parseFloat((existingItem.qty + hQty).toFixed(3));
-        const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
-            || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
+        const isPriceLocked = (typeof currentUser !== 'undefined' && currentUser && currentUser.lockPriceEdit);
+        const canEditPrice = !isPriceLocked && ((typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+            || (typeof hasPermission === 'function' && hasPermission('docs_price_edit')));
         if (hPrice !== null && canEditPrice) {
             let itemCost = 0;
             if (effVariant && (effVariant.avgBuyPrice || effVariant.cost || effVariant.buyPrice)) {
@@ -1052,8 +1092,9 @@ function completeAddToCart(product, selectedUnit, selectedVariant = null, custom
         const baseOriginalPrice = price;
         const itemDiscount = parseFloat(product.discount) || 0;
 
-        const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
-            || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
+        const isPriceLocked = (typeof currentUser !== 'undefined' && currentUser && currentUser.lockPriceEdit);
+        const canEditPrice = !isPriceLocked && ((typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+            || (typeof hasPermission === 'function' && hasPermission('docs_price_edit')));
 
         // تحديد ما إذا كان السعر في الهيدر هو مجرد تعبئة تلقائية أم تعديل يدوي
         if (hPrice !== null) {
@@ -1534,10 +1575,11 @@ function updateCartPrice(index, newPrice) {
     if (isEditMode && !checkPermission('docs_edit')) return renderCart();
     
     // 1. فحص صلاحية تعديل السعر للمستخدم
-    const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
-        || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
+    const isPriceLocked = (typeof currentUser !== 'undefined' && currentUser && currentUser.lockPriceEdit);
+    const canEditPrice = !isPriceLocked && ((typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+        || (typeof hasPermission === 'function' && hasPermission('docs_price_edit')));
     if (!canEditPrice) {
-        if (typeof showToast === 'function') showToast("🔒 تعديل سعر البيع غير مصرح به لهذا الحساب!", "warning");
+        if (typeof showToast === 'function') showToast(isPriceLocked ? "🔒 تعديل سعر البيع مقفل ومحمي لهذا الحساب!" : "🔒 تعديل سعر البيع غير مصرح به لهذا الحساب!", "warning");
         return renderCart();
     }
 
@@ -1881,21 +1923,34 @@ function renderCart() {
                </div>` 
             : '';
 
-        const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
-            || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
+        const isPriceLocked = (typeof currentUser !== 'undefined' && currentUser && currentUser.lockPriceEdit);
+        const canEditPrice = !isPriceLocked && ((typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+            || (typeof hasPermission === 'function' && hasPermission('docs_price_edit')));
 
         const priceFieldHtml = canEditPrice 
             ? `<input type="number" class="price-input" value="${(parseFloat(item.price) || 0).toFixed(2)}" min="0" step="0.01"
                       onchange="updateCartPrice(${index}, this.value)" onclick="this.select()" title="تعديل السعر"
                       style="width: 88px; height: 34px; font-size: 1.05rem; font-weight: 900; text-align: center; border-radius: 8px; border: 2px solid #3b82f6; background: #eff6ff; color: #1e40af; box-sizing: border-box; padding: 2px 4px;">`
             : `<input type="text" class="price-input" value="${(parseFloat(item.price) || 0).toFixed(2)}" readonly
-                      title="🔒 تعديل سعر البيع مقفل للكاشير ومصرح به للمدير فقط"
+                      title="${isPriceLocked ? '🔒 تعديل سعر البيع مقفل ومحمي لهذا الحساب' : '🔒 تعديل سعر البيع مقفل للكاشير ومصرح به للمدير فقط'}"
                       style="width: 88px; height: 34px; font-size: 1.05rem; font-weight: 900; text-align: center; border-radius: 8px; border: 1.5px dashed #cbd5e1; background: #f8fafc; color: #64748b; cursor: not-allowed; box-sizing: border-box; padding: 2px 4px;">`;
 
         tr.innerHTML = `
                     <td style="font-weight: 800; color: #64748b;">${index + 1}</td>
                     <td style="font-size: 0.82rem; color: #475569; font-weight: bold;">${item.code || '---'}</td>
-                    <td style="font-weight: 900; color: #1e293b; text-align: right;">${item.name}</td>
+                    <td style="font-weight: 900; color: #1e293b; text-align: right; vertical-align: middle; min-width: 140px;">
+                        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%;">
+                            <span style="width: 100%; line-height: 1.35; font-size: 0.92rem; color: #0f172a; word-break: normal; white-space: normal;">${item.name}</span>
+                            <button type="button" onclick="event.stopPropagation(); window.openInquiryForCartItem(${index});"
+                                title="استعلام فوري عن رصيد ومقاسات وألوان هذا الموديل بكافة المخازن والفروع"
+                                style="background: #ecfdf5; border: 1px solid #10b981; color: #047857; border-radius: 6px; padding: 1px 7px; font-size: 0.74rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; transition: all 0.15s; margin-top: 1px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);"
+                                onmouseover="this.style.background='#059669'; this.style.color='#ffffff';"
+                                onmouseout="this.style.background='#ecfdf5'; this.style.color='#047857';">
+                                <span style="font-size: 0.85rem; line-height: 1;">❓</span>
+                                <span>استعلام المقاسات والرصيد</span>
+                            </button>
+                        </div>
+                    </td>
                     <td class="col-variant-size" style="text-align: center;">${sizeElement}</td>
                     <td class="col-variant-color" style="text-align: center;">${colorElement}</td>
                     <td style="text-align: center;">
@@ -1970,6 +2025,38 @@ function renderCart() {
     updateHeaderPartnerInfo();
 
 }
+
+/**
+ * استعلام سريع ومباشر لصنف في سلة المبيعات
+ * يفتح نافذة الاستعلام مفلترة فوراً على نفس الموديل والمقاس واللون المحدد
+ */
+window.openInquiryForCartItem = function(index) {
+    if (typeof cart === 'undefined' || !cart[index]) return;
+    const item = cart[index];
+    const targetProduct = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+        ? productsDB.find(p => p.id === item.id || p.name === item.name)
+        : null;
+
+    if (!targetProduct && !item.id) {
+        if (typeof showToast === 'function') showToast('تعذر العثور على بيانات الصنف في النظام', 'error');
+        return;
+    }
+
+    const productId = targetProduct ? targetProduct.id : item.id;
+    const targetSize = item.selectedSize || (item.selectedVariant ? item.selectedVariant.size : '');
+    const targetColor = item.selectedColor || (item.selectedVariant ? item.selectedVariant.color : '');
+    const targetVariant = {
+        size: targetSize,
+        color: targetColor,
+        barcode: (item.selectedVariant && item.selectedVariant.barcode) ? item.selectedVariant.barcode : (item.code || '')
+    };
+
+    if (typeof window.openFastItemInquiryModal === 'function') {
+        window.openFastItemInquiryModal(productId, targetVariant);
+    } else {
+        if (typeof showToast === 'function') showToast('نافذة الاستعلام السريع غير متاحة حالياً', 'warning');
+    }
+};
 
 function updateCartPriceLevel() {
 
@@ -2072,10 +2159,17 @@ function calculateTotals(subTotalParam) {
 
     if (document.getElementById('subTotalDisplay')) document.getElementById('subTotalDisplay').innerText = subTotal.toFixed(2);
 
-    // 🛡️ فحص صلاحيات الخصم وأقصى نسبة مصرحة للموظف
+    // 🛡️ فحص صلاحيات الخصم وأقصى نسبة مصرحة للموظف والمدير
     const isAdmin = typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin';
     const canDiscount = isAdmin || (typeof hasPermission === 'function' && hasPermission('docs_discount'));
-    const maxDiscountPerc = isAdmin ? 100 : ((typeof currentUser !== 'undefined' && currentUser && currentUser.maxDiscountPercent !== undefined) ? parseFloat(currentUser.maxDiscountPercent) : 5);
+    
+    let maxDiscountPerc = 100;
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.maxDiscountPercent !== undefined && currentUser.maxDiscountPercent !== null && currentUser.maxDiscountPercent !== '') {
+        maxDiscountPerc = parseFloat(currentUser.maxDiscountPercent);
+        if (isNaN(maxDiscountPerc)) maxDiscountPerc = isAdmin ? 100 : 5;
+    } else {
+        maxDiscountPerc = isAdmin ? 100 : 5;
+    }
 
     const discInputEl = document.getElementById('discountInput');
     const discTypeEl = document.getElementById('discountType');
@@ -2107,7 +2201,7 @@ function calculateTotals(subTotalParam) {
 
     const discountType = document.getElementById('discountType').value;
 
-    // 🛑 فحص الأمان: منع تجاوز أقصى نسبة خصم مصرحة للكاشير
+    // 🛑 فحص الأمان: منع تجاوز أقصى نسبة خصم مصرحة للكاشير أو المدير
     if (canDiscount && maxDiscountPerc > 0 && maxDiscountPerc < 100) {
         if (discountType === 'perc' && discountVal > maxDiscountPerc) {
             if (window.BayanBarcode && typeof BayanBarcode.playBeep === 'function') BayanBarcode.playBeep(false);
@@ -2136,21 +2230,29 @@ function calculateTotals(subTotalParam) {
 
     if (document.getElementById('salesDiscountAmountDisplay')) document.getElementById('salesDiscountAmountDisplay').innerText = discountAmount.toFixed(2);
 
-    // 🛡️ فحص صلاحية الإضافة / الضريبة
+    // 🛡️ فحص صلاحية الإضافة / الضريبة وأقصى نسبة مصرحة للكاشير والمدير
     const canTax = isAdmin || (typeof hasPermission === 'function' && hasPermission('docs_tax'));
+    let maxAdditionPerc = 100;
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.maxAdditionPercent !== undefined && currentUser.maxAdditionPercent !== null && currentUser.maxAdditionPercent !== '') {
+        maxAdditionPerc = parseFloat(currentUser.maxAdditionPercent);
+        if (isNaN(maxAdditionPerc)) maxAdditionPerc = isAdmin ? 100 : 15;
+    } else {
+        maxAdditionPerc = isAdmin ? 100 : 15;
+    }
+
     const taxInputEl = document.getElementById('taxInput');
     const taxTypeEl = document.getElementById('taxType');
     if (taxInputEl) {
-        if (!canTax) {
+        if (!canTax || maxAdditionPerc <= 0) {
             taxInputEl.value = 0;
             taxInputEl.disabled = true;
-            taxInputEl.title = '🔒 إضافة الرسوم/الضرائب غير مصرح بها لهذا الحساب';
+            taxInputEl.title = '🔒 إضافة الرسوم أو الضريبة غير مصرح بها لهذا الحساب';
             taxInputEl.style.cursor = 'not-allowed';
             taxInputEl.style.background = '#f1f5f9';
             if (taxTypeEl) taxTypeEl.disabled = true;
         } else {
             taxInputEl.disabled = false;
-            taxInputEl.title = '';
+            taxInputEl.title = `أقصى إضافة مصرح بها: ${maxAdditionPerc}%`;
             taxInputEl.style.cursor = '';
             taxInputEl.style.background = '';
             if (taxTypeEl) taxTypeEl.disabled = false;
@@ -2165,7 +2267,26 @@ function calculateTotals(subTotalParam) {
         if (typeof showToast === 'function') showToast("⚠️ لا يمكن إدخال قيمة إضافة أو ضريبة بالسالب!", "warning");
     }
 
-    const taxType = document.getElementById('taxType').value;
+    const taxType = (document.getElementById('taxType') && document.getElementById('taxType').value) ? document.getElementById('taxType').value : 'perc';
+
+    // 🛑 فحص الأمان: منع تجاوز أقصى نسبة إضافة مصرح بها
+    if (canTax && maxAdditionPerc > 0 && maxAdditionPerc < 100) {
+        if (taxType === 'perc' && taxVal > maxAdditionPerc) {
+            if (window.BayanBarcode && typeof BayanBarcode.playBeep === 'function') BayanBarcode.playBeep(false);
+            if (typeof showToast === 'function') showToast(`⚠️ أقصى نسبة إضافة مصرح بها لحسابك هي (${maxAdditionPerc}%)!`, "warning");
+            taxVal = maxAdditionPerc;
+            if (taxInputEl) taxInputEl.value = maxAdditionPerc;
+        } else if (taxType === 'val') {
+            const maxTaxVal = subTotal > 0 ? (subTotal * maxAdditionPerc / 100) : 0;
+            if (taxVal > maxTaxVal && subTotal > 0) {
+                if (window.BayanBarcode && typeof BayanBarcode.playBeep === 'function') BayanBarcode.playBeep(false);
+                if (typeof showToast === 'function') showToast(`⚠️ قيمة الإضافة تتجاوز الحد الأقصى المصرح به (${maxAdditionPerc}% = ${maxTaxVal.toFixed(2)} ج.م)!`, "warning");
+                taxVal = Number(maxTaxVal.toFixed(2));
+                if (taxInputEl) taxInputEl.value = taxVal;
+            }
+        }
+    }
+
     let taxAmount = (taxType === 'perc') ? (subTotal * taxVal / 100) : taxVal;
 
     if (document.getElementById('salesTaxAmountDisplay')) document.getElementById('salesTaxAmountDisplay').innerText = taxAmount.toFixed(2);
@@ -2691,16 +2812,20 @@ async function saveBill(force = false, accountChecked = false) {
         } else {
 
             newInvoiceId = typeof getNextSequence === 'function' ? getNextSequence('بيع') : 1;
-            if (transactions.some(t => String(t.invoiceId) === String(newInvoiceId) && t.type && t.type.includes('بيع') && !t.type.includes('مرتجع'))) {
-                newInvoiceId = getNextSequence('بيع');
-            }
 
         }
 
         // تجميد الوقت: استخدام التاريخ الأصلي إذا كنا في وضع التعديل
 
-        const dt = (isEditMode && editingOriginalDate && typeof editingOriginalDate === 'object' && editingOriginalDate.full)
+        const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
             ? editingOriginalDate
+            : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+        const inputDateVal = document.getElementById('salesDate')?.value;
+        const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+        const dt = (isEditMode && origDt && !isDateManuallyChanged)
+            ? origDt
             : (typeof getTransactionDateTime === 'function'
                 ? getTransactionDateTime('salesDate', 'salesTime')
                 : {
@@ -2853,6 +2978,8 @@ async function saveBill(force = false, accountChecked = false) {
                 user: (isEditMode && window.editingOriginalUser) ? window.editingOriginalUser : (currentUser ? currentUser.name : '-'),
                 notes: document.getElementById('salesNotes') ? document.getElementById('salesNotes').value.trim() : '',
                 paidAmount: (idx === 0) ? tendered : 0,
+                remaining: (idx === 0) ? (isCredit ? Math.max(0, currentTotal - tendered) : 0) : 0,
+                deferred: (idx === 0) ? (isCredit ? Math.max(0, currentTotal - tendered) : 0) : 0,
                 isInvoiceHead: (idx === 0),
                 invoiceDiscount: (idx === 0) ? (parseFloat(document.getElementById('discountInput')?.value) || 0) : 0,
                 invoiceDiscountType: (idx === 0) ? (document.getElementById('discountType')?.value || 'val') : 'val',
@@ -2890,6 +3017,10 @@ async function saveBill(force = false, accountChecked = false) {
 
         if (!isEditMode && typeof window.registerTrialInvoiceCreation === 'function') {
             window.registerTrialInvoiceCreation();
+        }
+
+        if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
+            window.updateLastSavedSequence('بيع', newInvoiceId);
         }
 
         if (typeof logAuditAction === 'function') {
@@ -2979,12 +3110,16 @@ async function saveBill(force = false, accountChecked = false) {
         // إعادة ضبط وضع التعديل (Reset Edit State)
 
         isEditMode = false;
+        window.isEditMode = false;
 
         editingInvoiceId = null;
+        window.editingInvoiceId = null;
 
         editingOriginalDate = null;
+        window.editingOriginalDate = null;
 
         editingOriginalItems = [];
+        window.editingOriginalItems = [];
 
         const mainSaveBtn = document.querySelector('#sales-section .btn-save');
 
@@ -3005,7 +3140,26 @@ async function saveBill(force = false, accountChecked = false) {
             }, 100);
         }
 
+        if (typeof window.clearRevertedInvoiceBackup === 'function') {
+            window.clearRevertedInvoiceBackup();
+        }
+
         return true;
+
+    } catch (saveErr) {
+
+        console.error("❌ خطأ أثناء حفظ فاتورة المبيعات بعد تفريغ القديمة:", saveErr);
+        if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+            await window.rollbackLastRevertedInvoice();
+        }
+        showCustomAlert({
+            type: 'error',
+            titleText: '⚠️ تعذر حفظ الفاتورة',
+            msg: isEditMode
+                ? ('حدث خطأ أثناء حفظ التعديل، وتم الحفاظ على الفاتورة الأصلية واستعادتها بالكامل دون أي فقدان للبيانات.\n\nتفاصيل الخطأ: ' + (saveErr?.message || saveErr))
+                : ('حدث خطأ غير متوقع أثناء حفظ الفاتورة:\n' + (saveErr?.message || saveErr))
+        });
+        return false;
 
     } finally {
 
@@ -3067,59 +3221,22 @@ function shareBill(platform) {
 
 }
 
-function printBill() {
-
-    if (cart.length === 0) return alert("⚠️ الفاتورة فارغة! لا يمكن طباعة فاتورة بدون أصناف.");
-
+function getSalesInvoicePrintData() {
     const method = getSelectedPaymentMethod('sales-section');
-
     const customerNameInput = document.getElementById('customerName');
-
     const customer = customerNameInput ? customerNameInput.value.trim() : 'عميل نقدي';
-
-    // --- حماية: منع طباعة آجل لعميل نقدي ---
-
-    if (method.includes('آجل') && (customer === "" || customer.includes('نقدي') || customer.includes('كاش'))) {
-
-        showCustomAlert({
-
-            type: 'error',
-
-            titleText: '⚠️ خطأ في الطباعة',
-
-            msg: 'لا يمكن طباعة فاتورة "آجل" لحساب "نقدي". يرجى اختيار عميل مسجل أولاً لمتابعة مديونيته.'
-
-        });
-
-        if (customerNameInput) {
-
-            customerNameInput.focus();
-
-            customerNameInput.style.border = '2px solid red';
-
-        }
-
-        return;
-
-    }
-
     const dt = getTransactionDateTime('salesDate', 'salesTime');
-
-    const shopName = document.getElementById('shopName').value || 'متجر السعادة';
-
-    const shopAddress = document.getElementById('shopAddress').value || '';
-
-    const shopPhone = document.getElementById('shopPhone1').value || '';
-
-    const footerMsg = document.getElementById('printFooterMsg').value || 'شكراً لزيارتكم!';
-
+    const shopName = (typeof getMerchantStoreName === 'function' ? getMerchantStoreName() : (document.getElementById('shopName')?.value || 'متجر السعادة'));
+    const shopAddress = document.getElementById('shopAddress')?.value || '';
+    const shopPhone = document.getElementById('shopPhone1')?.value || '';
+    const footerMsg = document.getElementById('printFooterMsg')?.value || 'شكراً لزيارتكم!';
     const salesId = document.getElementById('salesBadgeID') ? document.getElementById('salesBadgeID').innerText : '---';
 
     const isExplicitCredit = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(method, 0, 0, 0) : (method.includes('آجل') || method.includes('اجل') || method.includes('ذمم') || method.includes('credit'));
-    let paidValue = currentTotal;
+    let paidValue = (typeof currentTotal !== 'undefined' ? currentTotal : 0);
     const tenderedInp = document.getElementById('tenderedAmount');
     if (!isExplicitCredit) {
-        paidValue = currentTotal;
+        paidValue = (typeof currentTotal !== 'undefined' ? currentTotal : 0);
     } else if (tenderedInp && tenderedInp.value !== '') {
         paidValue = parseFloat(tenderedInp.value) || 0;
     } else {
@@ -3137,95 +3254,111 @@ function printBill() {
         prevBalance = parseFloat(document.getElementById('prevBalanceDisplay').innerText) || 0;
     }
 
-    let invoiceTotal = currentTotal + prevBalance;
+    let invoiceTotal = (typeof currentTotal !== 'undefined' ? currentTotal : 0) + prevBalance;
     let creditValue = Math.max(0, invoiceTotal - paidValue);
 
     let customerAddressToPrint = currentSessionSelectedAddress;
-
-    if (!customerAddressToPrint) {
-
+    if (!customerAddressToPrint && typeof accounts !== 'undefined') {
         const acc = accounts.find(a => a.name === customer);
-
         if (acc) customerAddressToPrint = (acc.address || acc.mobile || '').split(/[|,]/)[0];
-
     }
 
-    let subTotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    let subTotal = cart.reduce((sum, item) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 0)), 0);
 
-    let discountVal = parseFloat(document.getElementById('discountInput').value) || 0;
+    let discountVal = parseFloat(document.getElementById('discountInput')?.value) || 0;
+    const discountType = document.getElementById('discountType')?.value || 'val';
 
-    const discountType = document.getElementById('discountType').value;
+    let taxVal = parseFloat(document.getElementById('taxInput')?.value) || 0;
+    const taxType = document.getElementById('taxType')?.value || 'val';
+
+    const isCurAdmin = typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin';
+    let maxCheckoutDisc = 100;
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.maxDiscountPercent !== undefined && currentUser.maxDiscountPercent !== null && currentUser.maxDiscountPercent !== '') {
+        maxCheckoutDisc = parseFloat(currentUser.maxDiscountPercent);
+        if (isNaN(maxCheckoutDisc)) maxCheckoutDisc = isCurAdmin ? 100 : 5;
+    } else {
+        maxCheckoutDisc = isCurAdmin ? 100 : 5;
+    }
+
+    let maxCheckoutAdd = 100;
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.maxAdditionPercent !== undefined && currentUser.maxAdditionPercent !== null && currentUser.maxAdditionPercent !== '') {
+        maxCheckoutAdd = parseFloat(currentUser.maxAdditionPercent);
+        if (isNaN(maxCheckoutAdd)) maxCheckoutAdd = isCurAdmin ? 100 : 15;
+    } else {
+        maxCheckoutAdd = isCurAdmin ? 100 : 15;
+    }
+
+    if (maxCheckoutDisc >= 0 && maxCheckoutDisc < 100) {
+        if (discountType === 'perc' && discountVal > maxCheckoutDisc) discountVal = maxCheckoutDisc;
+        else if (discountType === 'val' && subTotal > 0 && discountVal > (subTotal * maxCheckoutDisc / 100)) discountVal = Number((subTotal * maxCheckoutDisc / 100).toFixed(2));
+    }
+
+    if (maxCheckoutAdd >= 0 && maxCheckoutAdd < 100) {
+        if (taxType === 'perc' && taxVal > maxCheckoutAdd) taxVal = maxCheckoutAdd;
+        else if (taxType === 'val' && subTotal > 0 && taxVal > (subTotal * maxCheckoutAdd / 100)) taxVal = Number((subTotal * maxCheckoutAdd / 100).toFixed(2));
+    }
 
     let discountAmount = (discountType === 'perc') ? (subTotal * discountVal / 100) : discountVal;
-
-    let taxVal = parseFloat(document.getElementById('taxInput').value) || 0;
-
-    const taxType = document.getElementById('taxType').value;
-
     let taxAmount = (taxType === 'perc') ? (subTotal * taxVal / 100) : taxVal;
 
     const taxReasonEl = document.getElementById('taxReason');
-
     const selectedTaxReason = taxReasonEl ? taxReasonEl.value.trim() : 'إضافة';
 
     const settings = JSON.parse(getStore('pos_settings') || '{}');
-
     const globalTaxEnabled = settings.taxEnabled || false;
-
     const globalTaxPercent = parseFloat(settings.taxPercent) || 0;
-
     let globalTaxAmount = globalTaxEnabled ? (subTotal * globalTaxPercent / 100) : 0;
+    const totAmount = (typeof currentTotal !== 'undefined' ? currentTotal : (subTotal - discountAmount + taxAmount + globalTaxAmount));
 
-    const invoiceData = {
-
+    return {
         invoiceNumber: salesId,
-
         invoiceType: method,
-
-        date: dt.iso || dt.full.split(' ')[0],
-
-        time: dt.time || '',
-
-        cashier: currentUser.name,
-
+        date: dt.iso || (dt.full ? dt.full.split(' ')[0] : new Date().toLocaleDateString('ar-EG')),
+        time: dt.time || new Date().toLocaleTimeString('ar-EG'),
+        cashier: (typeof currentUser !== 'undefined' && currentUser ? currentUser.name : 'المدير'),
         customer: customer,
-
         items: cart,
-
         subTotal: subTotal,
-
         discount: discountAmount,
-
         tax: taxAmount,
-
         taxLabel: selectedTaxReason,
-
         globalTax: globalTaxAmount,
-
-        totalAmount: currentTotal,
-
+        totalAmount: totAmount,
         paid: paidValue,
-
-        deferred: currentTotal - paidValue,
-
+        deferred: totAmount - paidValue,
         prevBalance: prevBalance,
-
-        currentBalance: prevBalance + (currentTotal - paidValue),
-
+        currentBalance: prevBalance + (totAmount - paidValue),
         docType: 'sales'
-
     };
+}
+window.getSalesInvoicePrintData = getSalesInvoicePrintData;
 
-    if (typeof printInvoice === 'function') {
+function printBill() {
+    if (cart.length === 0) return alert("⚠️ الفاتورة فارغة! لا يمكن طباعة فاتورة بدون أصناف.");
+    const method = getSelectedPaymentMethod('sales-section');
+    const customerNameInput = document.getElementById('customerName');
+    const customer = customerNameInput ? customerNameInput.value.trim() : 'عميل نقدي';
 
-        printInvoice(invoiceData);
-
-    } else {
-
-        alert('خطأ: محرك الطباعة غير متوفر!');
-
+    // --- حماية: منع طباعة آجل لعميل نقدي ---
+    if (method.includes('آجل') && (customer === "" || customer.includes('نقدي') || customer.includes('كاش'))) {
+        showCustomAlert({
+            type: 'error',
+            titleText: '⚠️ خطأ في الطباعة',
+            msg: 'لا يمكن طباعة فاتورة "آجل" لحساب "نقدي". يرجى اختيار عميل مسجل أولاً لمتابعة مديونيته.'
+        });
+        if (customerNameInput) {
+            customerNameInput.focus();
+            customerNameInput.style.border = '2px solid red';
+        }
+        return;
     }
 
+    const invoiceData = getSalesInvoicePrintData();
+    if (typeof printInvoice === 'function') {
+        printInvoice(invoiceData);
+    } else {
+        alert('خطأ: محرك الطباعة غير متوفر!');
+    }
 }
 
 function printPurchaseBill() {

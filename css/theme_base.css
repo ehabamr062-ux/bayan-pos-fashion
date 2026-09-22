@@ -1883,6 +1883,26 @@ body.has-wallpaper .login-overlay {
     100% { transform: scale(1.2) translateY(3px); opacity: 1; }
 }
 
+/* مؤشر وحركة استرداد النسخة الاحتياطية بشاشة الدخول */
+.login-restore-arrow {
+    display: inline-block;
+    font-size: 0.78rem;
+    color: #c084fc;
+    animation: loginRestorePulse 2.2s infinite ease-in-out;
+}
+
+@keyframes loginRestorePulse {
+    0%, 100% {
+        transform: scale(1) rotate(0deg);
+        opacity: 0.85;
+    }
+    50% {
+        transform: scale(1.2) rotate(180deg);
+        opacity: 1;
+        filter: drop-shadow(0 0 6px #c084fc);
+    }
+}
+
 .login-container {
     position: relative;
     width: 100%;
@@ -2267,6 +2287,10 @@ body.dark-mode .moon-icon {
         }
         /* 🙈 إخفاء وتعتيم المبالغ في تقرير الحركة اليومية للحفاظ على السرية والخصوصية الكاملة */
         body.daily-amounts-hidden #daily-report-section #dailyTotalVal,
+        body.daily-amounts-hidden #daily-report-section #dailyDiscountsVal,
+        body.daily-amounts-hidden #daily-report-section #dailyAdditionsVal,
+        body.daily-amounts-hidden #daily-report-section #dailyVodafoneCashVal,
+        body.daily-amounts-hidden #daily-report-section .daily-method-val,
         body.daily-amounts-hidden #daily-report-section .report-summary-box .value,
         body.daily-amounts-hidden #daily-report-section .summary-val,
         body.daily-amounts-hidden #daily-report-section .stat-value,
@@ -2288,7 +2312,11 @@ body.dark-mode .moon-icon {
         body.daily-amounts-hidden #daily-report-section #opsSummaryBody tr:hover td:nth-child(5),
         body.daily-amounts-hidden #daily-report-section #treasurySummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #profitSummaryBody tr:hover td:nth-child(2),
-        body.daily-amounts-hidden #daily-report-section #dailyTotalSalesReceipts:hover #dailyTotalVal {
+        body.daily-amounts-hidden #daily-report-section #dailyTotalSalesReceipts:hover #dailyTotalVal,
+        body.daily-amounts-hidden #daily-report-section #dailyTotalDiscountsBadge:hover #dailyDiscountsVal,
+        body.daily-amounts-hidden #daily-report-section #dailyTotalAdditionsBadge:hover #dailyAdditionsVal,
+        body.daily-amounts-hidden #daily-report-section #dailyVodafoneCashBadge:hover #dailyVodafoneCashVal,
+        body.daily-amounts-hidden #daily-report-section .daily-method-badge:hover .daily-method-val {
             filter: blur(8px) !important;
             user-select: none !important;
             pointer-events: none !important;
@@ -3051,18 +3079,19 @@ body.dark-mode .moon-icon {
             vertical-align: middle !important;
         }
 
-        /* ====== تمييز الهوفر والتحديد في قسم البضاعة / الأصناف (أخضر غامق تقيل) ====== */
+        /* ====== تمييز الهوفر والتحديد في قسم البضاعة / الأصناف (بنفسجي ملكي داكن وفخم) ====== */
         #inventory-section table.invoice-table tbody tr,
         #inventoryTableBody tr {
-            transition: background-color 0.15s ease, color 0.15s ease !important;
+            transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease !important;
         }
 
         #inventory-section table.invoice-table tbody tr:hover,
         #inventoryTableBody tr:hover,
         #inventoryTableBody tr.selected-row-gold {
-            background-color: #065f46 !important; /* أخضر غامق تقيل وواضح جداً */
+            background: linear-gradient(90deg, #2e1065 0%, #4c1d95 60%, #581c87 100%) !important;
+            /* بنفسجي ملكي فاخر وداكن جداً */
             color: #ffffff !important;
-            box-shadow: 0 4px 15px rgba(6, 95, 70, 0.45) !important;
+            box-shadow: 0 4px 18px rgba(124, 58, 237, 0.45) !important;
         }
 
         #inventory-section table.invoice-table tbody tr:hover td,
@@ -3086,9 +3115,25 @@ body.dark-mode .moon-icon {
         #inventory-section table.invoice-table tbody tr:hover td.col-inv-margin,
         #inventoryTableBody tr:hover td.col-inv-margin,
         #inventoryTableBody tr.selected-row-gold td.col-inv-margin {
-            background: rgba(255, 255, 255, 0.18) !important;
+            background: rgba(255, 255, 255, 0.22) !important;
             color: #ffffff !important;
             border-radius: 6px !important;
+            font-weight: 900 !important;
+        }
+
+        /* 🖼️ تناسق صورة الموديل والأيقونة البديلة مع الهوفر البنفسجي الملكي */
+        #inventory-section table.invoice-table tbody tr:hover td.col-inv-image img,
+        #inventoryTableBody tr:hover td.col-inv-image img,
+        #inventoryTableBody tr.selected-row-gold td.col-inv-image img {
+            border-color: #ffffff !important;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+        }
+
+        #inventory-section table.invoice-table tbody tr:hover td.col-inv-image span,
+        #inventoryTableBody tr:hover td.col-inv-image span,
+        #inventoryTableBody tr.selected-row-gold td.col-inv-image span {
+            background: rgba(255, 255, 255, 0.15) !important;
+            border-color: rgba(255, 255, 255, 0.35) !important;
         }
 
         /* ====== شريط تمرير مخصص - قسم متابعة الأسعار والحسابات ====== */
@@ -3391,4 +3436,52 @@ details>summary {
             font-family: 'Cairo', sans-serif;
             text-shadow: 0 0 15px rgba(0, 229, 255, 0.6);
             line-height: 1;
+        }
+
+        /* ========================================================
+           📖 تصميم نافذة الدليل التفاعلي لقسم مراجعة الخزينة
+           ======================================================== */
+        .tr-guide-tab-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #94a3b8;
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+        }
+
+        .tr-guide-tab-btn:hover {
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            border-color: #38bdf8;
+            transform: translateY(-1px);
+        }
+
+        .tr-guide-tab-btn.active {
+            background: linear-gradient(135deg, #0284c7, #0369a1) !important;
+            color: #ffffff !important;
+            border-color: #38bdf8 !important;
+            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+        }
+
+        .tr-guide-tab-panel {
+            animation: fadeInGuideTab 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes fadeInGuideTab {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }

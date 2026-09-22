@@ -1,6 +1,6 @@
 {
   "name": "bayan-pos-fashion",
-  "version": "1.0.6",
+  "version": "3.1.1",
   "description": "Bayan POS Fashion System",
   "main": "main.js",
   "scripts": {
@@ -30,6 +30,7 @@
         }
       ]
     },
+    "compression": "maximum",
     "nsis": {
       "oneClick": true,
       "perMachine": false,
@@ -39,7 +40,12 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Bayan POS",
       "installerIcon": "media/logo.ico",
-      "uninstallerIcon": "media/logo.ico"
+      "uninstallerIcon": "media/logo.ico",
+      "artifactName": "Bayan-POS-Setup-${version}.${ext}",
+      "differentialPackage": true
+    },
+    "portable": {
+      "artifactName": "Bayan-POS-${version}.${ext}"
     },
     "publish": [
       {
@@ -48,6 +54,12 @@
         "repo": "bayan_fashion_website",
         "releaseType": "release"
       }
+    ],
+    "files": [
+      "**/*",
+      "!tools/**",
+      "!README.md",
+      "!**/*.map"
     ],
     "asar": true
   },

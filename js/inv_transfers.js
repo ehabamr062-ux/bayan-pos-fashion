@@ -743,19 +743,12 @@ var transferItemsBatch = window.transferItemsBatch;
             let filtered = [];
 
             if (!queryLower) {
-
-                // عرض أول 15 صنف عند الضغط على الحقل وهو فارغ
-
-                filtered = productsDB.slice(0, 15);
-
+                // عرض الأصناف الافتراضية عند الضغط على الحقل وهو فارغ
+                filtered = (productsDB || []).slice(0, 50);
             } else {
-
-                filtered = productsDB.filter(p => 
-                    (p.name && p.name.toLowerCase().includes(queryLower)) || 
-                    (p.barcode && String(p.barcode).toLowerCase().includes(queryLower)) ||
-                    (p.code && String(p.code).toLowerCase().includes(queryLower)) ||
-                    (p.variants && Array.isArray(p.variants) && p.variants.some(v => v.barcode && String(v.barcode).toLowerCase().includes(queryLower)))
-                ).slice(0, 15);
+                filtered = (typeof window.searchProductsRanked === 'function')
+                    ? window.searchProductsRanked(query)
+                    : (productsDB || []).filter(p => (p.name && p.name.includes(query)) || (p.barcode && String(p.barcode).includes(query)));
             }
 
             resultsDiv.innerHTML = '';
@@ -799,6 +792,12 @@ var transferItemsBatch = window.transferItemsBatch;
                     const safeName = (window.escapeHtml ? window.escapeHtml(p.name) : p.name);
                     const safeCode = (window.escapeHtml ? window.escapeHtml(p.code || p.id) : (p.code || p.id));
                     const safeBarcode = (window.escapeHtml ? window.escapeHtml(p.barcode || '---') : (p.barcode || '---'));
+                    const sizesList = (p.variants && Array.isArray(p.variants)) 
+                        ? [...new Set(p.variants.map(v => String(v.size || '').trim()).filter(s => s && s !== '-' && s !== 'موحد' && s !== 'قياسي'))] 
+                        : [];
+                    const sizesHtml = sizesList.length > 0 
+                        ? `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 800; border: 1px solid #bae6fd;">📏 مقاسات: ${sizesList.slice(0, 5).join(', ')}${sizesList.length > 5 ? '...' : ''}</span>`
+                        : '';
 
                     div.innerHTML = `
                         <div style="flex: 1; min-width: 180px; text-align: right;">
@@ -813,6 +812,7 @@ var transferItemsBatch = window.transferItemsBatch;
                                 <span style="background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 800; border: 1px solid #e2e8f0;">
                                     باركود: <b style="color: #334155; font-family: monospace;">${safeBarcode}</b>
                                 </span>
+                                ${sizesHtml}
                             </div>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
@@ -972,14 +972,45 @@ var transferItemsBatch = window.transferItemsBatch;
                                 currentWhStock = 0;
                             }
 
-                            // التحقق الفوري من الرصيد قبل الإضافة
-                            const existing = window.transferItemsBatch.find(it => it.id === match.id && ((it.size || it.selectedSize || '') === vSize) && ((it.color || it.selectedColor || '') === vColor));
-                            const currentBatchQty = existing ? (parseFloat(existing.qty) || 0) : 0;
+                            // دالة مساعدة لمعايرة المقاسات والألوان وتوحيد القيم الافتراضية
+                            const cleanAttr = (val) => {
+                                const s = String(val || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                                if (!s || s === 'قياسي' || s === 'موحد' || s === 'عام' || s === '-') return '';
+                                return s;
+                            };
+                            const cSize = cleanAttr(vSize);
+                            const cColor = cleanAttr(vColor);
+                            const vBarcode = matchingVariant.barcode ? String(matchingVariant.barcode).trim() : '';
 
-                            if (currentWhStock <= 0 || (currentBatchQty + 1) > currentWhStock) {
+                            // 1. البحث الذكي عن الصنف الموجود مسبقاً في جدول التحويل
+                            const existing = window.transferItemsBatch.find(it => {
+                                if (vBarcode && String(it.code || '').trim() === vBarcode) return true;
+                                const isSame = (it.id === match.id || String(it.id) === String(match.id) || it.name === match.name);
+                                if (!isSame) return false;
+                                return cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor;
+                            });
+
+                            // 2. 🛡️ الحراسة التراكمية الفورية للتحويل المخزني
+                            let currentBatchBaseQty = 0;
+                            window.transferItemsBatch.forEach(it => {
+                                let isMatch = false;
+                                if (vBarcode && String(it.code || '').trim() === vBarcode) isMatch = true;
+                                if (!isMatch) {
+                                    const isSame = (it.id === match.id || String(it.id) === String(match.id) || it.name === match.name);
+                                    if (isSame && cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor) {
+                                        isMatch = true;
+                                    }
+                                }
+                                if (isMatch) {
+                                    const itFactor = parseFloat(it.unitFactor) || 1;
+                                    currentBatchBaseQty += (parseFloat(it.qty) || 0) * itFactor;
+                                }
+                            });
+
+                            if (currentWhStock <= 0 || (currentBatchBaseQty + 1) > currentWhStock) {
                                 if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(false);
                                 if (typeof showToast === 'function') {
-                                    showToast(`🚫 لا يمكن الإضافة: رصيد [${match.name} - مقاس: ${vSize || '-'} لون: ${vColor || '-'}] في (${fromWh}) هو (${currentWhStock}) فقط!`, 'error', 4500);
+                                    showToast(`🚫 لا يمكن التحويل: متاح بمخزن (${fromWh}) للصنف [${match.name} - مقاس: ${vSize || '-'} لون: ${vColor || '-'}] هو (${currentWhStock}) فقط، وموجود بالقائمة (${currentBatchBaseQty})!`, 'error', 4500);
                                 }
                                 resultsDiv.classList.add('hidden');
                                 e.target.value = '';
@@ -1015,7 +1046,15 @@ var transferItemsBatch = window.transferItemsBatch;
                             return;
                         }
 
-                        // 2. بحث بالباركود الأساسي أو الكود
+                        // 2. بحث بالتطابق التام للاسم أو الباركود الأساسي أو الكود
+                        if (!match) {
+                            const normQuery = (typeof window.normalizeSearchQuery === 'function') ? window.normalizeSearchQuery(query) : query.toLowerCase().trim();
+                            match = productsDB.find(p => {
+                                const pNorm = (typeof window.normalizeSearchQuery === 'function') ? window.normalizeSearchQuery(p.name) : String(p.name || '').toLowerCase().trim();
+                                return pNorm === normQuery;
+                            });
+                        }
+
                         if (!match) {
                             match = productsDB.find(p => (p.barcode && String(p.barcode) === query) || (p.code && String(p.code) === query));
                         }
@@ -1133,24 +1172,53 @@ var transferItemsBatch = window.transferItemsBatch;
 
             const availInUnit = (availStock / factor);
 
-            // منع الإضافة فوراً إذا كان الرصيد صفر أو أقل من المطلوب
-            if (availStock <= 0 || requiredBaseQty > availStock) {
-                const varInfo = effVariant ? ` [مقاس: ${size || '-'} لون: ${color || '-'}]` : '';
-                if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(false);
-                return showToast(`🚫 لا يمكن الإضافة: رصيد (${product.name}${varInfo}) في [${wFrom}] هو (${availInUnit.toFixed(2).replace(/\.00$/, '')}) فقط!`, 'error', 5000);
-            }
-
-            // منع التكرار لنفس الوحدة والمقاس واللون
-            const unitName = currentTransferHeaderUnit ? currentTransferHeaderUnit.unitName : (product.unit || 'قطعة');
+            const cleanAttr = (val) => {
+                const s = String(val || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                if (!s || s === 'قياسي' || s === 'موحد' || s === 'عام' || s === '-') return '';
+                return s;
+            };
+            const cSize = cleanAttr(size);
+            const cColor = cleanAttr(color);
+            const vBarcode = effVariant && effVariant.barcode ? String(effVariant.barcode).trim() : '';
 
             if (!window.transferItemsBatch) window.transferItemsBatch = [];
             transferItemsBatch = window.transferItemsBatch;
 
-            const existing = window.transferItemsBatch.find(item => item.id == pId && item.unitName == unitName && (item.size || '') == size && (item.color || '') == color);
-            if (existing) {
-                if ((existing.qty + qty) * factor > availStock) {
-                    return showToast(`🚫 لا يمكن زيادة الكمية: إجمالي المطلوب سيتجاوز الرصيد المتاح (${availInUnit.toFixed(2).replace(/\.00$/, '')}) في [${wFrom}]`, 'error');
+            // 🛡️ الحراسة التراكمية الفورية: حساب إجمالي ما هو موجود بقائمة التحويل
+            let currentBatchBaseQty = 0;
+            window.transferItemsBatch.forEach(it => {
+                let isMatch = false;
+                if (vBarcode && String(it.code || '').trim() === vBarcode) isMatch = true;
+                if (!isMatch) {
+                    const isSame = (it.id == pId || String(it.id) === String(pId) || it.name === product.name);
+                    if (isSame && cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor) {
+                        isMatch = true;
+                    }
                 }
+                if (isMatch) {
+                    const itFactor = parseFloat(it.unitFactor) || 1;
+                    currentBatchBaseQty += (parseFloat(it.qty) || 0) * itFactor;
+                }
+            });
+
+            // منع الإضافة فوراً إذا تجاوز الإجمالي التراكمي الرصيد المتاح
+            if (availStock <= 0 || (currentBatchBaseQty + requiredBaseQty) > availStock) {
+                const varInfo = effVariant ? ` [مقاس: ${size || '-'} لون: ${color || '-'}]` : '';
+                if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(false);
+                const currDisplay = (currentBatchBaseQty / factor).toFixed(2).replace(/\.00$/, '');
+                return showToast(`🚫 لا يمكن التحويل: متاح بمخزن [${wFrom}] للصنف (${product.name}${varInfo}) هو (${availInUnit.toFixed(2).replace(/\.00$/, '')}) فقط، وموجود بالقائمة (${currDisplay})!`, 'error', 5000);
+            }
+
+            // منع التكرار والدمج الذكي لنفس الصنف والمقاس واللون
+            const unitName = currentTransferHeaderUnit ? currentTransferHeaderUnit.unitName : (product.unit || 'قطعة');
+
+            const existing = window.transferItemsBatch.find(it => {
+                if (vBarcode && String(it.code || '').trim() === vBarcode) return true;
+                const isSame = (it.id == pId || String(it.id) === String(pId) || it.name === product.name);
+                if (!isSame) return false;
+                return cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor;
+            });
+            if (existing) {
                 existing.qty += qty;
                 renderTransferTable();
                 showToast(`✅ تم تحديث كمية (${product.name}) إلى ${existing.qty}`, 'success');
@@ -1392,34 +1460,61 @@ var transferItemsBatch = window.transferItemsBatch;
                     try {
                         let processedCount = 0;
 
+                        // تجميع شامل لكافة أسطر التحويل بالوحدة الأساسية لكل صنف وتشكيلة لمنع التحويل بالسالب نهائياً
+                        const aggregatedTransfer = new Map();
+                        const cleanAttr = (val) => {
+                            const s = String(val || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+                            if (!s || s === 'قياسي' || s === 'موحد' || s === 'عام' || s === '-') return '';
+                            return s;
+                        };
+
                         for (let item of window.transferItemsBatch) {
                             if (item.qty <= 0) continue;
-
-                            const factor = parseFloat(item.unitFactor) || 1;
-                            const requiredBaseQty = item.qty * factor;
-
                             const p = productsDB.find(prod => prod && (prod.name === item.name || prod.id === item.id));
-                            
-                            const sSize = String(item.size || item.selectedSize || '').trim();
-                            const sColor = String(item.color || item.selectedColor || '').trim();
+                            if (!p) continue;
+                            const factor = parseFloat(item.unitFactor) || 1;
+                            const baseQty = item.qty * factor;
+                            const sSize = cleanAttr(item.size || item.selectedSize || '');
+                            const sColor = cleanAttr(item.color || item.selectedColor || '');
+                            const groupKey = `${p.id || p.name}__${sSize}__${sColor}`;
+
+                            if (!aggregatedTransfer.has(groupKey)) {
+                                aggregatedTransfer.set(groupKey, {
+                                    product: p,
+                                    size: sSize,
+                                    color: sColor,
+                                    rawSize: item.size || item.selectedSize || '',
+                                    rawColor: item.color || item.selectedColor || '',
+                                    totalBaseQty: baseQty,
+                                    sampleItem: item
+                                });
+                            } else {
+                                aggregatedTransfer.get(groupKey).totalBaseQty += baseQty;
+                            }
+                        }
+
+                        let transferStockErrors = [];
+                        aggregatedTransfer.forEach(entry => {
+                            const p = entry.product;
+                            const sSize = entry.size;
+                            const sColor = entry.color;
+                            const totalBaseQty = entry.totalBaseQty;
+
                             let effVariant = null;
                             let availStock = 0;
-
-                            if (p && p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
-                                // إذا كان الصنف له تشكيلات، ابحث عن التشكيلة المطابقة
+                            if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
                                 if (sSize || sColor) {
                                     effVariant = p.variants.find(v => 
-                                        (!sSize || String(v.size || '').trim() === sSize) && 
-                                        (!sColor || String(v.color || '').trim() === sColor)
+                                        (!sSize || cleanAttr(v.size) === sSize) && 
+                                        (!sColor || cleanAttr(v.color) === sColor)
                                     );
                                 } else if (p.variants.length === 1) {
                                     effVariant = p.variants[0];
                                 }
                             }
 
-                            if (p && p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
+                            if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
                                 if (effVariant) {
-                                    // التحقق يعتمد كلياً على رصيد الـ variant المحدد في المخزن المصدر
                                     if (effVariant.warehouseStocks && typeof effVariant.warehouseStocks === 'object' && effVariant.warehouseStocks[wFrom] !== undefined) {
                                         availStock = parseFloat(effVariant.warehouseStocks[wFrom]) || 0;
                                     } else if (wFrom === 'المخزن الرئيسي') {
@@ -1428,25 +1523,44 @@ var transferItemsBatch = window.transferItemsBatch;
                                         availStock = 0;
                                     }
                                 } else {
-                                    // الصنف له تشكيلات لكن المقاس/اللون المختار غير موجود أصلاً في تشكيلات الصنف
                                     availStock = 0;
                                 }
                             } else {
-                                // الصنف بدون تشكيلات
-                                if (p && p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[wFrom] !== undefined) {
+                                if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[wFrom] !== undefined) {
                                     availStock = parseFloat(p.warehouseStocks[wFrom]) || 0;
                                 } else if (wFrom === 'المخزن الرئيسي') {
-                                    availStock = p ? (parseFloat(p.stock) || 0) : 0;
+                                    availStock = parseFloat(p.stock) || 0;
                                 } else {
                                     availStock = 0;
                                 }
                             }
 
-                            if (availStock <= 0 || requiredBaseQty > availStock) {
-                                const varInfo = (sSize || sColor) ? ` [${sSize ? 'مقاس: ' + sSize : ''}${sColor ? ' - لون: ' + sColor : ''}]` : '';
-                                const availInUnit = (Math.max(0, availStock) / factor).toFixed(2).replace(/\.00$/, '');
-                                return alert(`🚫 رصيد غير كافٍ لتحويل الصنف (${item.name}${varInfo}):\nالكمية المطلوبة: ${item.qty} ${item.unitName || ''}\nالرصيد المتاح حالياً لهذا المقاس/اللون في مخزن (${wFrom}): ${availInUnit} ${item.unitName || ''}\n\nيرجى تعديل الكمية أو التشكيلة للمتابعة.`);
+                            if (availStock <= 0 || totalBaseQty > availStock) {
+                                const varInfo = (entry.rawSize || entry.rawColor) ? ` [${[entry.rawSize, entry.rawColor].filter(Boolean).join(' - ')}]` : '';
+                                const availDisplay = Math.max(0, availStock).toFixed(2).replace(/\.00$/, '');
+                                const reqDisplay = totalBaseQty.toFixed(2).replace(/\.00$/, '');
+                                transferStockErrors.push(`❌ ${p.name}${varInfo}: إجمالي المطلوب تحويله (${reqDisplay} ق) / المتاح في (${wFrom}): (${availDisplay} ق)`);
                             }
+                        });
+
+                        if (transferStockErrors.length > 0) {
+                            window.isSavingTransaction = false;
+                            transferBtns.forEach(b => {
+                                b.disabled = false;
+                                b.style.pointerEvents = '';
+                                b.style.opacity = '1';
+                            });
+                            if (typeof showCustomAlert === 'function') {
+                                showCustomAlert({
+                                    type: 'error',
+                                    titleText: '🚫 منع التحويل بالسالب (عجز مخزني)',
+                                    msg: 'لا يمكن إرسال إذن التحويل لأن الكميات المطلوبة تتجاوز رصيد المخزن المصدر:\n\n' + transferStockErrors.join('\n') + '\n\nيرجى تعديل الكميات للمتابعة.',
+                                    confirmText: 'حسناً، تراجع'
+                                });
+                            } else {
+                                alert('🚫 رصيد غير كافٍ في المخزن المصدر:\n\n' + transferStockErrors.join('\n'));
+                            }
+                            return;
                         }
 
                         const transId = isEditMode ? editingInvoiceId : ('TR-' + Date.now().toString().slice(-6));
@@ -1455,11 +1569,19 @@ var transferItemsBatch = window.transferItemsBatch;
                         const inputTime = document.getElementById('transferTime')?.value || new Date().toTimeString().slice(0, 5);
                         const transferNotes = document.getElementById('transferNotes')?.value || '';
 
-                        const dt = {
-                            full: `${new Date(inputDate).toLocaleDateString('ar-EG')}، ${inputTime}`,
-                            iso: inputDate,
-                            time: inputTime
-                        };
+                        const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+                            ? editingOriginalDate
+                            : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+                        const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDate && (inputDate !== origDt.iso);
+
+                        const dt = (isEditMode && origDt && !isDateManuallyChanged)
+                            ? origDt
+                            : {
+                                full: `${new Date(inputDate).toLocaleDateString('ar-EG')}، ${inputTime}`,
+                                iso: inputDate,
+                                time: inputTime
+                            };
 
                         if (isEditMode && window.revertAndClearOldInvoice) {
                             await window.revertAndClearOldInvoice(editingInvoiceId, editingInvoiceType);
@@ -1552,11 +1674,19 @@ var transferItemsBatch = window.transferItemsBatch;
                                 } catch(e) {}
                             }
 
+                            if (typeof window.clearRevertedInvoiceBackup === 'function') {
+                                window.clearRevertedInvoiceBackup();
+                            }
+
                             // إعادة ضبط وضع التعديل
                             isEditMode = false;
+                            window.isEditMode = false;
                             editingInvoiceId = null;
+                            window.editingInvoiceId = null;
                             editingOriginalDate = null;
+                            window.editingOriginalDate = null;
                             editingInvoiceType = null;
+                            window.editingInvoiceType = null;
 
                             showToast(`✅ تم بنجاح تحويل ( ${processedCount} ) أصناف من [${wFrom}] إلى [${wTo}]`, "success");
 
@@ -1598,10 +1728,19 @@ var transferItemsBatch = window.transferItemsBatch;
                             if (typeof updateInventoryStats === 'function') updateInventoryStats();
                             if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
                             if (typeof updateNotifications === 'function') updateNotifications();
+                            if (typeof window.refreshPendingTransfersUI === 'function') window.refreshPendingTransfersUI();
+                            setTimeout(() => {
+                                if (typeof showToast === 'function') {
+                                    showToast(`🔔 إذن التحويل #${transId} متاح الآن في التنبيهات بانتظار الاستلام والاعتماد المخزني`, 'info');
+                                }
+                            }, 800);
                         }
                     } catch (err) {
                         console.error("Error processing batch transfer:", err);
-                        showToast("❌ حدث خطأ أثناء تنفيذ التحويل", "error");
+                        if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+                            await window.rollbackLastRevertedInvoice();
+                        }
+                        showToast("❌ حدث خطأ أثناء تنفيذ التحويل وتم استعادة إذن التحويل الأصلي بأمان", "error");
                     } finally {
                         window.isSavingTransaction = false;
                         transferBtns.forEach(b => {
@@ -1966,6 +2105,22 @@ var transferItemsBatch = window.transferItemsBatch;
                 } catch(e) {}
             }
 
+            // 📋 توثيق استلام إذن التحويل رسمياً في سجل الاستلام والتدقيق الموثق
+            const wFrom = transItems[0]?.sourceWarehouse || 'المخزن الرئيسي';
+            const wTo = transItems[0]?.warehouse || 'المخزن المستلم';
+            const itemsSummary = transItems.map(it => `${it.product} (${it.qty} ${it.unit || 'قطعة'})`).join('، ');
+
+            if (typeof window.acknowledgeNotification === 'function') {
+                window.acknowledgeNotification('transfer', invId, {
+                    name: `إذن تحويل #${invId} (${wFrom} ⬅️ ${wTo})`,
+                    details: `✅ تم الاستلام والاعتماد المخزني: ${itemsSummary}`,
+                    typeLabel: 'تحويل مخزني مستلم',
+                    status: 'received',
+                    user: receiverUser,
+                    warehouse: wTo
+                }, 'archived', true);
+            }
+
             if (typeof showToast === 'function') {
                 showToast(`🎉 تم تأكيد استلام إذن التحويل #${invId} وإضافة البضاعة لرصيد المخزن بنجاح!`, 'success');
             }
@@ -1976,7 +2131,7 @@ var transferItemsBatch = window.transferItemsBatch;
             if (typeof renderHistoryTable === 'function') renderHistoryTable();
             if (typeof generateDailyReport === 'function' && document.getElementById('opsSummaryBody')) generateDailyReport();
             if (typeof showNotificationsModal === 'function') {
-                showNotificationsModal('transfers');
+                showNotificationsModal('archived');
             }
         };
 
@@ -2034,6 +2189,23 @@ var transferItemsBatch = window.transferItemsBatch;
                 } catch(e) {}
             }
 
+            // 📋 توثيق رفض إذن التحويل رسمياً في سجل الاستلام والتدقيق الموثق
+            const wFrom = transItems[0]?.sourceWarehouse || 'المخزن الرئيسي';
+            const wTo = transItems[0]?.warehouse || 'المخزن المستلم';
+            const itemsSummary = transItems.map(it => `${it.product} (${it.qty} ${it.unit || 'قطعة'})`).join('، ');
+
+            if (typeof window.acknowledgeNotification === 'function') {
+                window.acknowledgeNotification('transfer', invId, {
+                    name: `إذن تحويل #${invId} (${wFrom} ⬅️ ${wTo})`,
+                    details: `❌ تم رفض إذن التحويل: ${itemsSummary} (بواسطة: ${rejectorUser}) - بقيت البضاعة برصيد ${wFrom}`,
+                    typeLabel: 'تحويل مخزني مرفوض',
+                    status: 'rejected',
+                    isRejected: true,
+                    user: rejectorUser,
+                    warehouse: wTo
+                }, 'archived', true);
+            }
+
             if (typeof showToast === 'function') {
                 showToast(`⚠️ تم رفض إذن التحويل #${invId}. تظل البضاعة مسجلة بالكامل برصيد ومصفوفة المخزن المصدر.`, 'warning');
             }
@@ -2044,6 +2216,19 @@ var transferItemsBatch = window.transferItemsBatch;
             if (typeof renderHistoryTable === 'function') renderHistoryTable();
             if (typeof generateDailyReport === 'function' && document.getElementById('opsSummaryBody')) generateDailyReport();
             if (typeof showNotificationsModal === 'function') {
-                showNotificationsModal('transfers');
+                showNotificationsModal('archived');
             }
+        };
+
+        window.refreshPendingTransfersUI = function() {
+            if (typeof updateNotifications === 'function') updateNotifications();
+            const modal = document.getElementById('notifyModal');
+            if (modal && typeof showNotificationsModal === 'function') {
+                const curTab = window.currentNotificationsTab || 'transfers';
+                showNotificationsModal(curTab);
+            }
+            if (typeof renderInventoryTable === 'function') renderInventoryTable();
+            if (typeof updateWarehousesSummaryBoard === 'function') updateWarehousesSummaryBoard();
+            if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+            if (typeof renderHistoryTable === 'function') renderHistoryTable();
         };

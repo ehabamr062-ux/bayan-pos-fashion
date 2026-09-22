@@ -135,21 +135,26 @@ function renderVariantPickerCardHtml(product, v, context, activeWH, priceLevel, 
         `;
     }
 
+    const isOutOfStockBlocked = ((context === 'sales' || context === 'transfer') && stockVal <= 0);
+    const cardBorderColor = isOutOfStockBlocked ? '#fca5a5' : '#e2e8f0';
+    const cardBgColor = isOutOfStockBlocked ? '#fff8f8' : 'white';
+    const cardOpacity = isOutOfStockBlocked ? '0.78' : '1';
+
     if (isVerticalMode) {
         // الوضع الرأسي (طلب العميل: تتابع المقاسات تحت اللون بشكل طولي متناسق بدون أي تداخل أو خروج للكلام)
         return `
             <div class="variant-picker-card" data-index="${v._origIndex}" data-size="${(v.size || '').trim()}" data-color="${(v.color || '').trim()}" data-barcode="${(v.barcode || '').trim()}"
                 onclick="selectVariantAndAddToCart(${product.id}, ${v._origIndex}, '${context}')"
                 onmouseenter="setVariantModalSelectedIndexByCard(this);"
-                style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; cursor: pointer; transition: all 0.15s ease; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.03); user-select: none; width: 100%; box-sizing: border-box; overflow: hidden;">
+                style="background: ${cardBgColor}; border: 2px solid ${cardBorderColor}; border-radius: 12px; padding: 10px 12px; cursor: pointer; transition: all 0.15s ease; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.03); user-select: none; width: 100%; box-sizing: border-box; overflow: hidden; opacity: ${cardOpacity};">
                 
                 <!-- السطر الأول: المقاس في اليمين، وسعر البيع في اليسار -->
                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 6px; box-sizing: border-box;">
                     <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; min-width: 0;">
                         ${hasSize
-                            ? `<span class="variant-size-badge" style="background: #1e293b; color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.95rem; min-width: 36px; text-align: center; white-space: nowrap; flex-shrink: 0;">${v.size}</span>
+                            ? `<span class="variant-size-badge" style="background: ${isOutOfStockBlocked ? '#64748b' : '#1e293b'}; color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.95rem; min-width: 36px; text-align: center; white-space: nowrap; flex-shrink: 0;">${v.size}</span>
                                <span style="font-weight: 800; color: #475569; font-size: 0.84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">مقاس ${v.size}</span>`
-                            : `<span class="variant-size-badge" style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; white-space: nowrap;">🎨 ${v.color || 'تشكيلة أساسية'}</span>`
+                            : `<span class="variant-size-badge" style="background: ${isOutOfStockBlocked ? '#64748b' : 'linear-gradient(135deg, #059669, #047857)'}; color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; white-space: nowrap;">🎨 ${v.color || 'تشكيلة أساسية'}</span>`
                         }
                     </div>
                     <div style="text-align: left; flex-shrink: 0;">
@@ -159,8 +164,8 @@ function renderVariantPickerCardHtml(product, v, context, activeWH, priceLevel, 
 
                 <!-- السطر الثاني: الرصيد المتاح ونوع السعر -->
                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px dashed #e2e8f0; padding-top: 6px; box-sizing: border-box; gap: 6px;">
-                    <span style="color: ${stockColor}; background: ${stockBg}; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%;" title="المخزن: ${activeWH}">
-                        📦 المتاح: <b>${stockVal}</b>
+                    <span style="color: ${stockColor}; background: ${stockBg}; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; border: ${isOutOfStockBlocked ? '1px solid #fca5a5' : 'none'};" title="المخزن: ${activeWH}">
+                        ${isOutOfStockBlocked ? '🛑 المتاح: <b>0</b>' : `📦 المتاح: <b>${stockVal}</b>`}
                     </span>
                     <span style="font-size: 0.72rem; color: #64748b; font-weight: bold; white-space: nowrap; flex-shrink: 0;">
                         ${priceTitle}
@@ -175,18 +180,20 @@ function renderVariantPickerCardHtml(product, v, context, activeWH, priceLevel, 
         <div class="variant-picker-card" data-index="${v._origIndex}" data-size="${(v.size || '').trim()}" data-color="${(v.color || '').trim()}" data-barcode="${(v.barcode || '').trim()}"
             onclick="selectVariantAndAddToCart(${product.id}, ${v._origIndex}, '${context}')"
             onmouseenter="setVariantModalSelectedIndexByCard(this);"
-            style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; cursor: pointer; transition: all 0.15s ease; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.03); user-select: none; width: 100%; box-sizing: border-box; overflow: hidden;">
+            style="background: ${cardBgColor}; border: 2px solid ${cardBorderColor}; border-radius: 12px; padding: 10px 12px; cursor: pointer; transition: all 0.15s ease; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.03); user-select: none; width: 100%; box-sizing: border-box; overflow: hidden; opacity: ${cardOpacity};">
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 6px; box-sizing: border-box;">
-                <span class="variant-size-badge" style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    🎨 ${v.color || 'موحد'}
-                </span>
+                <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; min-width: 0;">
+                    <span class="variant-size-badge" style="background: ${isOutOfStockBlocked ? '#64748b' : 'linear-gradient(135deg, #059669, #047857)'}; color: white; padding: 3px 10px; border-radius: 8px; font-weight: 900; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        🎨 ${v.color || 'موحد'}
+                    </span>
+                </div>
                 <div style="text-align: left; flex-shrink: 0;">
                     ${priceSnippet}
                 </div>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px dashed #e2e8f0; padding-top: 6px; box-sizing: border-box; gap: 6px;">
-                <span style="color: ${stockColor}; background: ${stockBg}; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%;" title="المخزن: ${activeWH}">
-                    📦 المتاح: <b>${stockVal}</b>
+                <span style="color: ${stockColor}; background: ${stockBg}; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; border: ${isOutOfStockBlocked ? '1px solid #fca5a5' : 'none'};" title="المخزن: ${activeWH}">
+                    ${isOutOfStockBlocked ? '🛑 المتاح: <b>0</b>' : `📦 المتاح: <b>${stockVal}</b>`}
                 </span>
                 <span style="font-size: 0.72rem; color: #64748b; font-weight: bold; white-space: nowrap; flex-shrink: 0;">
                     ${priceTitle}
@@ -874,6 +881,59 @@ function selectVariantAndAddToCart(productId, variantIndex, context = 'sales') {
     if (!product || !product.variants || !product.variants[variantIndex]) return;
 
     const variant = product.variants[variantIndex];
+
+    // 🛑 1. صمام أمان المبيعات والتحويل المخزني: إذا كان الرصيد المتاح 0 في المخزن الحالي، نمنع إغلاق النافذة ونمنع النقل للهيدر
+    if (context === 'sales' || context === 'transfer') {
+        const activeWH = (typeof getVariantModalActiveWH === 'function')
+            ? getVariantModalActiveWH(context)
+            : ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+
+        let stockVal = 0;
+        if (variant.warehouseStocks && typeof variant.warehouseStocks === 'object' && variant.warehouseStocks[activeWH] !== undefined) {
+            stockVal = parseFloat(variant.warehouseStocks[activeWH]) || 0;
+        } else if (activeWH === 'المخزن الرئيسي' || !variant.warehouseStocks || Object.keys(variant.warehouseStocks).length === 0) {
+            stockVal = parseFloat(variant.stock) || 0;
+        } else {
+            stockVal = (variant.warehouseStocks && variant.warehouseStocks[activeWH] !== undefined)
+                ? (parseFloat(variant.warehouseStocks[activeWH]) || 0)
+                : (parseFloat(variant.stock) || 0);
+        }
+
+        if (stockVal <= 0) {
+            const varLabel = (variant.size ? `[مقاس: ${variant.size}] ` : '') + (variant.color ? `(لون: ${variant.color})` : '');
+            const whDesc = (context === 'transfer') ? `بالمخزن المحول منه (${activeWH})` : `بمخزن (${activeWH})`;
+            if (typeof showToast === 'function') {
+                showToast(`🚫 هذا المقاس/اللون ${varLabel}غير متوفر ${whDesc} - الرصيد: 0! يرجى اختيار مقاس أو لون متاح للتحويل.`, 'warning');
+            }
+            if (typeof BayanBarcode !== 'undefined' && typeof BayanBarcode.playBeep === 'function') {
+                BayanBarcode.playBeep(false);
+            }
+
+            // اهتزاز بصري للكارت للتنبيه دون إغلاق النافذة
+            const overlay = document.getElementById('bayanVariantPickerOverlay');
+            if (overlay) {
+                const cardEl = overlay.querySelector(`.variant-picker-card[data-index="${variantIndex}"]`);
+                if (cardEl) {
+                    cardEl.style.transition = 'all 0.08s ease';
+                    cardEl.style.borderColor = '#ef4444';
+                    cardEl.style.boxShadow = '0 0 16px rgba(239, 68, 68, 0.45)';
+                    cardEl.style.transform = 'translateX(-8px)';
+                    setTimeout(() => { if (cardEl) cardEl.style.transform = 'translateX(8px)'; }, 60);
+                    setTimeout(() => { if (cardEl) cardEl.style.transform = 'translateX(-5px)'; }, 120);
+                    setTimeout(() => { if (cardEl) cardEl.style.transform = 'translateX(5px)'; }, 180);
+                    setTimeout(() => {
+                        if (cardEl) {
+                            cardEl.style.transform = 'none';
+                            cardEl.style.boxShadow = '0 2px 5px rgba(0,0,0,0.03)';
+                            cardEl.style.borderColor = '#fca5a5';
+                        }
+                    }, 240);
+                }
+            }
+            return; // ⛔ توقف تام! النافذة تظل مفتوحة ولا يتم الذهاب لمربعات الهيدر إطلاقاً
+        }
+    }
+
     closeVariantSelectionModal();
 
     const defUnit = (product.units && product.units.length > 0) ? product.units[0] : null;
@@ -1058,8 +1118,8 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
         activeWH = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || 'المخزن الرئيسي').trim();
     }
 
-    const currentSize = item.selectedSize || item.size || '';
-    const currentColor = item.selectedColor || item.color || '';
+    const currentSize = String(item.selectedSize || item.size || '').trim();
+    const currentColor = String(item.selectedColor || item.color || '').trim();
 
     // دالة مساعدة لحساب رصيد تشكيلة معينة في المخزن الفعلي المحدد
     const getVarStockInWH = (s, c) => {
@@ -1076,17 +1136,30 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
         return 0;
     };
 
-    // 1. خيارات المقاسات (Dropdown للمقاسات مع توضيح الرصيد المتاح)
-    const availableSizes = [...new Set(variants.map(v => v.size).filter(s => s && String(s).trim() !== '' && String(s).trim() !== '-'))];
-    if (currentSize && currentSize !== '-' && !availableSizes.includes(currentSize)) {
+    const showStock = (cartType === 'sales' || cartType === 'transfer');
+
+    // 1. خيارات المقاسات: مرتبطة باللون الحالي المحدد حصراً لمنع ظهور مقاسات ألوان أخرى أو إكسات (0 ❌)
+    const colorMatchedVariants = (currentColor && currentColor !== '-' && currentColor !== 'عام' && currentColor !== 'موحد')
+        ? variants.filter(v => String(v.color || '').trim() === currentColor)
+        : variants;
+
+    const availableSizes = [...new Set(colorMatchedVariants
+        .map(v => String(v.size || '').trim())
+        .filter(s => s && s !== '-' && s !== 'عام' && s !== 'موحد' && s !== 'قياسي')
+    )];
+
+    if (currentSize && currentSize !== '-' && currentSize !== 'عام' && currentSize !== 'قياسي' && !availableSizes.includes(currentSize)) {
         availableSizes.unshift(currentSize);
     }
-    if (!item.selectedSize && !item.size && availableSizes.length > 0) {
+
+    // لا نفرض مقاساً وهمياً إذا كان هذا اللون ملوش مقاسات أصلاً
+    if (!currentSize && availableSizes.length > 0 && colorMatchedVariants.some(v => String(v.size || '').trim() !== '')) {
         item.selectedSize = availableSizes[0];
         item.size = availableSizes[0];
+    } else if (availableSizes.length === 0) {
+        item.selectedSize = '';
+        item.size = '';
     }
-
-    const showStock = (cartType === 'sales' || cartType === 'transfer');
 
     let sizeElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
     if (availableSizes.length > 1) {
@@ -1100,26 +1173,40 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
             style="width: 90px; max-width: 100%; border: 1.5px solid #a7f3d0; background: #ecfdf5; color: #047857; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer; text-align: center;">
             ${sizeOptions}
         </select>`;
-    } else if (availableSizes.length === 1 || (currentSize && currentSize !== '-')) {
-        const displaySize = availableSizes[0] || currentSize;
+    } else if (availableSizes.length === 1) {
+        const displaySize = availableSizes[0];
         sizeElement = `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${displaySize}</span>`;
+    } else if (currentSize && currentSize !== '-' && currentSize !== 'عام' && currentSize !== 'قياسي') {
+        sizeElement = `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${currentSize}</span>`;
     }
 
-    // 2. خيارات الألوان (Dropdown للألوان مع توضيح الرصيد المتاح)
-    const availableColors = [...new Set(variants.map(v => v.color).filter(c => c && String(c).trim() !== '' && String(c).trim() !== '-'))];
-    if (currentColor && currentColor !== '-' && !availableColors.includes(currentColor)) {
+    // 2. خيارات الألوان: مرتبطة بالمقاس الحالي المحدد حصراً
+    const sizeMatchedVariants = (currentSize && currentSize !== '-' && currentSize !== 'عام' && currentSize !== 'قياسي')
+        ? variants.filter(v => String(v.size || '').trim() === currentSize)
+        : variants;
+
+    const availableColors = [...new Set(sizeMatchedVariants
+        .map(v => String(v.color || '').trim())
+        .filter(c => c && c !== '-' && c !== 'عام' && c !== 'موحد' && c !== 'قياسي')
+    )];
+
+    if (currentColor && currentColor !== '-' && currentColor !== 'عام' && currentColor !== 'موحد' && !availableColors.includes(currentColor)) {
         availableColors.unshift(currentColor);
     }
-    if (!item.selectedColor && !item.color && availableColors.length > 0) {
+
+    if (!currentColor && availableColors.length > 0 && sizeMatchedVariants.some(v => String(v.color || '').trim() !== '')) {
         item.selectedColor = availableColors[0];
         item.color = availableColors[0];
+    } else if (availableColors.length === 0) {
+        item.selectedColor = '';
+        item.color = '';
     }
 
     let colorElement = `<span style="color:#94a3b8; font-weight:bold;">عام</span>`;
     if (availableColors.length > 1) {
         const colorOptions = availableColors.map(c => {
             const st = getVarStockInWH(currentSize, c);
-            const isSelected = currentColor === c;
+            const isSelected = (item.selectedColor || currentColor) === c;
             const stockLabel = showStock ? ` (${st > 0 ? st : '0 ❌'})` : '';
             return `<option value="${c}" ${isSelected ? 'selected' : ''} ${showStock && st <= 0 && !isSelected ? 'style="color:#94a3b8;"' : ''}>${c}${stockLabel}</option>`;
         }).join('');
@@ -1127,9 +1214,11 @@ function renderVariantSelectElements(item, index, cartType = 'sales') {
             style="width: 90px; max-width: 100%; border: 1.5px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 4px 2px; font-weight: 900; font-size: 0.82rem; outline: none; cursor: pointer; text-align: center;">
             ${colorOptions}
         </select>`;
-    } else if (availableColors.length === 1 || (currentColor && currentColor !== '-')) {
-        const displayColor = availableColors[0] || currentColor;
+    } else if (availableColors.length === 1) {
+        const displayColor = availableColors[0];
         colorElement = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${displayColor}</span>`;
+    } else if (currentColor && currentColor !== '-' && currentColor !== 'عام' && currentColor !== 'موحد') {
+        colorElement = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 8px; border-radius:6px; font-weight:900; font-size:0.82rem;">${currentColor}</span>`;
     }
 
     return { sizeElement, colorElement };
@@ -1147,24 +1236,50 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
     const item = currentCart[index];
     if (!item) return;
 
-    const prevSize = item.selectedSize || item.size || '';
-    const prevColor = item.selectedColor || item.color || '';
+    const prevSize = String(item.selectedSize || item.size || '').trim();
+    const prevColor = String(item.selectedColor || item.color || '').trim();
 
-    let candidateSize = (attr === 'size') ? value : prevSize;
-    let candidateColor = (attr === 'color') ? value : prevColor;
+    let candidateSize = (attr === 'size') ? String(value || '').trim() : prevSize;
+    let candidateColor = (attr === 'color') ? String(value || '').trim() : prevColor;
+
+    const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
+
+    // تكييف المقاس أو اللون المتبادل ذكياً إذا كان التشكيل الجديد لا يحتوي على الخيار السابق
+    if (pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {
+        if (attr === 'color') {
+            const varsForNewColor = pInfo.variants.filter(v => String(v.color || '').trim() === candidateColor);
+            const sizesForNewColor = [...new Set(varsForNewColor.map(v => String(v.size || '').trim()).filter(s => s && s !== '-' && s !== 'عام' && s !== 'قياسي' && s !== 'موحد'))];
+            if (sizesForNewColor.length > 0) {
+                if (!sizesForNewColor.includes(candidateSize)) {
+                    candidateSize = sizesForNewColor[0];
+                }
+            } else {
+                candidateSize = '';
+            }
+        } else if (attr === 'size') {
+            const varsForNewSize = pInfo.variants.filter(v => String(v.size || '').trim() === candidateSize);
+            const colorsForNewSize = [...new Set(varsForNewSize.map(v => String(v.color || '').trim()).filter(c => c && c !== '-' && c !== 'عام' && c !== 'موحد' && c !== 'قياسي'))];
+            if (colorsForNewSize.length > 0) {
+                if (!colorsForNewSize.includes(candidateColor)) {
+                    candidateColor = colorsForNewSize[0];
+                }
+            } else {
+                candidateColor = '';
+            }
+        }
+    }
 
     // تحديد المخزن المستهدف للفحص: في التحويل نأخذ المخزن المحول منه، وفي المبيعات نأخذ المخزن الحالي
     let targetWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
     if (cartType === 'transfer') {
         targetWH = (document.getElementById('transferFrom')?.value || document.getElementById('transferFromWarehouse')?.value || 'المخزن الرئيسي').trim();
     }
-    const pInfo = productsDB.find(p => p.id === item.id || p.name === item.name);
 
     // التحقق الصارم من رصيد المقاس واللون في المخزن المحدد (للمبيعات وتحويلات المخازن)
     if ((cartType === 'sales' || cartType === 'transfer') && pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {
         const matchedVar = pInfo.variants.find(v => 
-            (!candidateSize || String(v.size || '').trim() === String(candidateSize).trim()) && 
-            (!candidateColor || String(v.color || '').trim() === String(candidateColor).trim())
+            (!candidateSize || String(v.size || '').trim() === candidateSize) && 
+            (!candidateColor || String(v.color || '').trim() === candidateColor)
         );
 
         let candidateStock = 0;
@@ -1202,13 +1317,10 @@ function updateItemVariantAttr(index, attr, value, cartType = 'sales') {
         }
     }
 
-    if (attr === 'size') {
-        item.selectedSize = value;
-        item.size = value;
-    } else if (attr === 'color') {
-        item.selectedColor = value;
-        item.color = value;
-    }
+    item.selectedSize = candidateSize;
+    item.size = candidateSize;
+    item.selectedColor = candidateColor;
+    item.color = candidateColor;
 
     // البحث عن التشكيلة المطابقة لتحديث السعر والباركود والرصيد المخزني الفعلي للتشكيلة الجديدة
     if (pInfo && pInfo.variants && Array.isArray(pInfo.variants)) {

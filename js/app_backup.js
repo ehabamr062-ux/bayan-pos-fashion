@@ -11,13 +11,18 @@ async function backupData() {
     await window.executeAutoBackupToFile(false, true);
 }
 
-function restoreData(input) {
-    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+function restoreData(input, isEmergencyBypass = false) {
+    if (!isEmergencyBypass && typeof checkPermission === 'function' && !checkPermission('general_settings')) {
         if (input) input.value = '';
         return showToast("🚫 ليس لديك صلاحية استعادة النسخ الاحتياطية!", "error");
     }
     const file = input ? input.files[0] : null;
-    if (!file) return;
+    if (!file) {
+        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+            window.resetLoginEmergencyRestoreCard();
+        }
+        return;
+    }
     const reader = new FileReader();
     reader.onload = async function (e) {
         try {
@@ -25,6 +30,9 @@ function restoreData(input) {
             try {
                 data = JSON.parse(e.target.result);
             } catch (parseErr) {
+                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                    window.resetLoginEmergencyRestoreCard();
+                }
                 if (typeof showCustomAlert === 'function') {
                     showCustomAlert({
                         type: 'error',
@@ -40,6 +48,9 @@ function restoreData(input) {
 
             // 🛑 فحص التحقق من سلامة وصلاحية محتوى النسخة الاحتياطية قبل أي تعديل
             if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                    window.resetLoginEmergencyRestoreCard();
+                }
                 if (typeof showCustomAlert === 'function') {
                     showCustomAlert({
                         type: 'error',
@@ -60,6 +71,9 @@ function restoreData(input) {
             const hasUsers = Array.isArray(data.users) && data.users.length > 0;
 
             if (prodCount === 0 && txCount === 0 && accCount === 0 && !hasSettings && !hasUsers) {
+                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                    window.resetLoginEmergencyRestoreCard();
+                }
                 if (typeof showCustomAlert === 'function') {
                     showCustomAlert({
                         type: 'error',
@@ -79,6 +93,8 @@ function restoreData(input) {
                 if (db.treasuryAudit) tablesToTransact.push(db.treasuryAudit);
                 if (db.auditLogs) tablesToTransact.push(db.auditLogs);
                 if (db.settings) tablesToTransact.push(db.settings);
+                if (db.warehouses) tablesToTransact.push(db.warehouses);
+                if (db.wallpapers) tablesToTransact.push(db.wallpapers);
 
                 await db.transaction('rw', tablesToTransact, async () => {
                     // 1. مسح وإعادة كتابة الجداول الأساسية
@@ -122,16 +138,32 @@ function restoreData(input) {
                             await db.auditLogs.bulkPut(data.auditLogs);
                         }
                     }
+
+                    // 3. استرجاع المخازن المتعددة في IndexedDB
+                    if (db.warehouses) {
+                        await db.warehouses.clear();
+                        if (data.warehouses && data.warehouses.length > 0) {
+                            await db.warehouses.bulkPut(data.warehouses);
+                        }
+                    }
+
+                    // 4. استرجاع الخلفيات المخصصة في IndexedDB
+                    if (db.wallpapers) {
+                        await db.wallpapers.clear();
+                        if (data.wallpapers && data.wallpapers.length > 0) {
+                            await db.wallpapers.bulkPut(data.wallpapers);
+                        }
+                    }
                 });
 
-                // 3. استرجاع الإعدادات
+                // 5. استرجاع الإعدادات العامة
                 if (data.settings) {
                     const existingMain = await db.settings.get('main') || {};
                     await db.settings.put({ ...existingMain, ...data.settings, id: 'main' });
                     setStore('pos_settings', JSON.stringify(data.settings));
                 }
                 
-                // 4. استرجاع المخازن المتعددة والتصنيفات وإعدادات الباركود
+                // 6. استرجاع المخازن المتعددة والتصنيفات وإعدادات الباركود
                 if (data.warehouses && data.warehouses.length > 0) {
                     setStore('pos_warehouses', JSON.stringify(data.warehouses));
                 }
@@ -141,6 +173,99 @@ function restoreData(input) {
                 if (data.barcodeLabelSettings && Object.keys(data.barcodeLabelSettings).length > 0) {
                     setStore('bayan_barcode_label_settings', JSON.stringify(data.barcodeLabelSettings));
                 }
+                if (data.barcodeCenterSettings && Object.keys(data.barcodeCenterSettings).length > 0) {
+                    setStore('bayan_barcode_center_settings', JSON.stringify(data.barcodeCenterSettings));
+                }
+                if (data.paymentMethods && Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0) {
+                    setStore('bayan_payment_methods', JSON.stringify(data.paymentMethods));
+                }
+                if (data.globalUnits && Array.isArray(data.globalUnits) && data.globalUnits.length > 0) {
+                    setStore('bayan_global_units', JSON.stringify(data.globalUnits));
+                }
+
+                // 7. استرجاع هوية المحل والشعار والثيم والخلفيات
+                if (data.businessLogo) {
+                    setStore('bayan_business_logo', data.businessLogo);
+                }
+                if (data.userConfirmedCustomLogo) {
+                    setStore('bayan_user_confirmed_custom_logo', data.userConfirmedCustomLogo);
+                }
+                if (data.theme) {
+                    setStore('pos_theme', data.theme);
+                }
+                if (data.wallpaper) {
+                    setStore('bayan_wallpaper', data.wallpaper);
+                }
+                if (data.wallpaperType) {
+                    setStore('bayan_wallpaper_type', data.wallpaperType);
+                }
+                if (data.savedWallpaper) {
+                    setStore('bayan_saved_wallpaper', data.savedWallpaper);
+                }
+
+                // 8. استرجاع إعدادات وقوالب الطباعة
+                if (data.printSettings && Object.keys(data.printSettings).length > 0) {
+                    setStore('bayan_print_settings', JSON.stringify(data.printSettings));
+                }
+                if (data.printStyle) {
+                    setStore('bayan_print_style', data.printStyle);
+                }
+                if (data.printTemplateChoice && Object.keys(data.printTemplateChoice).length > 0) {
+                    setStore('bayan_print_template_choice', JSON.stringify(data.printTemplateChoice));
+                }
+                if (data.userTemplates && Array.isArray(data.userTemplates) && data.userTemplates.length > 0) {
+                    setStore('bayan_user_templates', JSON.stringify(data.userTemplates));
+                }
+                if (data.autoPrintEnabled !== undefined && data.autoPrintEnabled !== null) {
+                    setStore('pos_auto_print_enabled', String(data.autoPrintEnabled));
+                }
+
+                // 9. استرجاع سجلات الإيصالات والآلة الحاسبة وملاحظات الخزينة
+                if (data.treasuryNotes) {
+                    setStore('bayan_treasury_notes', data.treasuryNotes);
+                }
+                if (data.treasuryNotesConfig) {
+                    if (data.treasuryNotesConfig.borderColor) setStore('tr_notes_border_color', data.treasuryNotesConfig.borderColor);
+                    if (data.treasuryNotesConfig.customTitle) setStore('tr_notes_custom_title', data.treasuryNotesConfig.customTitle);
+                    if (data.treasuryNotesConfig.saveSystem) setStore('tr_notes_save_system', data.treasuryNotesConfig.saveSystem);
+                }
+                if (data.receiptLog && Array.isArray(data.receiptLog) && data.receiptLog.length > 0) {
+                    setStore('bayan_receipt_log', JSON.stringify(data.receiptLog));
+                }
+                if (data.calcHistory && Array.isArray(data.calcHistory) && data.calcHistory.length > 0) {
+                    setStore('bayan_calc_history', JSON.stringify(data.calcHistory));
+                }
+
+                // 10. استرجاع تخصيصات أعمدة الجداول بالكامل
+                if (data.tableColumnsSettings) {
+                    if (data.tableColumnsSettings.wrCols) setStore('wrColSettings', JSON.stringify(data.tableColumnsSettings.wrCols));
+                    if (data.tableColumnsSettings.invCols) setStore('pos_inv_cols_visible', JSON.stringify(data.tableColumnsSettings.invCols));
+                    if (data.tableColumnsSettings.invColsLegacy) setStore('pos_inv_cols', JSON.stringify(data.tableColumnsSettings.invColsLegacy));
+                    if (data.tableColumnsSettings.histCols) setStore('pos_hist_cols', JSON.stringify(data.tableColumnsSettings.histCols));
+                    if (data.tableColumnsSettings.accCols) setStore('pos_acc_cols', JSON.stringify(data.tableColumnsSettings.accCols));
+                    if (data.tableColumnsSettings.accColsOrder) setStore('pos_acc_cols_order_v2', JSON.stringify(data.tableColumnsSettings.accColsOrder));
+                    if (data.tableColumnsSettings.anCols) setStore('pos_an_cols', JSON.stringify(data.tableColumnsSettings.anCols));
+                    if (data.tableColumnsSettings.stmtCols) setStore('pos_stmt_cols', JSON.stringify(data.tableColumnsSettings.stmtCols));
+                    if (data.tableColumnsSettings.inquiryVariantsCols) setStore('pos_inquiry_variants_cols', JSON.stringify(data.tableColumnsSettings.inquiryVariantsCols));
+                    if (data.tableColumnsSettings.transferCols) setStore('transferColSettings', JSON.stringify(data.tableColumnsSettings.transferCols));
+                    if (data.tableColumnsSettings.priceAdjCols) setStore('priceAdjHiddenCols', JSON.stringify(data.tableColumnsSettings.priceAdjCols));
+                    if (data.tableColumnsSettings.priceAdjColsAlt) setStore('bayan_adj_hidden_columns', JSON.stringify(data.tableColumnsSettings.priceAdjColsAlt));
+                }
+
+                // 11. استرجاع تفضيلات وطرق العرض
+                if (data.viewPreferences) {
+                    if (data.viewPreferences.variantViewMode) setStore('bayan_variant_view_mode', data.viewPreferences.variantViewMode);
+                    if (data.viewPreferences.variantViewModePinned) setStore('bayan_variant_view_mode_pinned', data.viewPreferences.variantViewModePinned);
+                    if (data.viewPreferences.inquiryViewMode) setStore('pos_inquiry_view_mode', data.viewPreferences.inquiryViewMode);
+                    if (data.viewPreferences.showQuickItems !== undefined) setStore('showQuickItems', String(data.viewPreferences.showQuickItems));
+                    if (data.viewPreferences.pinnedPaymentMethod) setStore('pinned_payment_method', data.viewPreferences.pinnedPaymentMethod);
+                    if (data.viewPreferences.pinnedPriceLevel) {
+                        setStore('pos_pinned_price_level', data.viewPreferences.pinnedPriceLevel);
+                        setStore('pos_price_level_pinned', data.viewPreferences.pinnedPriceLevel);
+                    }
+                }
+
+                // 12. استرجاع أسباب الخصم والإضافة والضرائب
                 if (data.discountReasons) setStore('pos_discount_reasons', JSON.stringify(data.discountReasons));
                 if (data.taxReasons) setStore('pos_tax_reasons', JSON.stringify(data.taxReasons));
                 if (data.purchaseDiscountReasons) setStore('pos_p_discount_reasons', JSON.stringify(data.purchaseDiscountReasons));
@@ -150,7 +275,7 @@ function restoreData(input) {
                     showCustomAlert({
                         type: 'success',
                         titleText: '✅ تم استعادة النسخة الاحتياطية بنجاح',
-                        msg: `تمت استعادة كافة البيانات بنجاح!\n• عدد الأصناف: ${prodCount}\n• عدد الفواتير والحركات: ${txCount}\n• عدد الحسابات: ${accCount}\n\nسيتم إعادة تشغيل التطبيق لتطبيق البيانات فوراً.`,
+                        msg: `تمت استعادة كافة البيانات بنجاح!\n• عدد الأصناف: ${prodCount}\n• عدد الفواتير والحركات: ${txCount}\n• عدد الحسابات: ${accCount}${hasUsers ? `\n• عدد المستخدمين: ${data.users.length}` : ''}\n\nسيتم إعادة تشغيل التطبيق لتطبيق البيانات وتحديث المستخدمين فوراً.`,
                         confirmText: 'إعادة التشغيل الآن 🔄',
                         onConfirm: () => location.reload()
                     });
@@ -167,6 +292,7 @@ function restoreData(input) {
                 `📦 <b>عدد الأصناف:</b> ${prodCount} صنف<br>` +
                 `🧾 <b>عدد الفواتير والحركات:</b> ${txCount} حركة<br>` +
                 `👥 <b>عدد الحسابات والعملاء:</b> ${accCount} حساب<br>` +
+                (hasUsers ? `👤 <b>عدد المستخدمين والموظفين:</b> ${data.users.length} مستخدم<br>` : '') +
                 `</div><br>` +
                 `<b style="color: #dc2626;">⚠️ تحذير:</b> سيتم استبدال البيانات الحالية بالبيانات المحفوظة في هذا الملف.`;
 
@@ -179,17 +305,28 @@ function restoreData(input) {
                     confirmText: 'نعم، استعد البيانات 🔄',
                     cancelText: 'إلغاء ❌',
                     onConfirm: () => executeRestore(),
-                    onCancel: () => { if (input) input.value = ''; }
+                    onCancel: () => {
+                        if (input) input.value = '';
+                        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                            window.resetLoginEmergencyRestoreCard();
+                        }
+                    }
                 });
             } else {
-                if (confirm(`هل أنت متأكد من استعادة النسخة الاحتياطية؟\nالأصناف: ${prodCount}\nالفواتير: ${txCount}\nالحسابات: ${accCount}`)) {
+                if (confirm(`هل أنت متأكد من استعادة النسخة الاحتياطية؟\nالأصناف: ${prodCount}\nالفواتير: ${txCount}\nالحسابات: ${accCount}${hasUsers ? `\nالمستخدمين: ${data.users.length}` : ''}`)) {
                     executeRestore();
                 } else {
                     if (input) input.value = '';
+                    if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                        window.resetLoginEmergencyRestoreCard();
+                    }
                 }
             }
         } catch (err) {
             console.error("Failed to restore backup:", err);
+            if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                window.resetLoginEmergencyRestoreCard();
+            }
             if (typeof showCustomAlert === 'function') {
                 showCustomAlert({
                     type: 'error',
@@ -203,6 +340,7 @@ function restoreData(input) {
     };
     reader.readAsText(file);
 }
+window.restoreData = restoreData;
 
 // ================= منطق إضافة حساب جديد (New Account Logic) =================
 window.copyPaymentNumber = function(text) {
@@ -421,20 +559,65 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         window.showBackupProgressOverlay();
     }
     
-    // جلب كافة الجداول الإضافية من IndexedDB (سجلات الخزينة والتدقيق)
+    // 1. قراءة كافة الجداول الأساسية من IndexedDB مباشرة لضمان أعلى دقة وشمولية
+    let productsData = [];
+    try {
+        if (typeof db !== 'undefined' && db && db.products) productsData = await db.products.toArray();
+    } catch(e) {}
+    if (productsData.length === 0 && typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+        productsData = productsDB;
+    }
+
+    let transactionsData = [];
+    try {
+        if (typeof db !== 'undefined' && db && db.transactions) transactionsData = await db.transactions.toArray();
+    } catch(e) {}
+    if (transactionsData.length === 0 && typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+        transactionsData = transactions;
+    }
+
+    let accountsData = [];
+    try {
+        if (typeof db !== 'undefined' && db && db.accounts) accountsData = await db.accounts.toArray();
+    } catch(e) {}
+    if (accountsData.length === 0 && typeof accounts !== 'undefined' && Array.isArray(accounts)) {
+        accountsData = accounts;
+    }
+
+    let trashData = [];
+    try {
+        if (typeof db !== 'undefined' && db && db.trash) trashData = await db.trash.toArray();
+    } catch(e) {}
+    if (trashData.length === 0 && typeof trashBin !== 'undefined' && Array.isArray(trashBin)) {
+        trashData = trashBin;
+    }
+
+    // 2. جلب كافة الجداول الإضافية من IndexedDB (سجلات الخزينة، التدقيق، المخازن، والخلفيات المخصصة)
     let treasuryData = [];
     let auditLogData = [];
+    let warehousesData = [];
+    let wallpapersData = [];
     try {
         if (db && db.treasuryAudit) treasuryData = await db.treasuryAudit.toArray();
         if (db && db.auditLogs) auditLogData = await db.auditLogs.toArray();
+        if (db && db.warehouses) warehousesData = await db.warehouses.toArray();
+        if (db && db.wallpapers) wallpapersData = await db.wallpapers.toArray();
     } catch(e) {
-        console.warn("Error reading treasuryAudit or auditLogs for backup:", e);
+        console.warn("Error reading secondary tables for backup:", e);
     }
     if (treasuryData.length === 0 && typeof treasuryAuditRecords !== 'undefined' && Array.isArray(treasuryAuditRecords)) {
         treasuryData = treasuryAuditRecords;
     }
     if (auditLogData.length === 0 && typeof auditLogs !== 'undefined' && Array.isArray(auditLogs)) {
         auditLogData = auditLogs;
+    }
+    if (warehousesData.length === 0 && typeof warehouses !== 'undefined' && Array.isArray(warehouses) && warehouses.length > 0) {
+        warehousesData = warehouses;
+    }
+    if (warehousesData.length === 0) {
+        try {
+            warehousesData = JSON.parse(getStore('pos_warehouses') || '[]');
+        } catch(e) {}
     }
 
     // 🔒 تأمين وتشفير رموز الـ PIN للمستخدمين في ملف النسخة الاحتياطية لمنع كشفها
@@ -448,19 +631,64 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     });
 
     const data = {
-        version: "2.0",
+        version: window.appVersion || "3.1.1",
         backupDate: new Date().toISOString(),
-        products: productsDB || [],
-        transactions: transactions || [],
+        products: productsData,
+        transactions: transactionsData,
         settings: JSON.parse(getStore('pos_settings') || '{}'),
         users: securedUsers,
-        accounts: accounts || [],
-        trash: trashBin || [],
+        accounts: accountsData,
+        trash: trashData,
         treasuryAudit: treasuryData,
         auditLogs: auditLogData,
-        warehouses: (typeof warehouses !== 'undefined' && warehouses.length > 0) ? warehouses : JSON.parse(getStore('pos_warehouses') || '[]'),
+        warehouses: warehousesData,
+        wallpapers: wallpapersData,
         inventoryCategories: (window.inventoryCategories && window.inventoryCategories.length > 0) ? window.inventoryCategories : JSON.parse(getStore('bayan_inventory_categories') || '[]'),
         barcodeLabelSettings: JSON.parse(getStore('bayan_barcode_label_settings') || '{}'),
+        barcodeCenterSettings: JSON.parse(getStore('bayan_barcode_center_settings') || '{}'),
+        paymentMethods: JSON.parse(getStore('bayan_payment_methods') || '[]'),
+        globalUnits: JSON.parse(getStore('bayan_global_units') || '[]'),
+        businessLogo: getStore('bayan_business_logo') || '',
+        userConfirmedCustomLogo: getStore('bayan_user_confirmed_custom_logo') || '',
+        theme: getStore('pos_theme') || '',
+        wallpaper: getStore('bayan_wallpaper') || '',
+        wallpaperType: getStore('bayan_wallpaper_type') || '',
+        savedWallpaper: getStore('bayan_saved_wallpaper') || '',
+        printSettings: JSON.parse(getStore('bayan_print_settings') || '{}'),
+        printStyle: getStore('bayan_print_style') || '',
+        printTemplateChoice: JSON.parse(getStore('bayan_print_template_choice') || '{}'),
+        userTemplates: JSON.parse(getStore('bayan_user_templates') || '[]'),
+        autoPrintEnabled: getStore('pos_auto_print_enabled') || '',
+        receiptLog: JSON.parse(getStore('bayan_receipt_log') || '[]'),
+        calcHistory: JSON.parse(getStore('bayan_calc_history') || '[]'),
+        treasuryNotes: getStore('bayan_treasury_notes') || '',
+        treasuryNotesConfig: {
+            borderColor: getStore('tr_notes_border_color') || '',
+            customTitle: getStore('tr_notes_custom_title') || '',
+            saveSystem: getStore('tr_notes_save_system') || ''
+        },
+        tableColumnsSettings: {
+            wrCols: JSON.parse(getStore('wrColSettings') || '{}'),
+            invCols: JSON.parse(getStore('pos_inv_cols_visible') || '{}'),
+            invColsLegacy: JSON.parse(getStore('pos_inv_cols') || '{}'),
+            histCols: JSON.parse(getStore('pos_hist_cols') || '{}'),
+            accCols: JSON.parse(getStore('pos_acc_cols') || '{}'),
+            accColsOrder: JSON.parse(getStore('pos_acc_cols_order_v2') || '[]'),
+            anCols: JSON.parse(getStore('pos_an_cols') || '{}'),
+            stmtCols: JSON.parse(getStore('pos_stmt_cols') || '{}'),
+            inquiryVariantsCols: JSON.parse(getStore('pos_inquiry_variants_cols') || '{}'),
+            transferCols: JSON.parse(getStore('transferColSettings') || '{}'),
+            priceAdjCols: JSON.parse(getStore('priceAdjHiddenCols') || '[]'),
+            priceAdjColsAlt: JSON.parse(getStore('bayan_adj_hidden_columns') || '[]')
+        },
+        viewPreferences: {
+            variantViewMode: getStore('bayan_variant_view_mode') || '',
+            variantViewModePinned: getStore('bayan_variant_view_mode_pinned') || '',
+            inquiryViewMode: getStore('pos_inquiry_view_mode') || '',
+            showQuickItems: getStore('showQuickItems') || '',
+            pinnedPaymentMethod: getStore('pinned_payment_method') || '',
+            pinnedPriceLevel: getStore('pos_pinned_price_level') || getStore('pos_price_level_pinned') || ''
+        },
         discountReasons: (typeof discountReasons !== 'undefined') ? discountReasons : JSON.parse(getStore('pos_discount_reasons') || '[]'),
         taxReasons: (typeof taxReasons !== 'undefined') ? taxReasons : JSON.parse(getStore('pos_tax_reasons') || '[]'),
         purchaseDiscountReasons: (typeof purchaseDiscountReasons !== 'undefined') ? purchaseDiscountReasons : JSON.parse(getStore('pos_p_discount_reasons') || '[]'),
@@ -537,7 +765,8 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     }
 
     // 3. المحاولة الثالثة: عبر تنزيل ملف المتصفح (Web Browser Download)
-    if (!success) {
+    // إذا كان النسخ يدوياً، نقوم بتنزيل الملف دائماً في المتصفح / مجلد Downloads ليراه العميل أمامه فوراً
+    if (isManual || !success) {
         const settings = JSON.parse(getStore('pos_settings') || '{}');
         const canDownloadInBrowser = isManual || (settings.autoBackup === true && !silent);
 
@@ -549,14 +778,15 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
                 a.href = url;
                 const d = new Date();
                 const pad = (n) => String(n).padStart(2, '0');
-                const timestamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                const timestamp = `${d.getFullYear()}_${pad(d.getMonth()+1)}_${pad(d.getDate())}__${pad(d.getHours())}_${pad(d.getMinutes())}`;
                 finalFileName = `backup_pos_${isManual ? 'manual' : 'auto'}_${timestamp}.json`;
                 a.download = finalFileName;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
                 success = true;
-                backupDirDisplay = 'مجلد التنزيلات (Downloads)';
+                backupDirDisplay = 'سطح المكتب (Desktop) ومجلد التنزيلات (Downloads)';
                 savedFilePath = `Downloads/${finalFileName}`;
                 console.log("Backup file downloaded via browser to Downloads folder:", finalFileName);
             } catch (downloadErr) {
@@ -726,7 +956,9 @@ try {
     if (electron && electron.ipcRenderer) {
         electron.ipcRenderer.on('trigger-backup-before-quit', async () => {
             // 1. فحص هل هناك أي بيانات غير محفوظة في التبويبات المفتوحة قبل أي شيء
-            const unsaved = window.checkUnsavedDataInAllTabs();
+            const unsaved = (typeof window.checkUnsavedDataInAllTabs === 'function')
+                ? window.checkUnsavedDataInAllTabs()
+                : null;
 
             if (unsaved && unsaved.hasUnsaved) {
                 // إلغاء الإغلاق فوراً
@@ -750,16 +982,49 @@ try {
                 return;
             }
 
-            // 2. إذا كانت كافة البيانات محفوظة ولا توجد أصناف معلقة، نقوم بالنسخ الاحتياطي إذا كان مفعلاً صراحة
-            const settings = JSON.parse(getStore('pos_settings') || '{}');
-            if (settings.autoBackup === true) {
-                await window.executeAutoBackupToFile(false);
-            }
+            // 2. إذا كانت كافة البيانات محفوظة، نقوم بالنسخ الاحتياطي إذا كان مفعلاً
+            try {
+                const settings = JSON.parse(getStore('pos_settings') || '{}');
+                const shouldBackup = Boolean(settings.autoBackup) || settings.autoBackup === 'true' || (settings.autoBackupInterval && settings.autoBackupInterval !== 'close');
 
-            // إكمال عملية الخروج بأمان بعد إنهاء النسخ الاحتياطي
-            if (electron && electron.ipcRenderer) electron.ipcRenderer.send('proceed-quit');
+                if (shouldBackup) {
+                    if (typeof window.showBackupProgressOverlay === 'function') {
+                        window.showBackupProgressOverlay();
+                    }
+                    if (typeof window.executeAutoBackupToFile === 'function') {
+                        await window.executeAutoBackupToFile(true);
+                    }
+                    // مهلة بصرية قصيرة جداً (350ms) لإتمام الرسم والحفظ بسلاسة
+                    await new Promise(r => setTimeout(r, 350));
+                }
+            } catch (err) {
+                console.error("Backup before quit error:", err);
+            } finally {
+                // إكمال عملية الخروج بأمان بعد إنهاء النسخ الاحتياطي
+                if (electron && electron.ipcRenderer) {
+                    electron.ipcRenderer.send('proceed-quit');
+                }
+            }
         });
     }
 } catch (e) {
     console.log("Not running in Electron environment or ipcRenderer unavailable.");
 }
+
+// دعم تحذير الخروج في المتصفح العادي (Browser) عند وجود بيانات غير محفوظة
+window.addEventListener('beforeunload', (e) => {
+    // في بيئة Electron نتخطى هذا لأن main.js يدير دورة الإغلاق والأمان كاملاً
+    try {
+        if (typeof window !== 'undefined' && window.require && window.require('electron')) return;
+    } catch(err) {}
+
+    const unsaved = (typeof window.checkUnsavedDataInAllTabs === 'function')
+        ? window.checkUnsavedDataInAllTabs()
+        : null;
+
+    if (unsaved && unsaved.hasUnsaved) {
+        e.preventDefault();
+        e.returnValue = `تنبيه: توجد بيانات غير محفوظة في (${unsaved.tabLabel}).`;
+        return e.returnValue;
+    }
+});

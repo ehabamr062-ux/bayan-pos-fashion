@@ -50,6 +50,257 @@
         window.debouncedHandleSupplierSearch = debouncedHandleSupplierSearch;
         window.debouncedHandlePurchaseSearch = debouncedHandlePurchaseSearch;
 
+        // ============================================================
+        //  محرك البحث الذكي الموحد والمرتب للأصناف (Smart Ranked Product Search)
+        // ============================================================
+        function normalizeSearchQuery(text) {
+            if (text === null || text === undefined) return '';
+            const arabicDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+            const persianDigits = ['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
+            
+            let s = String(text).trim().toLowerCase();
+            
+            // تحويل الأرقام العربية والفارسية إلى أرقام إنجليزية موحدة (0-9)
+            for (let i = 0; i < 10; i++) {
+                s = s.split(arabicDigits[i]).join(String(i));
+                s = s.split(persianDigits[i]).join(String(i));
+            }
+            
+            // تطبيع الحروف العربية وإزالة التشكيل والتطويل
+            return s
+                .replace(/[أإآٱ]/g, 'ا')
+                .replace(/ة/g, 'ه')
+                .replace(/[ىي]/g, 'ي')
+                .replace(/ؤ/g, 'و')
+                .replace(/ئ/g, 'ي')
+                .replace(/[\u064B-\u065F\u0670]/g, '') // إزالة علامات التشكيل
+                .replace(/\u0640/g, '') // إزالة التطويل (الكشيدة)
+                .replace(/\s+/g, ' ');
+        }
+        window.normalizeSearchQuery = normalizeSearchQuery;
+
+        function getProductSearchTokens(p) {
+            const currentVer = p.editDate || p.updatedAt || p.price || 1;
+            if (p._searchTokens && p._searchTokensVer === currentVer) {
+                return p._searchTokens;
+            }
+            const rawName = String(p.name || '').trim();
+            const normName = normalizeSearchQuery(rawName);
+            const rawBarcode = String(p.barcode || '').trim();
+            const normBarcode = normalizeSearchQuery(rawBarcode);
+            const lowerBarcode = rawBarcode.toLowerCase();
+            const rawCode = String(p.code || p.sysCode || '').trim();
+            const normCode = normalizeSearchQuery(rawCode);
+            const lowerCode = rawCode.toLowerCase();
+            const rawModelCode = String(p.modelCode || p.model_code || p.model || '').trim();
+            const normModelCode = normalizeSearchQuery(rawModelCode);
+            const lowerModelCode = rawModelCode.toLowerCase();
+            const rawDirectSize = String(p.size || p.itemSize || '').trim();
+            const normDirectSize = normalizeSearchQuery(rawDirectSize);
+
+            const variantTokens = [];
+            if (p.variants && Array.isArray(p.variants)) {
+                for (let j = 0; j < p.variants.length; j++) {
+                    const v = p.variants[j];
+                    if (!v) continue;
+                    const vBarcode = String(v.barcode || '').trim();
+                    const vCode = String(v.code || '').trim();
+                    variantTokens.push({
+                        vBarcode,
+                        lowerVBarcode: vBarcode.toLowerCase(),
+                        normVBarcode: vBarcode ? normalizeSearchQuery(vBarcode) : '',
+                        vCode,
+                        lowerVCode: vCode.toLowerCase(),
+                        normVCode: vCode ? normalizeSearchQuery(vCode) : '',
+                        normVSize: v.size ? normalizeSearchQuery(v.size) : '',
+                        normVColor: v.color ? normalizeSearchQuery(v.color) : ''
+                    });
+                }
+            }
+
+            const unitTokens = [];
+            if (p.units && Array.isArray(p.units)) {
+                for (let k = 0; k < p.units.length; k++) {
+                    const u = p.units[k];
+                    if (!u) continue;
+                    const uBarcode = String(u.unitBarcode || '').trim();
+                    unitTokens.push({
+                        uBarcode,
+                        lowerUBarcode: uBarcode.toLowerCase(),
+                        normUBarcode: uBarcode ? normalizeSearchQuery(uBarcode) : '',
+                        normUName: u.unitName ? normalizeSearchQuery(u.unitName) : ''
+                    });
+                }
+            }
+
+            const tokens = {
+                rawName, normName,
+                rawBarcode, normBarcode, lowerBarcode,
+                rawCode, normCode, lowerCode,
+                rawModelCode, normModelCode, lowerModelCode,
+                rawDirectSize, normDirectSize,
+                variantTokens,
+                unitTokens
+            };
+            p._searchTokens = tokens;
+            p._searchTokensVer = currentVer;
+            return tokens;
+        }
+
+        function searchProductsRanked(query, options = {}) {
+            if (!query || typeof query !== 'string' || !query.trim()) return [];
+            
+            const rawQuery = String(query).trim();
+            const normQuery = normalizeSearchQuery(rawQuery);
+            const lowerQuery = rawQuery.toLowerCase();
+            if (!normQuery) return [];
+
+            // استخراج نص الاستعلام بعد حذف بادئات مثل "مقاس" أو "نمرة" للبحث الدقيق بالمقاس
+            const queryWithoutSize = normQuery.replace(/^(مقاس|نمرة|نمره|size)\s*/i, '').trim();
+
+            const list = options.products || 
+                ((typeof productsDB !== 'undefined' && Array.isArray(productsDB) && productsDB.length > 0)
+                    ? productsDB 
+                    : (window.productsDB || []));
+
+            // إذا لم يتم تحديد حد صريح، نعرض جميع النتائج بلا استثناء وبدون تقييد بـ 50 أو غيره
+            const limit = (options.limit && typeof options.limit === 'number' && options.limit > 0) ? options.limit : Infinity;
+            const scored = [];
+
+            for (let i = 0; i < list.length; i++) {
+                const p = list[i];
+                if (!p) continue;
+                if (options.filterDeleted !== false && p.isDeleted) continue;
+
+                const tok = getProductSearchTokens(p);
+                let score = 0;
+
+                // 1. تطابق تام مع اسم الصنف (أعلى أولوية مطلقة - مثل صنف اسمه "14")
+                if (tok.normName === normQuery) {
+                    score = Math.max(score, 25000);
+                }
+
+                // 2. تطابق تام مع الباركود الأساسي
+                if (tok.normBarcode === normQuery || tok.lowerBarcode === lowerQuery) {
+                    score = Math.max(score, 22000);
+                }
+
+                // 3. تطابق تام مع كود الصنف أو كود الموديل
+                if (tok.normCode === normQuery || tok.lowerCode === lowerQuery || 
+                    tok.normModelCode === normQuery || tok.lowerModelCode === lowerQuery) {
+                    score = Math.max(score, 20000);
+                }
+
+                // 4. فحص تطابق باركود التشكيلات (المقاسات والألوان) والوحدات
+                if (tok.variantTokens.length > 0) {
+                    for (let j = 0; j < tok.variantTokens.length; j++) {
+                        const vt = tok.variantTokens[j];
+                        if (vt.vBarcode) {
+                            if (vt.normVBarcode === normQuery || vt.lowerVBarcode === lowerQuery) {
+                                score = Math.max(score, 18000);
+                                break;
+                            } else if (vt.normVBarcode.startsWith(normQuery)) {
+                                score = Math.max(score, 3500);
+                            } else if (vt.normVBarcode.includes(normQuery)) {
+                                score = Math.max(score, 1200);
+                            }
+                        }
+                        if (vt.vCode) {
+                            if (vt.normVCode === normQuery || vt.lowerVCode === lowerQuery) {
+                                score = Math.max(score, 17500);
+                                break;
+                            }
+                        }
+
+                        // 🌟 البحث بالمقاس في التشكيلات بدقة كاملة
+                        if (vt.normVSize && (vt.normVSize === normQuery || (queryWithoutSize && vt.normVSize === queryWithoutSize))) {
+                            score = Math.max(score, 14000);
+                        } else if (vt.normVColor && (vt.normVColor === normQuery || vt.normVColor.includes(normQuery))) {
+                            score = Math.max(score, 5500);
+                        } else if (vt.normVSize && queryWithoutSize && vt.normVSize.includes(queryWithoutSize)) {
+                            score = Math.max(score, 5000);
+                        }
+                    }
+                }
+
+                // فحص المقاس المباشر على الصنف إن وجد
+                if (tok.normDirectSize) {
+                    if (tok.normDirectSize === normQuery || (queryWithoutSize && tok.normDirectSize === queryWithoutSize)) {
+                        score = Math.max(score, 14000);
+                    } else if (queryWithoutSize && tok.normDirectSize.includes(queryWithoutSize)) {
+                        score = Math.max(score, 5000);
+                    }
+                }
+
+                if (tok.unitTokens.length > 0) {
+                    for (let k = 0; k < tok.unitTokens.length; k++) {
+                        const ut = tok.unitTokens[k];
+                        if (ut.uBarcode) {
+                            if (ut.normUBarcode === normQuery || ut.lowerUBarcode === lowerQuery) {
+                                score = Math.max(score, 17000);
+                                break;
+                            } else if (ut.normUBarcode.startsWith(normQuery)) {
+                                score = Math.max(score, 3400);
+                            } else if (ut.normUBarcode.includes(normQuery)) {
+                                score = Math.max(score, 1100);
+                            }
+                        }
+                        if (ut.normUName && ut.normUName === normQuery) {
+                            score = Math.max(score, 4000);
+                        }
+                    }
+                }
+
+                // 5. الاسم يبدأ بنص البحث (حتى لو حرف واحد مثل "ب")
+                if (tok.normName.startsWith(normQuery)) {
+                    const lengthDiff = Math.max(0, tok.normName.length - normQuery.length);
+                    score = Math.max(score, 10000 - Math.min(lengthDiff * 5, 2000));
+                }
+
+                // 6. كلمة كاملة مطابقة في الاسم
+                if (score < 9000) {
+                    const words = tok.normName.split(/\s+/);
+                    if (words.includes(normQuery)) {
+                        score = Math.max(score, 8500);
+                    }
+                }
+
+                // 7. الاسم يحتوي على نص البحث في أي مكان (حتى لو حرف واحد)
+                if (score < 7000) {
+                    const idx = tok.normName.indexOf(normQuery);
+                    if (idx !== -1) {
+                        score = Math.max(score, 5000 - Math.min(idx * 20, 1500));
+                    }
+                }
+
+                // 8. كود الصنف أو كود الموديل يبدأ أو يحتوي على نص البحث
+                if ((tok.normCode && tok.normCode.startsWith(normQuery)) || (tok.normModelCode && tok.normModelCode.startsWith(normQuery))) {
+                    score = Math.max(score, 6000);
+                } else if ((tok.normCode && tok.normCode.includes(normQuery)) || (tok.normModelCode && tok.normModelCode.includes(normQuery))) {
+                    score = Math.max(score, 3000);
+                }
+
+                // 9. الباركود يبدأ أو يحتوي على نص البحث
+                if (tok.normBarcode && tok.normBarcode.startsWith(normQuery)) {
+                    score = Math.max(score, 3800);
+                } else if (tok.normBarcode && tok.normBarcode.includes(normQuery)) {
+                    score = Math.max(score, 1800);
+                }
+
+                if (score > 0) {
+                    scored.push({ item: p, score: score });
+                }
+            }
+
+            // ترتيب النتائج تنازلياً حسب درجة المطابقة
+            scored.sort((a, b) => b.score - a.score);
+
+            // إذا كان الحد غير نهائي نرجع جميع النتائج بلا استثناء
+            const results = (limit === Infinity) ? scored.map(entry => entry.item) : scored.slice(0, limit).map(entry => entry.item);
+            return results;
+        }
+        window.searchProductsRanked = searchProductsRanked;
+
 
 
         async function getUniqueHWID() {
@@ -163,7 +414,9 @@
             };
             auditLogs.push(entry);
             console.log(`🛡️ Audit Log: ${action}`, entry);
-            saveData();
+            if (typeof db !== 'undefined' && db.auditLogs) {
+                db.auditLogs.add(entry).catch(() => {});
+            }
         }
         let returnCart = [];
         let purReturnCart = [];
@@ -218,7 +471,55 @@
             }
         }
 
-        // --- دالة توليد الأرقام المتسلسلة الآمنة والفائقة السرعة ---
+        // دالة الفحص الصارم لنوع الحركة لمنع التداخل بين البيع والشراء والمرتجعات
+        function isTransactionOfType(t, typeKeyword) {
+            if (!t || !t.type) return false;
+            const typeStr = String(t.type);
+            if (!typeKeyword) return true;
+            
+            if (typeKeyword === 'مرتجع بيع') {
+                return typeStr.includes('مرتجع') && typeStr.includes('بيع');
+            }
+            if (typeKeyword === 'مرتجع شراء') {
+                return typeStr.includes('مرتجع') && typeStr.includes('شراء');
+            }
+            if (typeKeyword === 'بيع') {
+                return typeStr.includes('بيع') && !typeStr.includes('مرتجع');
+            }
+            if (typeKeyword === 'شراء') {
+                return typeStr.includes('شراء') && !typeStr.includes('مرتجع');
+            }
+            if (typeKeyword === 'تسوية') {
+                return typeStr.includes('تسوية');
+            }
+            if (typeKeyword === 'قبض') {
+                return typeStr.includes('قبض');
+            }
+            if (typeKeyword === 'صرف') {
+                return typeStr.includes('صرف');
+            }
+            return typeStr.includes(typeKeyword);
+        }
+        window.isTransactionOfType = isTransactionOfType;
+
+        // دالة استخراج الرقم المتسلسل الفعلي مع عزل بادئات الأجهزة
+        function extractNumericInvoiceId(invoiceId, devPrefix = '') {
+            if (invoiceId === null || invoiceId === undefined || invoiceId === '') return 0;
+            let raw = String(invoiceId).trim();
+            if (devPrefix && raw.startsWith(devPrefix)) {
+                raw = raw.slice(devPrefix.length);
+            }
+            const match = raw.match(/\d+/);
+            if (match) {
+                const num = parseInt(match[0], 10);
+                return isNaN(num) ? 0 : num;
+            }
+            return 0;
+        }
+        window.extractNumericInvoiceId = extractNumericInvoiceId;
+
+        // --- دالة توليد الأرقام المتسلسلة (دالة قراءة نقية Pure Read Function) ---
+        // تحسب الرقم المتتالي دون أي تعديل أو زيادة في الذاكرة الدائمة
         function getNextSequence(typeKeyword) {
             const list = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
             const isTablet = (typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer);
@@ -230,20 +531,60 @@
                 devPrefix = shortCode ? `T${shortCode}-` : 'T-';
             }
 
-            const maxId = list.reduce((max, t) => {
-                if (!typeKeyword || (t.type && t.type.includes(typeKeyword))) {
-                    let raw = String(t.invoiceId || '');
-                    if (devPrefix && raw.startsWith(devPrefix)) {
-                        raw = raw.slice(devPrefix.length);
-                    }
-                    const num = parseInt(raw, 10);
-                    if (!isNaN(num) && num > max) return num;
+            // 1. حساب أقصى رقم موجود في الحركات المحملة بالذاكرة
+            let maxId = 0;
+            for (let i = 0; i < list.length; i++) {
+                const t = list[i];
+                if (isTransactionOfType(t, typeKeyword)) {
+                    const num = extractNumericInvoiceId(t.invoiceId, devPrefix);
+                    if (num > maxId) maxId = num;
                 }
-                return max;
-            }, 0);
+            }
+
+            // 2. فحص أقصى رقم مسجل ومزامن من قاعدة البيانات (حتى لو لم تكن كل الفواتير السابقة محملة بذاكرة اليوم)
+            if (typeKeyword) {
+                const key = 'bayan_last_seq_' + (devPrefix || '') + typeKeyword;
+                const storedVal = (typeof getStore === 'function' ? getStore(key) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null);
+                const storedMax = parseInt(storedVal || '0', 10);
+                if (!isNaN(storedMax) && storedMax > maxId) {
+                    maxId = storedMax;
+                }
+            }
+
+            // 3. الرقم التالي هو أقصى رقم مسجل + 1
             const nextNum = maxId + 1;
             return devPrefix ? `${devPrefix}${nextNum}` : nextNum;
         }
+        window.getNextSequence = getNextSequence;
+
+        // دالة تحديث أقصى رقم متسلسل مسجل (تُستدعى فقط وحصرياً عند نجاح حفظ الفاتورة في قاعدة البيانات)
+        function updateLastSavedSequence(typeKeyword, invoiceId) {
+            if (!typeKeyword || invoiceId === null || invoiceId === undefined) return;
+            const isTablet = (typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer);
+            const savedPrefix = (typeof getStore === 'function') ? getStore('bayan_device_prefix') : null;
+            let devPrefix = (savedPrefix !== null && savedPrefix !== undefined && savedPrefix !== '') ? savedPrefix : '';
+            if (!devPrefix && isTablet) {
+                const dId = (window.BayanNetworkHub && window.BayanNetworkHub.deviceId) ? String(window.BayanNetworkHub.deviceId) : '';
+                const shortCode = dId ? dId.replace(/^DEV-/i, '').substring(0, 3).toUpperCase() : '';
+                devPrefix = shortCode ? `T${shortCode}-` : 'T-';
+            }
+            const num = extractNumericInvoiceId(invoiceId, devPrefix);
+            if (num > 0) {
+                const key = 'bayan_last_seq_' + (devPrefix || '') + typeKeyword;
+                const storedVal = (typeof getStore === 'function' ? getStore(key) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null);
+                const currentStored = parseInt(storedVal || '0', 10);
+                if (num > currentStored || isNaN(currentStored)) {
+                    if (typeof setStore === 'function') {
+                        setStore(key, String(num));
+                    }
+                    if (typeof localStorage !== 'undefined') {
+                        try { localStorage.setItem(key, String(num)); } catch(e) {}
+                    }
+                }
+            }
+        }
+        window.updateLastSavedSequence = updateLastSavedSequence;
+
 
         // --- مراقبة حالة الاتصال (Offline/Online) المباشرة والدورية ---
         window.addEventListener('online', () => updateConnectionStatus(true));
@@ -619,8 +960,9 @@
 
             // 5. التحويلات الواردة المعلقة
             const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
+            const isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.name === 'المدير';
             const allPendingTransfers = (typeof transactions !== 'undefined' && Array.isArray(transactions))
-                ? transactions.filter(t => t.type && t.type.includes('تحويل') && t.transferStatus === 'pending' && (t.warehouse === activeWH || t.toWarehouse === activeWH))
+                ? transactions.filter(t => t.type && t.type.includes('تحويل') && t.transferStatus === 'pending' && (isAdmin || t.warehouse === activeWH || t.toWarehouse === activeWH))
                 : [];
             const pendingTransferInvoices = {};
             allPendingTransfers.forEach(t => {
@@ -768,8 +1110,11 @@
                 window.acknowledgedDelayed = window.acknowledgedDelayed.filter(x => x !== targetIdStr);
                 setStore('acknowledged_delayed', JSON.stringify(window.acknowledgedDelayed));
             } else if (type === 'transfer') {
-                window.acknowledgedTransfers = window.acknowledgedTransfers.filter(x => x !== targetIdStr);
-                setStore('acknowledged_transfers', JSON.stringify(window.acknowledgedTransfers));
+                // 🔒 أذونات التحويل المستلمة أو المرفوضة معتمدة محاسبياً ونهائية ولا يمكن استعادتها لعدم الإخلال بأرصدة المخازن
+                if (typeof showToast === 'function') {
+                    showToast("⚠️ أذونات التحويل المخزني معتمدة ونهائية ولا يمكن إلغاء استلامها من هنا لعدم الإخلال بأرصدة المخازن.", "warning");
+                }
+                return;
             } else if (type === 'cloud') {
                 window.acknowledgedCloud = window.acknowledgedCloud.filter(x => x !== targetIdStr);
                 setStore('acknowledged_cloud', JSON.stringify(window.acknowledgedCloud));
@@ -832,41 +1177,40 @@
             }
         };
 
-        // مسح سجل الاستلام أو تصفيره
+        // مسح سجل الاستلام أو تصفيره (مع الحفاظ على سجلات التحويلات المخزنية المعتمدة)
         window.clearReceiptLog = function() {
             if (!window.bayanReceiptLog || window.bayanReceiptLog.length === 0) return;
-            if (confirm("هل أنت متأكد من مسح بيانات سجل الاستلام المؤرشفة نهائياً؟\n(لن يؤثر ذلك على التنبيهات النشطة)")) {
-                window.bayanReceiptLog = [];
-                setStore('bayan_receipt_log', JSON.stringify([]));
+            if (confirm("هل أنت متأكد من مسح بيانات سجل الاستلام المؤرشفة؟\n(تظل أذونات التحويل المخزني موثقة ومعتمدة للحفاظ على الأرصدة)")) {
+                window.bayanReceiptLog = (window.bayanReceiptLog || []).filter(x => x.type === 'transfer');
+                setStore('bayan_receipt_log', JSON.stringify(window.bayanReceiptLog));
                 if (typeof showNotificationsModal === 'function') {
                     showNotificationsModal('archived');
                 }
-                showToast("🗑️ تم مسح سجل الاستلام بنجاح.");
+                showToast("🗑️ تم مسح سجل الاستلام بنجاح وبقيت أذونات التحويل موثقة.");
             }
         };
 
         // استعادة كافة التنبيهات من سجل الاستلام للنشط
         window.resetAcknowledgedNotifications = function() {
-            if (confirm("هل أنت متأكد من استعادة كافة التنبيهات المستلمة والمؤرشفة إلى القوائم النشطة وتصفير السجل؟")) {
+            if (confirm("هل أنت متأكد من استعادة كافة التنبيهات المستلمة (البضاعة والحسابات) إلى القوائم النشطة؟\n(ملاحظة: أذونات التحويل المخزني تظل معتمدة وموثقة نهائياً لحماية الأرصدة)")) {
                 window.acknowledgedLowStock = [];
                 window.acknowledgedExpiry = [];
                 window.acknowledgedDebt = [];
                 window.acknowledgedDelayed = [];
-                window.acknowledgedTransfers = [];
                 window.acknowledgedCloud = [];
-                window.bayanReceiptLog = [];
+                // الحفاظ على قيود التحويلات المعتمدة نهائياً
+                window.bayanReceiptLog = (window.bayanReceiptLog || []).filter(x => x.type === 'transfer');
                 removeStore('acknowledged_low_stock');
                 removeStore('acknowledged_expiry');
                 removeStore('acknowledged_debt');
                 removeStore('acknowledged_delayed');
-                removeStore('acknowledged_transfers');
                 removeStore('acknowledged_cloud');
-                removeStore('bayan_receipt_log');
+                setStore('bayan_receipt_log', JSON.stringify(window.bayanReceiptLog));
                 updateNotifications();
                 if (typeof showNotificationsModal === 'function') {
                     showNotificationsModal('archived');
                 }
-                showToast("🔄 تم تصفير سجل الاستلام واستعادة كافة التنبيهات للقوائم النشطة");
+                showToast("🔄 تم استعادة تنبيهات البضاعة والحسابات للقوائم النشطة وبقيت أذونات التحويل معتمدة نهائياً.");
             }
         };
 
@@ -1187,8 +1531,180 @@
             if (select) return select.value;
 
             const btn = document.querySelector('#' + sectionId + ' .method-btn.selected');
-            return btn ? btn.innerText.trim() : 'نقدي';
+            return btn ? btn.innerText.trim() : 'كاش (نقدي)';
         }
+        window.getSelectedPaymentMethod = getSelectedPaymentMethod;
+
+        /**
+         * 💳 دالة مركزية ذكية وموحدة لقراءة وتنسيق طريقة الدفع ديناميكياً
+         * تقرأ وسيلة الدفع المسجلة بالفاتورة كما هي بالضبط دون مسخها أو تحويلها قسرياً إلى كاش
+         * وتستنتج الأيقونة واللون والنوع بناءً على إعدادات المستخدم والنظام.
+         */
+        window.formatPaymentMethodDisplay = function(txOrMethod, options = {}) {
+            if (!txOrMethod) return '💵 نقدي (كاش)';
+
+            let methodRaw = '';
+            let paidVal = 0;
+            let remainingVal = 0;
+            let isDeferred = false;
+            let finalTotal = 0;
+
+            if (typeof txOrMethod === 'object' && txOrMethod !== null) {
+                const tx = txOrMethod;
+                methodRaw = String(tx.method || tx.paymentMethod || '').trim();
+                paidVal = parseFloat(tx.paidAmount != null ? tx.paidAmount : (tx.paid != null ? tx.paid : 0)) || 0;
+                finalTotal = parseFloat(tx.invoiceGrandTotal || tx.finalTotal || tx.grandTotal || tx.total || 0) || 0;
+                remainingVal = parseFloat(tx.deferred != null ? tx.deferred : (tx.remaining != null ? tx.remaining : (finalTotal - paidVal)));
+                if (isNaN(remainingVal) || remainingVal < 0) remainingVal = 0;
+
+                isDeferred = (options.isDeferred !== undefined) 
+                    ? options.isDeferred 
+                    : (methodRaw.includes('آجل') || methodRaw.includes('أجل') || methodRaw.includes('ذمم') || methodRaw.includes('deferred') || methodRaw.includes('credit') || remainingVal > 0.001);
+            } else {
+                methodRaw = String(txOrMethod).trim();
+                paidVal = parseFloat(options.paidVal || 0) || 0;
+                remainingVal = parseFloat(options.remainingVal || 0) || 0;
+                isDeferred = (options.isDeferred !== undefined) ? !!options.isDeferred : (methodRaw.includes('آجل') || methodRaw.includes('أجل') || methodRaw.includes('ذمم'));
+            }
+
+            if (options.paidVal !== undefined) paidVal = parseFloat(options.paidVal) || 0;
+            if (options.remainingVal !== undefined) remainingVal = parseFloat(options.remainingVal) || 0;
+            if (options.isDeferred !== undefined) isDeferred = !!options.isDeferred;
+
+            // 1. التعامل مع الفاتورة الآجلة أو السداد الجزئي
+            if (isDeferred) {
+                if (paidVal > 0.001 && remainingVal > 0.001) {
+                    const subMethodClean = methodRaw && !methodRaw.includes('آجل') && !methodRaw.includes('أجل') ? ` (${methodRaw})` : '';
+                    return options.asBadge 
+                        ? `<span class="stock-badge" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; font-weight:800;" title="سداد جزئي">⏳ آجل${subMethodClean}</span>`
+                        : `⏳ آجل (سداد جزئي${subMethodClean ? ': ' + methodRaw : ''})`;
+                } else {
+                    return options.asBadge
+                        ? `<span class="stock-badge" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; font-weight:800;" title="آجل ذمم">⏳ آجل (ذمم)</span>`
+                        : `⏳ آجل (ذمم)`;
+                }
+            }
+
+            // إذا لم يكن هناك اسم طريقة مسجل
+            if (!methodRaw) {
+                return options.asBadge
+                    ? `<span class="stock-badge" style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; font-weight:800;">💵 نقدي (كاش)</span>`
+                    : `💵 نقدي (كاش)`;
+            }
+
+            // 2. فحص ذكي للأيقونة واللون المناسب لاسم وسيلة الدفع المسجلة
+            let icon = '💳';
+            let badgeBg = '#f0f9ff';
+            let badgeColor = '#0369a1';
+            let badgeBorder = '#bae6fd';
+
+            const lower = methodRaw.toLowerCase();
+
+            if (lower.includes('فودافون') || lower.includes('اورنج') || lower.includes('أورانج') || lower.includes('اتصالات') || lower.includes('وي باي') || lower.includes('محفظة') || (lower.includes('كاش') && (lower.includes('فودافون') || lower.includes('اورنج') || lower.includes('اتصالات') || lower.includes('we'))) || lower.includes('wallet')) {
+                icon = '📱';
+                badgeBg = '#fdf2f8';
+                badgeColor = '#9d174d';
+                badgeBorder = '#fbcfe8';
+            } else if (lower.includes('انستاباي') || lower.includes('إنستاباي') || lower.includes('insta')) {
+                icon = '⚡';
+                badgeBg = '#eff6ff';
+                badgeColor = '#1d4ed8';
+                badgeBorder = '#bfdbfe';
+            } else if (lower.includes('فيزا') || lower.includes('ماستر') || lower.includes('visa') || lower.includes('master') || lower.includes('مدى') || lower.includes('شبكة') || lower.includes('كارت') || lower.includes('بطاقة') || lower.includes('card')) {
+                icon = '💳';
+                badgeBg = '#f0fdf4';
+                badgeColor = '#15803d';
+                badgeBorder = '#bbf7d0';
+            } else if (lower.includes('بنك') || lower.includes('تحويل') || lower.includes('bank') || lower.includes('حساب') || lower.includes('iban')) {
+                icon = '🏦';
+                badgeBg = '#f8fafc';
+                badgeColor = '#334155';
+                badgeBorder = '#cbd5e1';
+            } else if (lower.includes('شيك')) {
+                icon = '📑';
+                badgeBg = '#faf5ff';
+                badgeColor = '#6b21a8';
+                badgeBorder = '#e9d5ff';
+            } else if (lower.includes('خصم من حساب') || lower.includes('رصيد')) {
+                icon = '👤';
+                badgeBg = '#fefce8';
+                badgeColor = '#854d0e';
+                badgeBorder = '#fef08a';
+            } else if (lower.includes('نقدي') || lower.includes('كاش') || lower.includes('نقد') || lower.includes('cash')) {
+                icon = '💵';
+                badgeBg = '#ecfdf5';
+                badgeColor = '#047857';
+                badgeBorder = '#a7f3d0';
+            } else {
+                // وسيلة دفع مخصصة أضافها المستخدم (أمان، فوري، إلخ)
+                let userDef = null;
+                if (typeof getPaymentMethods === 'function') {
+                    const allMethods = getPaymentMethods();
+                    userDef = allMethods.find(m => m.name === methodRaw || m.id === methodRaw);
+                }
+                if (userDef) {
+                    if (userDef.type === 'cash') {
+                        icon = '💵';
+                        badgeBg = '#ecfdf5';
+                        badgeColor = '#047857';
+                        badgeBorder = '#a7f3d0';
+                    } else if (userDef.type === 'credit') {
+                        icon = '⏳';
+                        badgeBg = '#fffbeb';
+                        badgeColor = '#b45309';
+                        badgeBorder = '#fde68a';
+                    } else {
+                        icon = '💳';
+                        badgeBg = '#f0f9ff';
+                        badgeColor = '#0369a1';
+                        badgeBorder = '#bae6fd';
+                    }
+                } else {
+                    icon = '💳';
+                }
+            }
+
+            // تنظيف البادئة إذا كان الاسم يحتوي بالفعل على أيقونة لتجنب التكرار
+            let cleanName = methodRaw.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+/u, '').trim();
+            if (!cleanName) cleanName = methodRaw;
+
+            const fullText = `${icon} ${cleanName}`;
+
+            if (options.asBadge) {
+                return `<span class="stock-badge" style="background:${badgeBg}; color:${badgeColor}; border:1px solid ${badgeBorder}; font-weight:800;" title="طريقة الدفع: ${cleanName}">${fullText}</span>`;
+            }
+
+            return fullText;
+        };
+
+        /**
+         * 📱 دالة مركزية للتحقق مما إذا كانت طريقة الدفع بنكية أو إلكترونية أو محفظة (غير كاش بالدرج)
+         */
+        window.isNonCashPaymentMethod = function(m) {
+            if (!m) return false;
+            let str = String(m).toLowerCase().trim();
+            str = str.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+/u, '').trim() || str;
+            return str.includes('بنك') || str.includes('تحويل') || str.includes('فيزا') || 
+                   str.includes('شيك') || str.includes('شبكة') || str.includes('فودافون') || 
+                   str.includes('فودافن') || str.includes('vodafone') || str.includes('voda') || 
+                   str.includes('اورنج') || str.includes('أورانج') || str.includes('orange') || 
+                   str.includes('اتصالات') || str.includes('etisalat') || str.includes('وي') || 
+                   str.includes('we') || str.includes('انستاباي') || str.includes('إنستاباي') || 
+                   str.includes('انستا') || str.includes('insta') || str.includes('محفظة') || 
+                   str.includes('wallet') || str.includes('مدى') || str.includes('mada') || 
+                   str.includes('master') || str.includes('بطاقة') || str.includes('card') ||
+                   str === 'vodafone_cash';
+        };
+
+        /**
+         * 📱 دالة مركزية للتحقق مما إذا كانت طريقة الدفع هي فودافون كاش
+         */
+        window.isVodafonePaymentMethod = function(m) {
+            if (!m) return false;
+            let str = String(m).toLowerCase().trim();
+            str = str.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+/u, '').trim() || str;
+            return str.includes('فودافون') || str.includes('فودافن') || str.includes('vodafone') || str.includes('voda') || str === 'vodafone_cash';
+        };
 
         // --- 3. الوظائف التشغيلية (حفظ، طباعة) ---
 
@@ -1385,7 +1901,7 @@
                 } catch(e) {}
             }
 
-            const allCols = ["0","1","quick","3","13","10","11","9","12","detailed","6","7","8","5","4","margin","2","internal"];
+            const allCols = ["0","1","quick","3","13","10","11","9","image","12","detailed","6","7","8","5","4","margin","2","internal"];
             allCols.forEach(idx => {
                 const show = inventoryColumnVisibility[idx] !== false;
                 const cells = document.querySelectorAll(`.col-inv-${idx}`);
@@ -1422,6 +1938,9 @@
         }
 
         function handleProductImage(event) {
+            if (typeof window.handleProductImage === 'function' && window.handleProductImage !== handleProductImage) {
+                return window.handleProductImage(event);
+            }
             const file = event && event.target && event.target.files ? event.target.files[0] : null;
             if (!file) return;
             const reader = new FileReader();
@@ -1859,6 +2378,66 @@
                 window.open('https://wa.me/201006825905', '_blank');
             }
         }
+        window.contactDeveloper = contactDeveloper;
+
+        async function openAnyDeskDirectly(specificCode) {
+            const input = document.getElementById('bayanAnyDeskInput');
+            const rawCode = (specificCode !== undefined && specificCode !== null) ? specificCode : (input ? input.value : '');
+            const cleanCode = String(rawCode || '').replace(/[^a-zA-Z0-9@._-]/g, '').trim();
+
+            if (typeof showToast === 'function') {
+                showToast(cleanCode ? `🖥️ جاري فتح AnyDesk والاتصال بالكود: ${cleanCode}...` : '🖥️ جاري فتح تطبيق AnyDesk على جهازك...', 'info');
+            }
+
+            // 1. المحاولة عبر IPC في بيئة Electron (تشغيل مباشر وسريع بدون أي وسائط خارجية)
+            try {
+                if (window.require) {
+                    const { ipcRenderer } = window.require('electron');
+                    if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                        const res = await ipcRenderer.invoke('launch-anydesk', cleanCode);
+                        if (res && res.success) {
+                            if (typeof showToast === 'function') {
+                                showToast(cleanCode ? `✅ تم فتح AnyDesk وجاري بدء الجلسة (${cleanCode})` : '✅ تم فتح تطبيق AnyDesk بنجاح', 'success');
+                            }
+                            return;
+                        }
+                    }
+                }
+            } catch (ipcErr) {
+                console.warn('IPC launch-anydesk error:', ipcErr);
+            }
+
+            // 2. المحاولة البديلة عبر بروتوكول anydesk:
+            const protoUrl = cleanCode ? `anydesk:${cleanCode}` : 'anydesk:';
+            if (typeof window.openExternalUrl === 'function') {
+                window.openExternalUrl(protoUrl);
+            } else {
+                try {
+                    window.location.href = protoUrl;
+                } catch(e) {
+                    window.open(protoUrl, '_self');
+                }
+            }
+        }
+        window.openAnyDeskDirectly = openAnyDeskDirectly;
+        window.sendAnyDeskCodeToDev = openAnyDeskDirectly;
+
+        function copyDevPhone() {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText('01006825905').then(() => {
+                    if (typeof showToast === 'function') {
+                        showToast('✅ تم نسخ رقم هاتف المطور (01006825905) بنجاح!', 'success');
+                    } else {
+                        alert('تم نسخ الرقم بنجاح');
+                    }
+                }).catch(() => {
+                    prompt('رقم الدعم الفني:', '01006825905');
+                });
+            } else {
+                prompt('رقم الدعم الفني:', '01006825905');
+            }
+        }
+        window.copyDevPhone = copyDevPhone;
 
         // --- دوال إعدادات الخط والتبويبات ---
         function adjustFontSize(change) {
@@ -3005,4 +3584,22 @@ function populateWarehouseDropdowns() {
 }
 window.populateWarehouseDropdowns = populateWarehouseDropdowns;
 
+// 🔒 فحص أمني مركزي: هل مبالغ تقرير الحركة اليومية محمية حالياً وتتطلب إذن المدير؟
+function isDailyReportAmountsProtected() {
+    const isHidden = document.body.classList.contains('daily-amounts-hidden');
+    if (!isHidden) return false;
 
+    const curUser = (typeof currentUser !== 'undefined') ? currentUser : null;
+    const isAdmin = curUser ? (curUser.role === 'admin') : true;
+    if (isAdmin) return false;
+
+    const uTarget = (typeof users !== 'undefined' && Array.isArray(users))
+        ? (users.find(u => u.pin === curUser.pin || u.name === curUser.name) || curUser)
+        : curUser;
+
+    if (uTarget && uTarget.permissions && uTarget.permissions.general && uTarget.permissions.general.lockDailyAmounts !== undefined) {
+        return !!uTarget.permissions.general.lockDailyAmounts;
+    }
+    return true;
+}
+window.isDailyReportAmountsProtected = isDailyReportAmountsProtected;

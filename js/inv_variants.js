@@ -200,6 +200,40 @@ function isBarcodeInUseAnywhere(barcode, excludeBarcode = null) {
 }
 window.isBarcodeInUseAnywhere = isBarcodeInUseAnywhere;
 
+/**
+ * تنسيق ذكي وأنيق لبيانات المقاس واللون على ملصق وتيكت الباركود:
+ * - لو الصنف بلون فقط (مثل شنطة سوداء): يطبع "أسود" فقط ويتجاهل كلمة "قياسي" أو "موحد".
+ * - لو الصنف بمقاس فقط (مثل تيشرت XL): يطبع "XL" فقط ويتجاهل كلمة "موحد".
+ * - لو الصنف بمقاس ولون (مثل شبشب 35 أخضر): يطبع "أخضر 35".
+ * - لو الصنف عام عادي بدون مقاس ولا لون: يترك فارغاً بنظافة وشياكة.
+ */
+function formatBarcodeVariantLabel(size, color) {
+    let s = String(size || '').trim();
+    let c = String(color || '').trim();
+
+    // إزالة أي أقواس أو علامات ترقيم حول الكلمة مثل (قياسي) أو [موحد]
+    s = s.replace(/^[\(\[\{'"«]/, '').replace(/[\)\]\}'"»]$/, '').trim();
+    c = c.replace(/^[\(\[\{'"«]/, '').replace(/[\)\]\}'"»]$/, '').trim();
+
+    const dummyWords = [
+        'قياسي', 'قياسى', 'مقاس قياسي', 'مقاس قياسى',
+        'موحد', 'موحدة', 'مقاس موحد', 'مقاس موحدة', 'لون موحد',
+        'فري سايز', 'فريسايز', 'فري', 'free size', 'freesize', 'free',
+        'عام', 'عادي', 'افتراضي', 'إفتراضي', 'بدون', 'لا يوجد',
+        '-', '--', '---', '/', 'n/a', 'na', 'none', 'null', 'undefined', 'default', 'standard', 'onesize', 'one size'
+    ];
+
+    const isDummySize = !s || dummyWords.includes(s.toLowerCase());
+    const isDummyColor = !c || dummyWords.includes(c.toLowerCase());
+
+    const parts = [];
+    if (!isDummyColor) parts.push(c);
+    if (!isDummySize) parts.push(s);
+
+    return parts.join(' ');
+}
+window.formatBarcodeVariantLabel = formatBarcodeVariantLabel;
+
 async function executePrinting(modeOrTargets, copies = 1) {
     let targets = [];
     if (Array.isArray(modeOrTargets)) {
@@ -247,7 +281,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
     }
 
     const bSettings = getBarcodeLabelSettings();
-    const shopName = (document.getElementById('shopName') ? document.getElementById('shopName').value : '') || 'بيان فاشون';
+    const shopName = (document.getElementById('shopName') ? document.getElementById('shopName').value : '') || (typeof getMerchantStoreName === 'function' ? getMerchantStoreName() : '') || (typeof window.getMerchantStoreName === 'function' ? window.getMerchantStoreName() : '') || 'بيان فاشون';
     const currency = typeof getCurrencySymbol === 'function' ? getCurrencySymbol() : 'ج.م';
 
     // توسيع قائمة الأصناف لتشمل كل تركيبة مقاس ولون (Variant) كملصق مستقل ودقيق
@@ -314,7 +348,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
 
     printableItems.forEach(item => {
         const priceFormatted = (parseFloat(item.price) || 0).toFixed(2);
-        const variantText = [item.color, item.size].filter(Boolean).join(' ');
+        const variantText = formatBarcodeVariantLabel(item.size, item.color);
 
         for (let i = 0; i < item.copies; i++) {
             labelIdx++;
@@ -355,7 +389,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                         ${svgString}
                     </div>
                     <div class="bottom-row">
-                        <div class="variant-text">${variantText}</div>
+                        ${variantText ? `<div class="variant-text" title="${variantText}"><bdi>${variantText}</bdi></div>` : '<div class="variant-text"></div>'}
                         ${bSettings.showPrice ? `<div class="price-val">${priceFormatted}</div>` : ''}
                     </div>
                 </div>
@@ -396,12 +430,13 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     width: ${bSettings.width}mm;
                     margin: 0 auto;
                     padding: 0;
+                    ${parseFloat(bSettings.offsetX) ? `transform: translateX(${parseFloat(bSettings.offsetX)}mm);` : ''}
                 }
                 .barcode-label { 
                     width: ${bSettings.width}mm;
                     height: ${bSettings.height}mm;
                     max-height: ${bSettings.height}mm;
-                    padding: 0.8mm 1.4mm;
+                    padding: 0.8mm 2mm;
                     margin: 0 auto !important;
                     display: flex;
                     flex-direction: column;
@@ -427,6 +462,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     max-width: 100%;
                     text-align: center;
                     letter-spacing: 0.2px;
+                    padding: 0 1.5mm;
                 }
                 .divider-line {
                     width: 100%;
@@ -444,6 +480,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     color: #000000; 
                     line-height: 1.1; 
                     text-align: center;
+                    padding: 0 1.5mm;
                 }
                 .svg-wrap {
                     width: 100%;
@@ -467,29 +504,44 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     justify-content: space-between;
                     align-items: center;
                     width: 100%;
-                    padding: 0 0.5mm;
+                    padding: 0 1.2mm;
                     margin: 0;
-                    line-height: 1.1;
+                    line-height: 1.15;
+                    box-sizing: border-box;
                 }
                 .variant-text {
-                    font-size: ${isSmall ? '7.5pt' : '8.5pt'};
+                    font-size: ${isSmall ? '7.2pt' : '8.2pt'};
                     font-weight: 900;
                     color: #000000;
                     text-align: right;
+                    direction: rtl;
+                    unicode-bidi: isolate;
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
-                    max-width: 58%;
+                    flex: 1;
+                    min-width: 0;
+                    padding-left: 1.5mm;
+                }
+                .variant-text bdi {
+                    display: inline-block;
+                    max-width: 100%;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    vertical-align: bottom;
                 }
                 .price-val {
                     font-size: ${isSmall ? '8pt' : '9.5pt'};
                     font-weight: 900;
                     color: #000000;
                     text-align: left;
+                    direction: ltr;
                     font-family: 'Segoe UI', Arial, sans-serif;
                     white-space: nowrap;
+                    flex-shrink: 0;
                 }
                 @media print {
+                    .no-print { display: none !important; }
                     html, body { 
                         width: 100% !important; 
                         height: auto !important; 
@@ -500,10 +552,12 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     .label-container {
                         width: ${bSettings.width}mm !important;
                         margin: 0 auto !important;
+                        ${parseFloat(bSettings.offsetX) ? `transform: translateX(${parseFloat(bSettings.offsetX)}mm) !important;` : ''}
                     }
                     .barcode-label { 
                         width: ${bSettings.width}mm !important;
                         height: ${bSettings.height}mm !important;
+                        padding: 0.8mm 2mm !important;
                         border: none !important; 
                         box-shadow: none !important; 
                         page-break-after: always !important;
@@ -515,58 +569,57 @@ async function executePrinting(modeOrTargets, copies = 1) {
             </style>
         </head>
         <body>
+            <div class="no-print" style="text-align: center; margin-bottom: 12px; padding: 10px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; font-family: 'Segoe UI', Tahoma, sans-serif;">
+                <button onclick="window.print()" style="background: #2563eb; color: white; padding: 8px 22px; font-size: 15px; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-left: 8px;">🖨️ طباعة الآن</button>
+                <button onclick="window.close()" style="background: #ef4444; color: white; padding: 8px 22px; font-size: 15px; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">❌ إغلاق</button>
+            </div>
             <div class="label-container">
                 ${labelsHtml}
             </div>
+            <script>
+                function triggerPrint() {
+                    window.focus();
+                    window.print();
+                }
+                if (document.readyState === 'complete') {
+                    setTimeout(triggerPrint, 350);
+                } else {
+                    window.addEventListener('load', function() {
+                        setTimeout(triggerPrint, 350);
+                    });
+                }
+            </script>
         </body>
         </html>
     `;
 
-    // 2. استخدام Iframe مخفي فائق السرعة والموثوقية للطباعة المباشرة في Electron وكافة المتصفحات بدون اعتراض النوافذ
-    let printIframe = document.getElementById('bayan-barcode-print-iframe');
-    if (!printIframe) {
-        printIframe = document.createElement('iframe');
-        printIframe.id = 'bayan-barcode-print-iframe';
-        printIframe.style.cssText = 'position:fixed;right:100%;bottom:100%;width:0;height:0;border:none;opacity:0;pointer-events:none;';
-        document.body.appendChild(printIframe);
-    }
-
-    try {
+    // 2. استخدام نافذة طباعة مخصصة وموثوقة بنسبة 100% متوافقة مع Electron وكافة المتصفحات (نفس أسلوب طباعة الفواتير الناجح)
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+        printWindow.document.open();
+        printWindow.document.write(fullPrintHtml);
+        printWindow.document.close();
+    } else {
+        // بديل أمان فوري في حال حظر النوافذ المنبثقة بالمتصفح
+        let printIframe = document.getElementById('bayan-barcode-print-iframe');
+        if (!printIframe) {
+            printIframe = document.createElement('iframe');
+            printIframe.id = 'bayan-barcode-print-iframe';
+            printIframe.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;border:none;background:#ffffff;';
+            document.body.appendChild(printIframe);
+        }
         const pDoc = printIframe.contentWindow.document;
         pDoc.open();
         pDoc.write(fullPrintHtml);
         pDoc.close();
-
         setTimeout(() => {
             try {
                 printIframe.contentWindow.focus();
                 printIframe.contentWindow.print();
-            } catch (frameErr) {
-                console.warn("Barcode iframe print error:", frameErr);
-                const printWindow = window.open('', '_blank', 'width=800,height=600');
-                if (printWindow) {
-                    printWindow.document.open();
-                    printWindow.document.write(fullPrintHtml);
-                    printWindow.document.close();
-                    setTimeout(() => {
-                        printWindow.focus();
-                        printWindow.print();
-                    }, 400);
-                }
+            } catch(e) {
+                console.error("Iframe print error:", e);
             }
         }, 400);
-    } catch(err) {
-        console.error("Barcode print execution error:", err);
-        const printWindow = window.open('', '_blank', 'width=800,height=600');
-        if (printWindow) {
-            printWindow.document.open();
-            printWindow.document.write(fullPrintHtml);
-            printWindow.document.close();
-            setTimeout(() => {
-                printWindow.focus();
-                printWindow.print();
-            }, 400);
-        }
     }
 }
 window.executePrinting = executePrinting;
@@ -994,13 +1047,25 @@ function renderSmartMatrixView() {
     let grandTotalStock = 0;
 
     let tableHtml = `
-        <table class="bayan-table" style="margin: 0; width: 100%; font-size: 0.88rem; text-align: center; border-collapse: collapse;">
-            <thead style="position: sticky; top: 0; background: #1e293b; color: white; z-index: 5;">
+        <table class="bayan-table" style="margin: 0; width: 100%; font-size: 0.88rem; text-align: center; border-collapse: separate; border-spacing: 0; border: 2px solid #64748b; border-radius: 8px; overflow: hidden;">
+            <thead style="position: sticky; top: 0; background: #0f172a; color: white; z-index: 5;">
                 <tr>
-                    <th style="padding: 10px 14px; width: 130px; border-bottom: 2px solid #334155;">اللون / المقاس</th>
-                    ${sizes.map(s => `<th style="padding: 10px 12px; border-bottom: 2px solid #334155; font-size: 0.95rem; font-weight: 900;">${s}</th>`).join('')}
-                    <th style="padding: 10px 14px; width: 110px; background: #0f172a; color: #38bdf8; border-bottom: 2px solid #334155;">إجمالي اللون</th>
-                    <th style="padding: 10px 8px; width: 50px; border-bottom: 2px solid #334155;">حذف</th>
+                    <th style="padding: 12px 14px; width: 140px; min-width: 140px; background: #0f172a; color: #f8fafc; font-weight: 900; border-bottom: 3px solid #334155; border-left: 2px solid #475569; text-align: right;">
+                        <span style="font-size: 0.95rem;">🎨 اللون \\ 📏 المقاس</span>
+                    </th>
+                    ${sizes.map(s => `
+                        <th style="padding: 10px 8px; min-width: 90px; background: #1e293b; color: white; border-bottom: 3px solid #334155; border-left: 2px solid #475569; text-align: center;" title="عمود المقاس: ${s}">
+                            <div style="display: inline-flex; align-items: center; justify-content: center; min-width: 56px; padding: 5px 12px; background: #0f172a; color: #38bdf8; border: 2px solid #0284c7; border-radius: 8px; font-size: 1.15rem; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.35);">
+                                ${s}
+                            </div>
+                        </th>
+                    `).join('')}
+                    <th style="padding: 10px 14px; width: 110px; min-width: 110px; background: #0f172a; color: #38bdf8; border-bottom: 3px solid #334155; border-left: 2px solid #475569; text-align: center; font-weight: 900;">
+                        <span>📊 إجمالي اللون</span>
+                    </th>
+                    <th style="padding: 10px 8px; width: 65px; min-width: 65px; background: #0f172a; color: #ef4444; border-bottom: 3px solid #334155; text-align: center; font-weight: 900;">
+                        <span>إجراء</span>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -1010,7 +1075,7 @@ function renderSmartMatrixView() {
         let rowSum = 0;
         let cellsHtml = '';
 
-        sizes.forEach(sz => {
+        sizes.forEach((sz, sIdx) => {
             const item = matrixMap[`${col}__${sz}`];
             const stockVal = item ? item.stock : 0;
             const rIdx = item ? item.rowIndex : -1;
@@ -1020,57 +1085,82 @@ function renderSmartMatrixView() {
             colTotals[sz] += stockVal;
             grandTotalStock += stockVal;
 
+            const colBg = (sIdx % 2 === 0) ? '#ffffff' : '#f8fafc';
+
             if (item) {
                 cellsHtml += `
-                    <td style="padding: 6px; border: 1px solid #f1f5f9; position: relative;">
-                        <input type="number" value="${stockVal}" min="0" data-row-index="${rIdx}" data-orig-stock="${origVal}"
-                            ${isLocked ? 'readonly' : ''}
-                            onchange="syncMatrixInputToDetailedRow(${rIdx}, this.value)"
-                            onfocus="if(window.isVariantsStockLocked) { this.blur(); if(typeof showToast==='function') showToast('🔒 الكميات مقفلة ومحمية. انقر على زر القفل 🔓 في الأعلى للتعديل', 'warning'); } else { this.select(); }"
-                            style="width: 58px; height: 32px; font-size: 1rem; font-weight: 900; text-align: center; border: 1.5px solid ${isChanged ? '#f59e0b' : (isLocked ? '#cbd5e1' : '#3b82f6')}; border-radius: 6px; color: ${stockVal > 0 ? '#047857' : '#64748b'}; background: ${isLocked ? (stockVal > 0 ? '#f8fafc' : '#ffffff') : '#eff6ff'}; cursor: ${isLocked ? 'not-allowed' : 'text'};"
-                            title="${isChanged ? `القيمة الأصلية السابقة: ${origVal}` : ''}">
+                    <td style="padding: 8px 4px; border-bottom: 1.5px solid #cbd5e1; border-left: 2px solid #94a3b8; background: ${colBg}; text-align: center; vertical-align: middle;">
+                        <div style="display: flex; justify-content: center; align-items: center; width: 100%;">
+                            <input type="number" value="${stockVal}" min="0" data-row-index="${rIdx}" data-orig-stock="${origVal}" data-size="${sz}" data-color="${col}"
+                                ${isLocked ? 'readonly' : ''}
+                                onchange="syncMatrixInputToDetailedRow(${rIdx}, this.value)"
+                                onfocus="if(window.isVariantsStockLocked) { this.blur(); if(typeof showToast==='function') showToast('🔒 الكميات مقفلة ومحمية. انقر على زر القفل 🔓 في الأعلى للتعديل', 'warning'); } else { this.select(); }"
+                                style="width: 70px; height: 36px; font-size: 1.1rem; font-weight: 900; text-align: center; border: 2px solid ${isChanged ? '#f59e0b' : (isLocked ? '#94a3b8' : '#2563eb')}; border-radius: 8px; color: ${stockVal > 0 ? '#047857' : '#64748b'}; background: ${isLocked ? (stockVal > 0 ? '#f0fdf4' : '#ffffff') : '#eff6ff'}; cursor: ${isLocked ? 'not-allowed' : 'text'}; transition: 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.06);"
+                                title="المقاس: ${sz} | اللون: ${col}${isChanged ? ` (الأصل: ${origVal})` : ''}">
+                        </div>
                     </td>
                 `;
             } else {
                 cellsHtml += `
-                    <td style="padding: 6px; border: 1px solid #f1f5f9; background: #f8fafc;">
-                        <button type="button" onclick="createVariantAndRenderMatrix('${sz}', '${col}')"
-                            style="border: 1px dashed #cbd5e1; background: transparent; color: #94a3b8; font-weight: bold; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 0.75rem;">+ إضافة</button>
+                    <td style="padding: 8px 4px; border-bottom: 1.5px solid #cbd5e1; border-left: 2px solid #94a3b8; background: #f1f5f9; text-align: center; vertical-align: middle;">
+                        <div style="display: flex; justify-content: center; align-items: center; width: 100%;">
+                            <button type="button" onclick="createVariantAndRenderMatrix('${sz}', '${col}')"
+                                style="border: 1.5px dashed #94a3b8; background: #ffffff; color: #475569; font-weight: 800; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: 0.2s;"
+                                onmouseover="this.style.borderColor='#2563eb'; this.style.color='#2563eb';"
+                                onmouseout="this.style.borderColor='#94a3b8'; this.style.color='#475569';"
+                                title="إضافة مقاس ${sz} للون ${col}">+ إضافة</button>
+                        </div>
                     </td>
                 `;
             }
         });
 
         tableHtml += `
-            <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 8px 12px; font-weight: 900; color: #1e293b; text-align: right; background: #f8fafc; border: 1px solid #f1f5f9;">
-                    <span style="font-size: 0.95rem;">🎨 ${col}</span>
+            <tr style="border-bottom: 1.5px solid #cbd5e1; transition: background 0.15s;" onmouseover="this.style.background='rgba(59,130,246,0.04)'" onmouseout="this.style.background=''">
+                <td style="padding: 10px 14px; font-weight: 900; color: #1e293b; text-align: right; background: #f8fafc; border-bottom: 1.5px solid #cbd5e1; border-left: 2px solid #94a3b8;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 1.05rem;">🎨</span>
+                        <span style="font-size: 0.95rem; font-weight: 900; color: #0f172a;">${col}</span>
+                    </div>
                 </td>
                 ${cellsHtml}
-                <td style="padding: 8px 12px; font-weight: 900; font-size: 1rem; color: #0284c7; background: #f0f9ff; border: 1px solid #e0f2fe;">
-                    ${rowSum}
+                <td style="padding: 8px 12px; font-weight: 900; font-size: 1.05rem; color: #0284c7; background: #f0f9ff; border-bottom: 1.5px solid #cbd5e1; border-left: 2px solid #94a3b8; text-align: center;">
+                    <span style="background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 6px; border: 1.5px solid #bae6fd; display: inline-block;">${rowSum}</span>
                 </td>
-                <td style="padding: 6px; border: 1px solid #f1f5f9; white-space: nowrap;">
+                <td style="padding: 6px; border-bottom: 1.5px solid #cbd5e1; text-align: center; white-space: nowrap;">
                     <button type="button" onclick="restoreColorRowInMatrix('${col}')"
-                        style="background: #f0fdf4; color: #166534; border: 1px solid #86efac; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-weight: 900; margin-left: 3px;" title="استعادة أرصدة هذا اللون للأصل">🔄</button>
+                        style="background: #f0fdf4; color: #166534; border: 1.5px solid #86efac; border-radius: 6px; width: 30px; height: 30px; cursor: pointer; font-weight: 900; margin-left: 3px;" title="استعادة أرصدة هذا اللون للأصل">🔄</button>
                     <button type="button" onclick="removeColorRowFromMatrix('${col}')"
-                        style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-weight: 900;" title="حذف كل مقاسات هذا اللون">✕</button>
+                        style="background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; border-radius: 6px; width: 30px; height: 30px; cursor: pointer; font-weight: 900;" title="حذف كل مقاسات هذا اللون">✕</button>
                 </td>
             </tr>
         `;
     });
 
-    // سطر إجمالي المقاسات (الفوتر الذكي)
+    // سطر إجمالي المقاسات (الفوتر الذكي مع فواصل الأعمدة)
     tableHtml += `
             </tbody>
-            <tfoot style="position: sticky; bottom: 0; background: #f8fafc; font-weight: 900; border-top: 2px solid #cbd5e1; z-index: 4;">
+            <tfoot style="position: sticky; bottom: 0; background: #f8fafc; font-weight: 900; border-top: 3px solid #64748b; z-index: 4;">
                 <tr>
-                    <td style="padding: 10px 14px; text-align: right; color: #475569; font-weight: 900;">إجمالي المقاس:</td>
-                    ${sizes.map(s => `<td style="padding: 10px; font-size: 1rem; color: #7c3aed; background: #f5f3ff;">${colTotals[s]}</td>`).join('')}
-                    <td style="padding: 10px 14px; font-size: 1.15rem; color: #047857; background: #ecfdf5; border: 2px solid #86efac; border-radius: 6px;">
-                        ${grandTotalStock}
+                    <td style="padding: 10px 14px; text-align: right; color: #1e293b; font-weight: 900; background: #f1f5f9; border-left: 2px solid #94a3b8;">
+                        <span>📌 إجمالي المقاس:</span>
                     </td>
-                    <td></td>
+                    ${sizes.map((s, sIdx) => {
+                        const colBg = (sIdx % 2 === 0) ? '#fdf4ff' : '#faf5ff';
+                        return `
+                            <td style="padding: 10px 6px; font-size: 1.05rem; font-weight: 900; color: #6d28d9; background: ${colBg}; border-left: 2px solid #94a3b8; text-align: center;">
+                                <span style="background: #ede9fe; color: #6d28d9; padding: 4px 12px; border-radius: 6px; border: 1.5px solid #ddd6fe; display: inline-block; min-width: 44px;">
+                                    ${colTotals[s]}
+                                </span>
+                            </td>
+                        `;
+                    }).join('')}
+                    <td style="padding: 10px 12px; font-size: 1.15rem; font-weight: 900; color: #047857; background: #ecfdf5; border-left: 2px solid #94a3b8; text-align: center;">
+                        <span style="background: #d1fae5; color: #065f46; padding: 4px 14px; border-radius: 8px; border: 1.5px solid #a7f3d0; display: inline-block;">
+                            ${grandTotalStock}
+                        </span>
+                    </td>
+                    <td style="background: #f1f5f9;"></td>
                 </tr>
             </tfoot>
         </table>
@@ -1133,7 +1223,7 @@ window.printSingleVariantBarcode = async function(btn, event) {
     if (typeof executePrinting === 'function') {
         executePrinting([singleItem], copies);
         if (typeof showToast === 'function') {
-            const desc = [size, color].filter(Boolean).join(' - ');
+            const desc = formatBarcodeVariantLabel(size, color);
             showToast(`🖨️ جاري طباعة ملصق الباركود: ${barcode}${desc ? ' (' + desc + ')' : ''}`, 'success');
         }
     } else {

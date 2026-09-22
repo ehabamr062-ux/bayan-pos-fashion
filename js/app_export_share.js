@@ -330,52 +330,513 @@ function validateDocumentData(type, actionType = 'التصدير') {
 }
 window.validateDocumentData = validateDocumentData;
 
-// 2.6 دالة مشاركة الفواتير والمستندات عبر الواتساب والتليجرام
-function shareTransaction(type, platform) {
-    const platformLabel = (platform === 'wa' || platform === 'whatsapp') ? 'المشاركة عبر الواتساب' : 'المشاركة عبر التلجرام';
+// دالة استخراج اسم الطرف/العميل/المورد بحسب نوع المستند
+function getPartnerNameForType(type) {
+    if (type === 'sales') {
+        return (document.getElementById('customerName')?.value || '').trim();
+    } else if (type === 'purchase') {
+        return (document.getElementById('supplierName')?.value || '').trim();
+    } else if (type === 'receipt') {
+        return (document.getElementById('receiptCustomer')?.value || '').trim();
+    } else if (type === 'disbursement') {
+        return (document.getElementById('disbursePayee')?.value || '').trim();
+    } else if (type === 'salesReturn') {
+        return (document.getElementById('salesReturnPartnerDisplay')?.innerText || '').trim();
+    } else if (type === 'purchaseReturn') {
+        return (document.getElementById('purReturnPartnerDisplay')?.innerText || '').trim();
+    }
+    return '';
+}
+window.getPartnerNameForType = getPartnerNameForType;
+
+// دالة جلب رقم هاتف الطرف من سجل الحسابات العامة (accounts)
+function getPartnerPhone(partnerName) {
+    if (!partnerName || typeof partnerName !== 'string') return '';
+    const clean = (s) => (s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+    const searchClean = clean(partnerName);
+    if (!searchClean || ['عميل نقدي', 'نقدي', 'مورد', 'عميل', 'جهة', '---'].includes(searchClean)) {
+        return '';
+    }
+
+    const accList = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts : ((typeof window.accounts !== 'undefined' && Array.isArray(window.accounts)) ? window.accounts : []);
+
+    if (accList && accList.length > 0) {
+        const found = accList.find(a => a && a.name && (a.name.trim() === partnerName.trim() || clean(a.name) === searchClean));
+        if (found) {
+            const raw = found.mobile || found.phone || found.landline || '';
+            if (raw) return String(raw).trim();
+        }
+    }
+    return '';
+}
+window.getPartnerPhone = getPartnerPhone;
+
+// دالة تنظيف وتنسيق رقم الهاتف ليتوافق مع رابط الواتساب الدولي
+function formatPhoneForWhatsApp(phone) {
+    if (!phone) return '';
+    let digits = String(phone).replace(/[^0-9]/g, '');
+    if (!digits) return '';
+
+    if (digits.startsWith('00')) {
+        digits = digits.substring(2);
+    }
+    // أرقام المحمول المصرية (010, 011, 012, 015) المكونة من 11 رقماً
+    if (digits.length === 11 && digits.startsWith('01')) {
+        digits = '2' + digits;
+    } else if (digits.length === 10 && (digits.startsWith('10') || digits.startsWith('11') || digits.startsWith('12') || digits.startsWith('15'))) {
+        digits = '20' + digits;
+    }
+    return digits;
+}
+window.formatPhoneForWhatsApp = formatPhoneForWhatsApp;
+
+// دالة التعبئة التلقائية لرقم هاتف العميل واسمه عند فتح أي من قوائم المشاركة
+function autoFillSharePhone(menuId) {
+    const menuToType = {
+        'salesInvoiceShareMenu': 'sales',
+        'salesShareMenu': 'salesReturn',
+        'purchaseInvoiceShareMenu': 'purchase',
+        'purShareMenu': 'purchaseReturn',
+        'receiptShareMenu': 'receipt',
+        'disburseShareMenu': 'disbursement'
+    };
+    const type = menuToType[menuId];
+    if (!type) return;
+
+    const phoneInput = document.getElementById('waSharePhone_' + type);
+    const partnerInfo = document.getElementById('waSharePartnerInfo_' + type);
+
+    const partnerName = getPartnerNameForType(type);
+    if (partnerInfo) {
+        if (partnerName && !['عميل نقدي', 'نقدي', 'مورد', 'عميل', 'جهة', '---'].includes(partnerName)) {
+            partnerInfo.innerText = `الطرف: ${partnerName}`;
+            partnerInfo.title = partnerName;
+        } else {
+            partnerInfo.innerText = '';
+        }
+    }
+
+    if (phoneInput) {
+        const phone = getPartnerPhone(partnerName);
+        phoneInput.value = phone || '';
+        setTimeout(() => {
+            if (phoneInput && !phoneInput.value) {
+                try { phoneInput.focus(); } catch (e) {}
+            }
+        }, 120);
+    }
+}
+window.autoFillSharePhone = autoFillSharePhone;
+
+// دالة مشاركة الفاتورة أو السند كصورة عالية الدقة عبر الواتساب مع النسخ للحافظة والتنزيل المباشر
+async function shareTransactionWithImage(type, targetPhone) {
+    const platformLabel = 'المشاركة عبر الواتساب';
     if (typeof validateDocumentData === 'function' && !validateDocumentData(type, platformLabel)) {
         return;
     }
 
+    // إغلاق أي قوائم مشاركة مفتوحة
+    document.querySelectorAll('.share-menu').forEach(m => m.classList.remove('active'));
+
+    // استخراج رقم الهاتف من الحقل أو من بيانات الطرف
+    let phone = (targetPhone || '').trim();
+    if (!phone) {
+        const phoneInput = document.getElementById('waSharePhone_' + type);
+        if (phoneInput && phoneInput.value.trim()) {
+            phone = phoneInput.value.trim();
+        }
+    }
+    if (!phone) {
+        const pName = getPartnerNameForType(type);
+        phone = getPartnerPhone(pName);
+    }
+    const cleanPhone = formatPhoneForWhatsApp(phone);
+
+    // تفعيل حالة التحميل على زر الصورة لمنع تكرار النقر وإعلام الكاشير
+    const imgBtn = document.getElementById('btnShareWaImage_' + type);
+    const origBtnHTML = imgBtn ? imgBtn.innerHTML : '';
+    if (imgBtn) {
+        imgBtn.disabled = true;
+        imgBtn.innerHTML = '<span class="wa-spin">⏳</span> جاري التجهيز...';
+    }
+
+    if (typeof showToast === 'function') {
+        showToast("🎨 جاري تجهيز صورة الفاتورة للواتساب...", "info");
+    }
+
+    try {
+        // 1. تجهيز قالب الفاتورة/السند الفعلي
+        if (typeof prepareBillHTML === 'function') {
+            prepareBillHTML(type);
+        }
+        const receiptArea = document.getElementById('receipt-area');
+        if (!receiptArea || !receiptArea.children.length) {
+            throw new Error("تعذر تجهيز قالب الفاتورة للطباعة");
+        }
+
+        // 2. إعداد الحفظ المؤقت للتنسيق للرسم بجودة فائقة
+        const origDisplay = receiptArea.style.display;
+        const origPos = receiptArea.style.position;
+        const origLeft = receiptArea.style.left;
+        const origTop = receiptArea.style.top;
+        const origZIndex = receiptArea.style.zIndex;
+        const origWidth = receiptArea.style.width;
+        const origBackground = receiptArea.style.background;
+
+        let targetRenderWidth = '340px';
+        try {
+            const savedSettings = JSON.parse(getStore('bayan_print_template_choice') || '{}');
+            const templateChoice = savedSettings.template || '80mm Standard';
+            if (templateChoice === 'A4 Professional' || templateChoice === 'A4') targetRenderWidth = '794px';
+            else if (templateChoice === 'A5 Modern' || templateChoice === 'A5') targetRenderWidth = '560px';
+            else if (templateChoice === '57mm Mobile' || templateChoice === '57mm') targetRenderWidth = '240px';
+            else targetRenderWidth = '340px';
+        } catch (_) {}
+
+        receiptArea.style.display = 'block';
+        receiptArea.style.position = 'fixed';
+        receiptArea.style.left = '-9999px';
+        receiptArea.style.top = '0px';
+        receiptArea.style.zIndex = '-99999';
+        receiptArea.style.width = (type === 'sales' ? targetRenderWidth : '680px');
+        receiptArea.style.background = '#ffffff';
+
+        let canvas;
+        try {
+            if (typeof html2canvas !== 'function') {
+                throw new Error("مكتبة تحويل الصور html2canvas غير محملة");
+            }
+            // إزالة windowWidth الثابتة لتفادي بطء محاكاة الشاشات الكبيرة ولتسريع المعالجة إلى أقل من ثانية واحدة
+            canvas = await html2canvas(receiptArea, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                logging: false
+            });
+        } finally {
+            receiptArea.style.display = origDisplay;
+            receiptArea.style.position = origPos;
+            receiptArea.style.left = origLeft;
+            receiptArea.style.top = origTop;
+            receiptArea.style.zIndex = origZIndex;
+            receiptArea.style.width = origWidth;
+            receiptArea.style.background = origBackground;
+        }
+
+        if (!canvas) throw new Error("تعذر إنشاء صورة الفاتورة");
+
+        const imgData = canvas.toDataURL('image/png');
+
+        // 3. نسخ الصورة إلى الحافظة (Clipboard) لتكون جاهزة للصق المباشر (Ctrl + V)
+        let copied = false;
+        try {
+            if (typeof require !== 'undefined') {
+                const { clipboard, nativeImage } = require('electron');
+                if (clipboard && nativeImage) {
+                    const image = nativeImage.createFromDataURL(imgData);
+                    clipboard.writeImage(image);
+                    copied = true;
+                }
+            }
+        } catch (e) {
+            console.warn("Electron clipboard writeImage error:", e);
+        }
+
+        if (!copied && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+            try {
+                if (typeof window.focus === 'function') {
+                    try { window.focus(); } catch (_) {}
+                }
+                const blob = await new Promise((resolve) => {
+                    canvas.toBlob((b) => resolve(b), 'image/png');
+                });
+                if (blob) {
+                    try {
+                        await navigator.clipboard.write([
+                            new ClipboardItem({ 'image/png': blob })
+                        ]);
+                        copied = true;
+                    } catch (clipErr) {
+                        console.info("ملاحظة: تعذر النسخ المباشر للحافظة عبر المتصفح، تم توفير الصورة عبر التنزيل التلقائي.");
+                    }
+                }
+            } catch (err) {
+                console.info("ملاحظة تحويل الصورة للحافظة:", err.message || err);
+            }
+        }
+
+        // 4. تنزيل الصورة محلياً فقط كإجراء احتياطي إذا فشل النسخ للحافظة
+        let fileName = "فاتورة";
+        let docTitle = "فاتورة";
+        let docNo = "---";
+        if (type === 'sales') {
+            const p = document.getElementById('customerName')?.value || 'عميل';
+            docNo = document.getElementById('salesInvoiceNo')?.value || document.getElementById('salesBadgeID')?.innerText || '---';
+            fileName = `فاتورة_مبيعات_${p}_${docNo}`;
+            docTitle = "📄 فاتورة مبيعات";
+        } else if (type === 'purchase') {
+            const p = document.getElementById('supplierName')?.value || 'مورد';
+            docNo = document.getElementById('purchaseInvoiceNo')?.value || document.getElementById('purBadgeID')?.innerText || '---';
+            fileName = `فاتورة_مشتريات_${p}_${docNo}`;
+            docTitle = "📦 فاتورة مشتريات";
+        } else if (type === 'salesReturn') {
+            const p = document.getElementById('salesReturnPartnerDisplay')?.innerText || 'عميل';
+            docNo = document.getElementById('salesReturnBadgeID')?.innerText || '---';
+            fileName = `مرتجع_مبيعات_${p}_${docNo}`;
+            docTitle = "🔄 مرتجع مبيعات";
+        } else if (type === 'purchaseReturn') {
+            const p = document.getElementById('purReturnPartnerDisplay')?.innerText || 'مورد';
+            docNo = document.getElementById('purReturnBadgeID')?.innerText || '---';
+            fileName = `مرتجع_مشتريات_${p}_${docNo}`;
+            docTitle = "🔄 مرتجع مشتريات";
+        } else if (type === 'receipt') {
+            const p = document.getElementById('receiptCustomer')?.value || 'عميل';
+            docNo = document.getElementById('receiptID')?.value || '---';
+            fileName = `سند_قبض_${p}_${docNo}`;
+            docTitle = "💵 سند قبض";
+        } else if (type === 'disbursement') {
+            const p = document.getElementById('disbursePayee')?.value || 'جهة';
+            docNo = document.getElementById('disburseID')?.value || '---';
+            fileName = `سند_صرف_${p}_${docNo}`;
+            docTitle = "💸 سند صرف";
+        }
+
+        // تنزيل الصورة كملف فقط في حال تعذر النسخ للحافظة (لتجنب تراكم الملفات عند نجاح النسخ المباشر)
+        if (!copied) {
+            try {
+                const cleanFileName = (fileName || 'فاتورة').replace(/[\\\/:*?"<>|]/g, '_') + '.png';
+                const link = document.createElement('a');
+                link.href = imgData;
+                link.download = cleanFileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (downloadErr) {
+                console.warn("Auto-download error:", downloadErr);
+            }
+        }
+
+        const shopName = (typeof getMerchantStoreName === 'function' ? getMerchantStoreName() : (document.getElementById('shopName')?.value || 'بَيَان POS'));
+        const partnerName = getPartnerNameForType(type) || 'عميلنا العزيز';
+        
+        let invoiceSummary = '';
+        if (type === 'sales' && typeof cart !== 'undefined' && cart.length > 0) {
+            const tot = (typeof currentTotal !== 'undefined' ? currentTotal : 0).toFixed(2);
+            invoiceSummary = `\n💰 الإجمالي: *${tot} ج.م*` +
+                             `\n📋 عدد الأصناف: *${cart.length}*`;
+        }
+
+        const greeting = `مرحباً بك *${partnerName}* ✨\nمن: *${shopName}*\nمرفق لسيادتكم (${docTitle}) رقم: *#${docNo}*${invoiceSummary}\n\nشكراً لتعاملكم الراقي معنا! 🙏`;
+        const encodedText = encodeURIComponent(greeting);
+
+        let waUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodedText}` : `https://wa.me/?text=${encodedText}`;
+
+        window.open(waUrl, '_blank');
+
+        if (copied) {
+            // فتح نافذة المساعد الفورية لتوضيح زرار Ctrl + V للكاشير بشكل لافت وبديهي
+            showWhatsAppPasteHelperModal();
+            if (typeof showToast === 'function') {
+                showToast("📋 تم تجهيز الفاتورة ونسخها للحافظة بنجاح! اضغط (Ctrl + V) في واتساب لإرسالها فوراً 🚀", "success");
+            }
+        } else {
+            if (typeof showToast === 'function') {
+                showToast("📥 تم تجهيز الفاتورة بتصميم الطباعة وتنزيلها لجهازك! يمكنك إرفاقها في واتساب 🚀", "success");
+            }
+        }
+    } catch (err) {
+        console.error("WhatsApp Image Share Error:", err);
+        if (typeof showToast === 'function') {
+            showToast("❌ حدث خطأ أثناء تجهيز الصورة: " + err.message, "error");
+        }
+    } finally {
+        if (imgBtn) {
+            imgBtn.disabled = false;
+            imgBtn.innerHTML = origBtnHTML;
+        }
+    }
+}
+window.shareTransactionWithImage = shareTransactionWithImage;
+
+// نافذة التوضيح للكاشير لاختصار اللصق Ctrl + V
+function showWhatsAppPasteHelperModal() {
+    let modal = document.getElementById('waPasteModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        const handleKey = (e) => {
+            if (e.key === 'Enter' || e.key === 'Escape') {
+                closeWhatsAppPasteHelperModal();
+                window.removeEventListener('keydown', handleKey);
+            }
+        };
+        window.addEventListener('keydown', handleKey);
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                closeWhatsAppPasteHelperModal();
+                window.removeEventListener('keydown', handleKey);
+            }
+        };
+    }
+}
+window.showWhatsAppPasteHelperModal = showWhatsAppPasteHelperModal;
+
+function closeWhatsAppPasteHelperModal() {
+    const modal = document.getElementById('waPasteModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+window.closeWhatsAppPasteHelperModal = closeWhatsAppPasteHelperModal;
+
+// منشئ الرسائل النصية المباشرة المنسقة للواتساب
+function buildWhatsAppTextMessage(type) {
+    const shopName = (typeof getMerchantStoreName === 'function' ? getMerchantStoreName() : (document.getElementById('shopName')?.value || 'بَيَان POS'));
+    const nowStr = (typeof getTransactionDateTime === 'function' ? getTransactionDateTime('salesDate', 'salesTime').full : new Date().toLocaleString('ar-EG'));
+    
+    let header = `✨ *${shopName}* ✨\n`;
+    let body = "";
+    
+    if (type === 'sales') {
+        const partner = document.getElementById('customerName')?.value || 'عميل نقدي';
+        const invNo = document.getElementById('salesInvoiceNo')?.value || document.getElementById('salesBadgeID')?.innerText || '---';
+        const grandTotal = (typeof currentTotal !== 'undefined' ? currentTotal : 0).toFixed(2);
+        const method = (typeof getSelectedPaymentMethod === 'function' ? getSelectedPaymentMethod('sales-section') : (document.getElementById('salesPaymentMethod')?.value || 'نقدي'));
+        const disc = parseFloat(document.getElementById('salesDiscount')?.value) || 0;
+        const tax = parseFloat(document.getElementById('salesTax')?.value) || 0;
+
+        header += `📄 *فاتورة مبيعات* #${invNo}\n👤 العميل: *${partner}*\n📅 التاريخ: ${nowStr}\n`;
+        
+        if (typeof cart !== 'undefined' && cart.length > 0) {
+            body += `\n📋 *تفاصيل الأصناف:*\n`;
+            cart.forEach((item, idx) => {
+                const q = parseFloat(item.qty) || 1;
+                const p = parseFloat(item.price) || 0;
+                const tot = (q * p).toFixed(2);
+                let unitStr = item.selectedUnit ? (typeof item.selectedUnit === 'object' ? item.selectedUnit.unitName : item.selectedUnit) : (item.unit || '');
+                if (unitStr) unitStr = ` (${unitStr})`;
+                body += `${idx + 1}. *${item.name}*${unitStr}\n   ▫️ الكمية: ${q} × السعر: ${p.toFixed(2)} = *${tot} ج.م*\n`;
+            });
+        }
+        
+        body += `\n💰 *الإجمالي النهائي: ${grandTotal} ج.م*`;
+        if (disc > 0) body += `\n🏷️ الخصم: ${disc.toFixed(2)} ج.م`;
+        if (tax > 0) body += `\n🧾 الضريبة: ${tax.toFixed(2)} ج.م`;
+        body += `\n💳 طريقة الدفع: ${method}`;
+        
+    } else if (type === 'purchase') {
+        const partner = document.getElementById('supplierName')?.value || 'مورد';
+        const invNo = document.getElementById('purchaseInvoiceNo')?.value || document.getElementById('purBadgeID')?.innerText || '---';
+        const items = (typeof purchaseCart !== 'undefined' && Array.isArray(purchaseCart)) ? purchaseCart : [];
+        const grandTotal = items.reduce((sum, it) => sum + ((parseFloat(it.qty) || 1) * (parseFloat(it.cost) || 0)), 0).toFixed(2);
+        
+        header += `📦 *فاتورة مشتريات* #${invNo}\n👤 المورد: *${partner}*\n📅 التاريخ: ${nowStr}\n`;
+        if (items.length > 0) {
+            body += `\n📋 *الأصناف:*\n`;
+            items.forEach((item, idx) => {
+                const q = parseFloat(item.qty) || 1;
+                const c = parseFloat(item.cost) || 0;
+                body += `${idx + 1}. *${item.name}* (الكمية: ${q} × ${c.toFixed(2)}) = *${(q * c).toFixed(2)} ج.م*\n`;
+            });
+        }
+        body += `\n💰 *الإجمالي النهائي: ${grandTotal} ج.م*`;
+        
+    } else if (type === 'salesReturn') {
+        const partner = document.getElementById('salesReturnPartnerDisplay')?.innerText || 'عميل';
+        const docNo = document.getElementById('salesReturnBadgeID')?.innerText || '---';
+        const total = document.getElementById('salesReturnTotalDisplay')?.innerText || '0.00';
+        header += `🔄 *مرتجع مبيعات* #${docNo}\n👤 الطرف: *${partner}*\n📅 التاريخ: ${nowStr}\n`;
+        body += `\n💰 *إجمالي المرتجع: ${total} ج.م*`;
+        
+    } else if (type === 'purchaseReturn') {
+        const partner = document.getElementById('purReturnPartnerDisplay')?.innerText || 'مورد';
+        const docNo = document.getElementById('purReturnBadgeID')?.innerText || '---';
+        const total = document.getElementById('purReturnTotalDisplay')?.innerText || '0.00';
+        header += `🔄 *مرتجع مشتريات* #${docNo}\n👤 الطرف: *${partner}*\n📅 التاريخ: ${nowStr}\n`;
+        body += `\n💰 *إجمالي المرتجع: ${total} ج.م*`;
+        
+    } else if (type === 'receipt') {
+        const partner = document.getElementById('receiptCustomer')?.value || 'عميل';
+        const docNo = document.getElementById('receiptID')?.value || '---';
+        const amount = document.getElementById('receiptAmount')?.value || '0.00';
+        const notes = document.getElementById('receiptNotes')?.value || '';
+        header += `💵 *سند قبض نقدية* #${docNo}\n👤 المستلم منه: *${partner}*\n📅 التاريخ: ${nowStr}\n`;
+        body += `\n💰 *المبلغ المقبوض: ${amount} ج.م*`;
+        if (notes) body += `\n📝 البيان / الملاحظات: ${notes}`;
+        
+    } else if (type === 'disbursement') {
+        const partner = document.getElementById('disbursePayee')?.value || 'جهة';
+        const docNo = document.getElementById('disburseID')?.value || '---';
+        const amount = document.getElementById('disburseAmount')?.value || '0.00';
+        const notes = document.getElementById('disburseNotes')?.value || '';
+        header += `💸 *سند صرف نقدية* #${docNo}\n👤 يصرف لسيادة: *${partner}*\n📅 التاريخ: ${nowStr}\n`;
+        body += `\n💰 *المبلغ المنصرف: ${amount} ج.م*`;
+        if (notes) body += `\n📝 البيان / الملاحظات: ${notes}`;
+    }
+    
+    const footer = `\n\n🙏 *شكراً لتعاملكم الراقي معنا!*`;
+    return header + body + footer;
+}
+window.buildWhatsAppTextMessage = buildWhatsAppTextMessage;
+
+// 2.6 دالة مشاركة الفواتير والمستندات عبر الواتساب والتليجرام (تدعم إرسال الصورة وإرسال النص المباشر)
+async function shareTransaction(type, platform) {
+    if (type === 'dailyReport' && typeof isDailyReportAmountsProtected === 'function' && isDailyReportAmountsProtected()) {
+        if (typeof window.verifyAdminPinAuthorization === 'function') {
+            const ok = await window.verifyAdminPinAuthorization('📤 مشاركة تقرير الحركة اليومية', 'يتطلب مشاركة بيانات تقرير الحركة اليومية إدخال رمز PIN المدير.');
+            if (!ok) return;
+        } else {
+            if (typeof showToast === 'function') showToast('🔒 المبالغ المالية محمية ولا يمكن مشاركتها بدون إذن المدير', 'error');
+            return;
+        }
+    }
+
+    const platformLabel = (platform === 'wa_image' || platform === 'wa' || platform === 'whatsapp' || platform === 'wa_text') 
+        ? 'المشاركة عبر الواتساب' 
+        : 'المشاركة عبر التلجرام';
+        
+    if (typeof validateDocumentData === 'function' && !validateDocumentData(type, platformLabel)) {
+        return;
+    }
+
+    // 1. خيار إرسال صورة الفاتورة (نسخ ولصق بتصميم الطباعة الحقيقي)
+    if (platform === 'wa_image' || (platform === 'wa' && type !== 'dailyReport') || (platform === 'whatsapp' && type !== 'dailyReport')) {
+        shareTransactionWithImage(type);
+        return;
+    }
+
+    // 2. خيار الإرسال النصي المباشر السريع للواتساب (بدون الحاجة لنسخ أو لصق أو كيبورد)
+    if (platform === 'wa_text') {
+        let phone = '';
+        const phoneInput = document.getElementById('waSharePhone_' + type);
+        if (phoneInput && phoneInput.value.trim()) {
+            phone = phoneInput.value.trim();
+        }
+        if (!phone) {
+            const pName = getPartnerNameForType(type);
+            phone = getPartnerPhone(pName);
+        }
+        const cleanPhone = formatPhoneForWhatsApp(phone);
+        
+        const message = buildWhatsAppTextMessage(type);
+        const encodedText = encodeURIComponent(message);
+        const shareUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodedText}` : `https://wa.me/?text=${encodedText}`;
+        
+        document.querySelectorAll('.share-menu').forEach(m => m.classList.remove('active'));
+        if (typeof showToast === 'function') {
+            showToast("💬 جاري فتح محادثة الواتساب مع الفاتورة النصية جاهزة للإرسال فوراً! 🚀", "success");
+        }
+        window.open(shareUrl, '_blank');
+        return;
+    }
+
+    // 3. مشاركة التقرير اليومي الشامل أو التلجرام
     let title = "مشاركة مستند";
     let invNo = "---";
     let partnerName = "---";
     let grandTotal = "0.00";
     let itemsText = "";
 
-    if (type === 'sales') {
-        title = "📄 فاتورة مبيعات";
-        partnerName = document.getElementById('customerName')?.value || 'عميل نقدي';
-        invNo = document.getElementById('salesInvoiceNo')?.value || document.getElementById('salesInvNoDisplay')?.innerText || '---';
-        grandTotal = (typeof currentTotal !== 'undefined' ? currentTotal : 0).toFixed(2);
-        if (typeof cart !== 'undefined' && cart.length > 0) {
-            itemsText = "\n📋 الأصناف:\n" + cart.map((item, i) => `${i + 1}. ${item.name} (${item.qty} × ${item.price}) = ${(item.qty * item.price).toFixed(2)}`).join('\n');
-        }
-    } else if (type === 'purchase') {
-        title = "📦 فاتورة مشتريات";
-        partnerName = document.getElementById('supplierName')?.value || 'مورد';
-        invNo = document.getElementById('purchaseInvoiceNo')?.value || '---';
-        grandTotal = (typeof purchaseCart !== 'undefined' ? purchaseCart.reduce((sum, item) => sum + (item.qty * item.cost), 0) : 0).toFixed(2);
-        if (typeof purchaseCart !== 'undefined' && purchaseCart.length > 0) {
-            itemsText = "\n📋 الأصناف:\n" + purchaseCart.map((item, i) => `${i + 1}. ${item.name} (${item.qty} × ${item.cost}) = ${(item.qty * item.cost).toFixed(2)}`).join('\n');
-        }
-    } else if (type === 'salesReturn') {
-        title = "🔄 مرتجع مبيعات";
-        partnerName = document.getElementById('salesReturnPartnerDisplay')?.innerText || 'عميل';
-        grandTotal = (document.getElementById('salesReturnTotalDisplay')?.innerText || '0.00');
-    } else if (type === 'purchaseReturn') {
-        title = "🔄 مرتجع مشتريات";
-        partnerName = document.getElementById('purReturnPartnerDisplay')?.innerText || 'مورد';
-        grandTotal = (document.getElementById('purReturnTotalDisplay')?.innerText || '0.00');
-    } else if (type === 'receipt') {
-        title = "💵 سند قبض";
-        partnerName = document.getElementById('receiptCustomer')?.value || 'عميل';
-        grandTotal = (document.getElementById('receiptAmount')?.value || '0.00');
-    } else if (type === 'disbursement') {
-        title = "💸 سند صرف";
-        partnerName = document.getElementById('disbursePayee')?.value || 'جهة';
-        grandTotal = (document.getElementById('disburseAmount')?.value || '0.00');
-    } else if (type === 'dailyReport') {
+    if (type === 'dailyReport') {
         title = "📊 تقرير الحركة اليومية الشامل";
         partnerName = "تقرير تقفيل اليومية";
         
@@ -385,6 +846,10 @@ function shareTransaction(type, platform) {
         const whSelect = document.getElementById('dailyReportWarehouseSelect');
         const selectedWh = (whSelect && whSelect.value !== 'all') ? whSelect.value : ((window.dailyReportData && window.dailyReportData.selectedWarehouse !== 'all') ? window.dailyReportData.selectedWarehouse : '');
         const whText = selectedWh ? `🏢 المخزن: ${selectedWh}\n` : '';
+
+        const trSelect = document.getElementById('dailyReportTreasurySelect');
+        const selectedTr = (trSelect && trSelect.value !== 'all') ? trSelect.value : ((window.dailyReportData && window.dailyReportData.selectedTreasury !== 'all') ? window.dailyReportData.selectedTreasury : '');
+        const trText = selectedTr ? `💰 الخزينة / وسيلة الدفع: ${selectedTr}\n` : '';
 
         const repData = window.dailyReportData || {};
         const netProfit = repData.netProfit !== undefined ? repData.netProfit.toFixed(2) : (document.getElementById('dailyNetProfit')?.innerText || '0.00');
@@ -398,11 +863,16 @@ function shareTransaction(type, platform) {
         grandTotal = canViewProfits ? netProfit : totalSales;
         itemsText = `\n📅 الفترة: من ${fromD} إلى ${toD}\n` +
                     whText +
+                    trText +
                     `🛍️ إجمالي المبيعات: ${totalSales} ج.م\n` +
+                    (repData.totalSalesCash !== undefined ? `  💵 منها كاش الدرج: ${repData.totalSalesCash.toFixed(2)} ج.م\n` : '') +
+                    (repData.vodafoneCashTotal !== undefined && (repData.vodafoneCashTotal !== 0 || (repData.vodafoneCashSales && repData.vodafoneCashSales > 0)) ? `  📱 فودافون كاش (صافي): ${repData.vodafoneCashTotal.toFixed(2)} ج.م\n` : '') +
+                    (repData.totalSalesNonCash && repData.totalSalesNonCash > 0 ? `  💳 باقي المحافظ والشبكة: ${(repData.totalSalesNonCash - (repData.vodafoneCashSales || 0)).toFixed(2)} ج.م\n` : '') +
                     `📦 إجمالي المشتريات: ${totalPurchases} ج.م\n` +
                     `💵 المقبوضات المالية: ${totalReceipts} ج.م\n` +
-                    `💸 المصروفات / السندات: ${totalExpenses} ج.م` +
-                    (canViewProfits ? (`\n📈 مجمل الربح: ${grossProfit} ج.م\n🎯 صافي الربح النهائي: ${netProfit} ج.م`) : '');
+                    `💸 المصروفات / السندات: ${totalExpenses} ج.م\n` +
+                    (repData.finalCashBalance !== undefined ? `💰 الرصيد النهائي بالدرج: ${repData.finalCashBalance.toFixed(2)} ج.م\n` : '') +
+                    (canViewProfits ? (`📈 مجمل الربح: ${grossProfit} ج.م\n🎯 صافي الربح النهائي: ${netProfit} ج.م`) : '');
     }
 
     const shopName = document.getElementById('shopName')?.value || 'بَيَان POS';
@@ -410,7 +880,7 @@ function shareTransaction(type, platform) {
     if (type === 'dailyReport') {
         message = `✨ *${shopName}* ✨\n${title}${itemsText}\n\nتاريخ الاستخراج: ${new Date().toLocaleDateString('ar-EG')}\nتم الاستخراج بواسطة برنامج بَيَان 🚀`;
     } else {
-        message = `✨ *${shopName}* ✨\n${title}\n📌 رقم المستند: ${invNo}\n👤 الطرف: ${partnerName}\n💰 الإجمالي: ${grandTotal} ج.م${itemsText}\n\nشكراً لتعاملكم معنا! 🙏`;
+        message = buildWhatsAppTextMessage(type);
     }
 
     const encodedText = encodeURIComponent(message);
@@ -622,6 +1092,10 @@ function exportInvoiceDataToExcel(type, fileName, customItems) {
         const selectedWh = (whSelect && whSelect.value !== 'all') ? whSelect.value : ((window.dailyReportData && window.dailyReportData.selectedWarehouse !== 'all') ? window.dailyReportData.selectedWarehouse : 'all');
         const selectedWhLabel = (selectedWh !== 'all') ? selectedWh : 'كافة المخازن والفروع';
 
+        const trSelect = document.getElementById('dailyReportTreasurySelect');
+        const selectedTr = (trSelect && trSelect.value !== 'all') ? trSelect.value : ((window.dailyReportData && window.dailyReportData.selectedTreasury !== 'all') ? window.dailyReportData.selectedTreasury : 'all');
+        const selectedTrLabel = (selectedTr !== 'all') ? selectedTr : 'كافة الخزائن ووسائل الدفع';
+
         const repData = window.dailyReportData || {};
         const netProfit = repData.netProfit !== undefined ? repData.netProfit.toFixed(2) : (document.getElementById('dailyNetProfit')?.innerText || '0.00');
         const totalSales = repData.totalSales !== undefined ? repData.totalSales.toFixed(2) : (document.getElementById('dailyTotalSales')?.innerText || '0.00');
@@ -639,19 +1113,61 @@ function exportInvoiceDataToExcel(type, fileName, customItems) {
                 return (t.warehouse === selectedWh || (!t.warehouse && selectedWh === 'المخزن الرئيسي'));
             });
         }
+        if (selectedTr !== 'all') {
+            const isNonCashMethodStr = (s) => {
+                if (!s) return false;
+                const str = String(s).toLowerCase();
+                return str.includes('بنك') || str.includes('تحويل') || str.includes('فيزا') || 
+                       str.includes('شيك') || str.includes('شبكة') || str.includes('فودافون') || 
+                       str.includes('فودافن') || str.includes('vodafone') || str.includes('voda') || 
+                       str.includes('اورنج') || str.includes('أورانج') || str.includes('orange') || 
+                       str.includes('اتصالات') || str.includes('etisalat') || str.includes('وي') || 
+                       str.includes('we') || str.includes('انستاباي') || str.includes('إنستاباي') || 
+                       str.includes('انستا') || str.includes('insta') || str.includes('محفظة') || 
+                       str.includes('wallet') || str.includes('مدى') || str.includes('mada') || 
+                       str.includes('master') || str.includes('بطاقة') || str.includes('card') ||
+                       str === 'vodafone_cash';
+            };
+            filtered = filtered.filter(t => {
+                const m = String(t.method || t.paymentMethod || t.treasury || '').trim().toLowerCase();
+                const sel = selectedTr.trim().toLowerCase();
+                const isSelCash = !isNonCashMethodStr(sel) && (sel.includes('نقد') || sel.includes('كاش') || sel.includes('cash'));
+                if (isSelCash) {
+                    if (!m) return true;
+                    return !isNonCashMethodStr(m) && !m.includes('آجل') && !m.includes('ذمم');
+                }
+                const clean = str => str.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+/u, '').trim();
+                const cleanSel = clean(sel);
+                const cleanM = clean(m);
+                if (cleanSel.includes('فودافون') || cleanSel.includes('فودافن') || cleanSel.includes('vodafone') || cleanSel.includes('voda') || cleanSel === 'vodafone_cash') {
+                    return cleanM.includes('فودافون') || cleanM.includes('فودافن') || cleanM.includes('vodafone') || cleanM.includes('voda') || cleanM === 'vodafone_cash';
+                }
+                if (cleanSel.includes('انستاباي') || cleanSel.includes('إنستاباي') || cleanSel.includes('insta')) {
+                    return cleanM.includes('انستاباي') || cleanM.includes('إنستاباي') || cleanM.includes('insta');
+                }
+                return cleanM === cleanSel || cleanM.includes(cleanSel) || cleanSel.includes(cleanM);
+            });
+        }
         
         const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
         const summaryRows = [
             ["📊 ملخص تقرير الحركة والتقفيل اليومي"],
             ["الفترة الزمنية:", `من ${fromDate} إلى ${toDate}`],
             ["🏢 المخزن:", selectedWhLabel],
+            ["💰 الخزينة / وسيلة الدفع:", selectedTrLabel],
             ["تاريخ الاستخراج:", new Date().toLocaleString('ar-EG')],
             [],
             ["البيان المالي", "القيمة الإجمالية (ج.م)"],
-            ["🛍️ إجمالي المبيعات", totalSales],
+            ["🛍️ إجمالي المبيعات العامة", totalSales],
+            ["🛒 مبيعات نقدية (درج الكاش)", repData.totalSalesCash !== undefined ? repData.totalSalesCash.toFixed(2) : '-'],
+            ["📱 صافي محفظة فودافون كاش", repData.vodafoneCashTotal !== undefined ? repData.vodafoneCashTotal.toFixed(2) : '0.00'],
+            ["💳 مبيعات إلكترونية / فيزا وبنكي", repData.totalSalesNonCash !== undefined ? repData.totalSalesNonCash.toFixed(2) : '-'],
             ["📦 إجمالي المشتريات والتوريد", totalPurchases],
             ["💵 إجمالي المقبوضات (سندات القبض)", totalReceipts],
-            ["💸 إجمالي المصروفات وسندات الصرف", totalExpenses]
+            ["💸 إجمالي المصروفات وسندات الصرف", totalExpenses],
+            ["⏺️ رصيد سابق (افتتاحي)", repData.previousBalance !== undefined ? repData.previousBalance.toFixed(2) : '-'],
+            ["🔄 صافي حركة النقدية بالدرج", repData.netCashMovement !== undefined ? repData.netCashMovement.toFixed(2) : '-'],
+            ["💰 الرصيد النهائي بالدرج", repData.finalCashBalance !== undefined ? repData.finalCashBalance.toFixed(2) : '-']
         ];
 
         if (canViewProfits) {
@@ -1018,6 +1534,18 @@ function prepareBillHTML(type) {
         const isSalesRet = (type === 'salesReturn' || type === 'sales-return' || type === 'return_sales' || (String(type).includes('مرتجع') && (String(type).includes('بيع') || String(type).includes('مبيعات'))));
         const isPurRet = (type === 'purchaseReturn' || type === 'purchase-return' || type === 'return_purchase' || (String(type).includes('مرتجع') && (String(type).includes('شراء') || String(type).includes('مشتريات'))));
         const isSales = (type === 'sales' || type === 'sale' || type === 'بيع');
+
+        // في فواتير المبيعات: استخدام نفس كود وتصميم قالب الطباعة الفعلي المعتمد 100% (80mm/A4/A5)
+        if (isSales && typeof window.buildInvoiceDocumentHTML === 'function' && typeof window.getSalesInvoicePrintData === 'function') {
+            const invData = window.getSalesInvoicePrintData();
+            const rendered = window.buildInvoiceDocumentHTML(invData);
+            receiptArea.innerHTML = `
+                <div style="background:#ffffff; color:#000000; padding:4mm; margin:0 auto; width:100%; max-width:${rendered.pageWidth}; box-sizing:border-box; font-family:'Arial','Segoe UI',Tahoma,sans-serif; text-align:right; direction:rtl;">
+                    ${rendered.content}
+                </div>
+            `;
+            return;
+        }
         const title = isSalesRet ? "🔄 مرتجع مبيعات" : (isPurRet ? "🔄 مرتجع مشتريات" : (isSales ? "فاتورة مبيعات" : "فاتورة مشتريات 🚐"));
         const partner = isSales ? (document.getElementById('customerName')?.value.trim() || 'عميل نقدي') : (document.getElementById('supplierName')?.value.trim() || 'مورد');
         const method = isSales ? (typeof getSelectedPaymentMethod === 'function' ? getSelectedPaymentMethod('sales-section') : 'نقدي') : (document.getElementById('purchasePaymentMethod')?.value || 'نقدي');
@@ -1170,7 +1698,17 @@ async function exportElementToImage(elementOrId, fileName) {
 }
 window.exportElementToImage = exportElementToImage;
 
-function exportCurrentBill(type, format) {
+async function exportCurrentBill(type, format) {
+    if (type === 'dailyReport' && typeof isDailyReportAmountsProtected === 'function' && isDailyReportAmountsProtected()) {
+        if (typeof window.verifyAdminPinAuthorization === 'function') {
+            const ok = await window.verifyAdminPinAuthorization('📊 تصدير تقرير الحركة اليومية', 'يتطلب تصدير ملفات تقرير الحركة اليومية إدخال رمز PIN المدير.');
+            if (!ok) return false;
+        } else {
+            if (typeof showToast === 'function') showToast('🔒 المبالغ المالية محمية ولا يمكن تصديرها بدون إذن المدير', 'error');
+            return false;
+        }
+    }
+
     const actionLabel = (format === 'pdf' ? 'تصدير PDF' : (format === 'excel' ? 'تصدير ملف إكسل' : 'تصدير الصورة'));
     if (typeof validateDocumentData === 'function' && !validateDocumentData(type, actionLabel)) {
         return false;

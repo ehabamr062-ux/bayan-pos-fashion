@@ -94,7 +94,12 @@ function generateOfflineBarcodeSVG(barcodeText, width = 1.4, height = 30) {
     return '';
 }
 
-function printInvoice(invoiceData) {
+/**
+ * بناء كود HTML الكامل للفاتورة وفقاً للقالب المحدد (A4, 80mm, 57mm...)
+ * يُستخدم للطباعة وتصدير الصور (مثل واتساب) بنفس التصميم المعتمد 100%
+ */
+function buildInvoiceDocumentHTML(invoiceData) {
+    if (!invoiceData) invoiceData = {};
     // قراءة القالب المحفوظ
     const savedSettings  = JSON.parse(getStore('bayan_print_template_choice') || '{}');
     const templateChoice = invoiceData.template || savedSettings.template || '80mm Standard';
@@ -293,6 +298,23 @@ function printInvoice(invoiceData) {
                     : (templateChoice === 'A5 Modern'       || templateChoice === 'A5') ? '148mm'
                     : (templateChoice === '57mm Mobile'     || templateChoice === '57mm') ? '57mm'
                     : '80mm';
+
+    return {
+        content,
+        pageWidth,
+        docTitle,
+        shopName,
+        data: d
+    };
+}
+window.buildInvoiceDocumentHTML = buildInvoiceDocumentHTML;
+
+function printInvoice(invoiceData) {
+    const rendered = buildInvoiceDocumentHTML(invoiceData);
+    const content = rendered.content;
+    const pageWidth = rendered.pageWidth;
+    const docTitle = rendered.docTitle;
+    const shopName = rendered.shopName;
 
     // فتح نافذة طباعة مستقلة - نفس أسلوب تقرير الحركة اليومية
     const printWindow = window.open('', '_blank');

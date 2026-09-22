@@ -12,11 +12,9 @@
                 if (r === 'client') return 'client';
                 if (r === 'master') return 'master';
             }
-            const isElectronOrFile = (typeof require !== 'undefined' && typeof process !== 'undefined' && process.versions && !!process.versions.electron) || 
-                            (window.location.protocol === 'file:');
-            // إذا كان على المتصفح: يكون Master مستقلاً ما لم يقم المستخدم بإقرانه ككاشير فرعي صراحة
+            // إذا كان الجهاز مقترناً مسبقاً أو به رابط سيرفر محدد
             const isClientConfigured = (typeof getStore === 'function' && (getStore('bayan_client_is_paired') === 'true' || !!getStore('bayan_local_server_url')));
-            return (isElectronOrFile || !isClientConfigured) ? 'master' : 'client';
+            return isClientConfigured ? 'client' : 'master';
         },
         get isMasterServer() {
             return this.getTerminalRole() === 'master';
@@ -126,11 +124,11 @@
                     const { ipcRenderer } = require('electron');
                     await ipcRenderer.invoke('update-paired-device-name', { deviceId, newName: cleanName });
                 } else {
-                    await fetch(`${this.serverUrl}/api/paired-device/update-name`, {
+                    await this.fetchWithTimeout(`${this.serverUrl}/api/paired-device/update-name`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ deviceId, newName: cleanName })
-                    });
+                    }, 1500);
                 }
                 if (typeof showToast === 'function') showToast('✅ تم تعديل مسمى الجهاز بنجاح!', 'success');
                 this.openServerHubModal();
@@ -177,6 +175,12 @@
             if (typeof setStore === 'function') {
                 setStore('bayan_terminal_role', this._terminalRole);
             }
+            if (typeof require !== 'undefined') {
+                try {
+                    const { ipcRenderer } = require('electron');
+                    await ipcRenderer.invoke('set-terminal-role', this._terminalRole);
+                } catch(e) {}
+            }
             this.updateHeaderButtonUI();
 
             if (isClient) {
@@ -198,8 +202,13 @@
                     await this.checkClientPairing();
                 } else {
                     await this.pullMasterDb();
+                    this.connectLiveStream();
                 }
             } else {
+                if (this._eventSource) {
+                    try { this._eventSource.close(); } catch(e) {}
+                    this._eventSource = null;
+                }
                 this.serverUrl = 'http://127.0.0.1:4545';
                 this.isPaired = true;
                 if (typeof setStore === 'function') {
@@ -240,11 +249,159 @@
             await this.checkClientPairing();
             if (this.isPaired) {
                 await this.pullMasterDb();
+                this.connectLiveStream();
                 this.openServerHubModal();
             }
         },
 
-        fetchWithTimeout: async function(url, options = {}, timeoutMs = 3500) {
+        _eventSource: null,
+
+        // ⚡ الاتصال المباشر بقناة البث الحي اللحظي (Server-Sent Events)
+        connectLiveStream: function() {
+            if (this.isMasterServer || !this.isPaired || !this.serverUrl) return;
+            if (this._eventSource) {
+                try { this._eventSource.close(); } catch(e) {}
+                this._eventSource = null;
+            }
+            const sseUrl = `${this.serverUrl}/api/sync/live-stream?token=${encodeURIComponent(this.deviceToken || '')}&deviceId=${encodeURIComponent(this.deviceId || '')}`;
+            try {
+                const es = new EventSource(sseUrl);
+                this._eventSource = es;
+
+                es.addEventListener('connected', async (e) => {
+                    console.log('📡 [LiveStream] Connected to Master Server real-time stream!');
+                    this.isServerOnline = true;
+                    this.updateHeaderButtonUI();
+                    if (this._hasDisconnectedOnce) {
+                        this._hasDisconnectedOnce = false;
+                        try {
+                            console.log('🔄 [LiveStream] Reconnected after network interruption. Catching up with latest master data...');
+                            await this.pullMasterDb();
+                        } catch(err) {}
+                    }
+                });
+
+                es.addEventListener('DELTA_UPDATE', async (e) => {
+                    try {
+                        const payload = JSON.parse(e.data);
+                        console.log('⚡ [LiveStream] Real-time delta received from Master:', payload);
+                        if (payload && payload.db) {
+                            await this.applyLiveDelta(payload.db);
+                        }
+                    } catch(err) {
+                        console.warn('[LiveStream] Delta processing error:', err);
+                    }
+                });
+
+                es.addEventListener('TRANSFERS_UPDATED', (e) => {
+                    try {
+                        if (typeof window.refreshPendingTransfersUI === 'function') window.refreshPendingTransfersUI();
+                    } catch(err) {}
+                });
+
+                es.onerror = () => {
+                    this._hasDisconnectedOnce = true;
+                    this.isServerOnline = false;
+                    this.updateHeaderButtonUI();
+                    console.warn('[LiveStream] Connection interrupted. EventSource auto-reconnecting...');
+                };
+            } catch(err) {
+                console.warn('[LiveStream] EventSource setup error:', err);
+            }
+        },
+
+        // ⚡ تطبيق التحديثات اللحظية المباشرة في الرام والواجهة في أقل من 20 مللي ثانية (0 Reload)
+        applyLiveDelta: async function(db) {
+            if (!db || typeof db !== 'object') return;
+
+            let transactionsUpdated = false;
+            let productsUpdated = false;
+            let accountsUpdated = false;
+            let warehousesUpdated = false;
+
+            // 1. تطبيق الفواتير والعمليات
+            if (Array.isArray(db.transactions) && db.transactions.length > 0) {
+                if (!window.transactions) window.transactions = [];
+                const mergedTx = this.mergeTransactions(db.transactions, window.transactions, window.trash || []);
+                window.transactions = mergedTx;
+                if (typeof transactions !== 'undefined') transactions = mergedTx;
+                if (window.bayanDB && window.bayanDB.transactions) {
+                    try { await window.bayanDB.transactions.bulkPut(db.transactions); } catch(e) {}
+                }
+                transactionsUpdated = true;
+            }
+
+            // 2. تطبيق الأصناف والمخزون
+            if (Array.isArray(db.products) && db.products.length > 0) {
+                if (!window.productsDB) window.productsDB = [];
+                const mergedProds = this.mergeProducts(db.products, window.productsDB, window.trash || []);
+                window.productsDB = mergedProds;
+                if (typeof productsDB !== 'undefined') productsDB = mergedProds;
+                if (window.bayanDB && window.bayanDB.products) {
+                    try { await window.bayanDB.products.bulkPut(db.products); } catch(e) {}
+                }
+                productsUpdated = true;
+            }
+
+            // 3. تطبيق الحسابات
+            if (Array.isArray(db.accounts) && db.accounts.length > 0) {
+                if (!window.accounts) window.accounts = [];
+                const mergedAccs = this.mergeAccounts(db.accounts, window.accounts, window.trash || []);
+                window.accounts = mergedAccs;
+                if (typeof accounts !== 'undefined') accounts = mergedAccs;
+                if (window.bayanDB && window.bayanDB.accounts) {
+                    try { await window.bayanDB.accounts.bulkPut(db.accounts); } catch(e) {}
+                }
+                accountsUpdated = true;
+            }
+
+            // 4. تطبيق المخازن
+            if (Array.isArray(db.warehouses) && db.warehouses.length > 0) {
+                window.warehouses = this.mergeWarehouses(window.warehouses || [], db.warehouses, window.trash || []);
+                if (typeof warehouses !== 'undefined') warehouses = window.warehouses;
+                if (window.bayanDB && window.bayanDB.warehouses) {
+                    try { await window.bayanDB.warehouses.bulkPut(window.warehouses); } catch(e) {}
+                }
+                warehousesUpdated = true;
+            }
+
+            // 5. التحديث الفوري المباشر للواجهة النشطة في ثوانٍ معدودة دون إعادة تحميل
+            window.accountBalancesCache = {};
+            if (typeof invalidateStockCache === 'function') invalidateStockCache();
+            if (typeof updateDatalists === 'function') updateDatalists();
+
+            const activeSecEl = document.querySelector('.section-view:not(.hidden)');
+            const currentSecId = activeSecEl ? activeSecEl.id : '';
+
+            if (transactionsUpdated) {
+                if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
+                if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+                if (typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                if (typeof renderDailyReportTable === 'function') renderDailyReportTable();
+                if (typeof updateDashboardStats === 'function') updateDashboardStats();
+            }
+
+            if (productsUpdated) {
+                if (typeof renderCart === 'function') renderCart();
+                if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                if (currentSecId === 'inventory-section' && typeof renderInventoryTable === 'function') renderInventoryTable();
+            }
+
+            if (accountsUpdated) {
+                if (currentSecId === 'accounts-section' && typeof renderAccountsTable === 'function') renderAccountsTable();
+            }
+
+            if (warehousesUpdated) {
+                if (currentSecId === 'warehouses-section' && typeof renderWarehousesTable === 'function') renderWarehousesTable();
+                if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
+            }
+
+            if (typeof showToast === 'function' && (transactionsUpdated || productsUpdated)) {
+                showToast('⚡ تم تحديث البيانات فورياً من الشبكة', 'info');
+            }
+        },
+
+        fetchWithTimeout: async function(url, options = {}, timeoutMs = 8000) {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), timeoutMs);
             const reqHeaders = {
@@ -264,6 +421,58 @@
             }
         },
 
+        // 📱 مستشعر استيقاظ شاشة التابلت والموبايل (Screen Wakeup & Reconnection)
+        setupVisibilityWakeup: function() {
+            if (typeof document === 'undefined') return;
+            document.addEventListener('visibilitychange', async () => {
+                if (document.visibilityState === 'visible') {
+                    // الشاشة نورت وصحيت: إنعاش فوري لقناة البث الحي وسحب أي فواتير وتعديلات فوراً
+                    if (!this.isMasterServer && this.isPaired && this.serverUrl) {
+                        if (!this._eventSource || this._eventSource.readyState !== 1) {
+                            console.log('📱 [NetworkHub] Screen woke up! Re-establishing live stream...');
+                            this.connectLiveStream();
+                        }
+                        try {
+                            const infoRes = await this.fetchWithTimeout(`${this.serverUrl}/api/server-info`, {}, 2500);
+                            const info = await infoRes.json();
+                            if (info && info.lastDbUpdate && info.lastDbUpdate !== this.lastSyncedTimestamp) {
+                                console.log('🔄 [NetworkHub] New updates detected after wakeup! Pulling...');
+                                await this.pullMasterDb();
+                            }
+                        } catch(e) {}
+                    }
+                }
+            });
+        },
+
+        initDeviceId: function() {
+            if (typeof getStore === 'function') {
+                let id = getStore('bayan_client_device_id');
+                if (!id) {
+                    id = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase() + '-' + Date.now().toString(36).toUpperCase();
+                    setStore('bayan_client_device_id', id);
+                }
+                this.deviceId = id;
+
+                const storedToken = getStore('bayan_client_device_token');
+                const isStoredPaired = getStore('bayan_client_is_paired') === 'true';
+                if (storedToken && isStoredPaired) {
+                    this.deviceToken = storedToken;
+                    this.isPaired = true;
+                }
+                const storedLetter = getStore('bayan_terminal_letter');
+                if (storedLetter) this.terminalLetter = storedLetter;
+                const storedName = getStore('bayan_device_name');
+                if (storedName) this.deviceName = storedName;
+                const storedOrder = getStore('bayan_pairing_order');
+                if (storedOrder) this.pairingOrder = parseInt(storedOrder, 10);
+            } else {
+                if (!this.deviceId) {
+                    this.deviceId = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+                }
+            }
+        },
+
         init: async function() {
             try {
                 if (this._initialized) return;
@@ -274,7 +483,6 @@
                 if (this.isMasterServer) {
                     console.log('🖥️ [NetworkHub] Running as Master Server (Host / Laptop)');
                     this.setupMasterListeners();
-                    this.pushLocalDbToServer();
                 } else {
                     console.log('📱 [NetworkHub] Running as Client Terminal / Tablet -> Server URL:', this.serverUrl, '| Paired:', this.isPaired);
                     if (!this.isPaired) {
@@ -287,16 +495,18 @@
                         try {
                             await this.pullMasterDb();
                         } catch(e) {}
+                        this.connectLiveStream();
                     }
                 }
 
                 // تحديث شكل ومسمى زر السيرفر في شريط العنوان
                 this.updateHeaderButtonUI();
 
-                // بدء المزامنة الدورية الذكية للبيانات والتحويلات
+                // بدء المزامنة الدورية الذكية للبيانات والتحويلات ومستشعر الشاشة
                 this.startAutoSyncPolling();
                 this.startPendingTransfersPolling();
                 this.setupSaveDataHook();
+                this.setupVisibilityWakeup();
             } catch(err) {
                 console.warn('[NetworkHub] init error caught:', err.message);
             }
@@ -312,6 +522,10 @@
 
             setInterval(async () => {
                 if (!this.serverUrl || !this.isPaired) return;
+                // ⚡ توفير 100%: إذا كان البث اللحظي الحي (SSE) متصلاً ويعمل، نتخطى الاستطلاع تماماً (يعمل فقط كـ Fallback عند انقطاع SSE)
+                if (this._eventSource && this._eventSource.readyState === 1) {
+                    return;
+                }
                 try {
                     const infoRes = await this.fetchWithTimeout(`${this.serverUrl}/api/server-info`, {}, 1500);
                     const info = await infoRes.json();
@@ -331,6 +545,7 @@
             }, pollingInterval);
         },
 
+        _lastDeltaTime: 0,
         setupSaveDataHook: function() {
             const originalSaveData = window.saveData;
             if (typeof originalSaveData === 'function') {
@@ -346,13 +561,29 @@
 
         onDataSavedDebounceTimer: null,
 
+        // 🛡️ معالج حفظ الإعدادات: محمي تماماً من إرسال كامل بيانات المحل أثناء البيع
         onDataSaved: function() {
+            // 🛑 وضع الخمول الذكي: إذا كان الجهاز ماستر ومفيش أي أجهزة مقترنة، نتخطى إرسال كامل قاعدة البيانات لتوفير المعالج والرامات
+            if (this.isMasterServer && !this._hasPairedDevices) {
+                return;
+            }
+            // صمام أمان صارم: إذا كان هناك حفظ دلتا لفاتورة أو صنف تم مؤخراً (خلال آخر 15 ثانية)، نتجاهل البوش الكامل كلياً
+            if (this._lastDeltaTime && (Date.now() - this._lastDeltaTime < 15000)) {
+                return;
+            }
             if (this.onDataSavedDebounceTimer) {
                 clearTimeout(this.onDataSavedDebounceTimer);
             }
+            // مهلة هادئة (8 ثوانٍ) لتجميع أي تعديلات إعدادات دون إجهاد السيرفر
             this.onDataSavedDebounceTimer = setTimeout(() => {
+                if (this._lastDeltaTime && (Date.now() - this._lastDeltaTime < 15000)) {
+                    return;
+                }
+                if (this.isMasterServer && !this._hasPairedDevices) {
+                    return;
+                }
                 this.pushLocalDbToServer();
-            }, 1200);
+            }, 8000);
         },
 
         pendingDelta: {
@@ -364,6 +595,13 @@
 
         // ⚡ المزامنة الجزئية الذكية بعد حفظ الفاتورة (ترسل فقط الفاتورة والأصناف المتأثرة بدلاً من الداتابيز بالكامل)
         onDeltaSaved: function({ newTransactions = [], modifiedProducts = [], modifiedAccounts = [] } = {}) {
+            // تسجيل وقت حدوث الدلتا وإلغاء أي بوش كامل معلق فوراً
+            this._lastDeltaTime = Date.now();
+            if (this.onDataSavedDebounceTimer) {
+                clearTimeout(this.onDataSavedDebounceTimer);
+                this.onDataSavedDebounceTimer = null;
+            }
+
             if (!this.pendingDelta) {
                 this.pendingDelta = { transactions: [], products: [], accounts: [] };
             }
@@ -396,10 +634,10 @@
             if (this.onDeltaDebounceTimer) {
                 clearTimeout(this.onDeltaDebounceTimer);
             }
-            // إرسال خفيف جداً بعد 800 مللي ثانية دون أي ثقل
+            // إرسال خفيف جداً بعد 500 مللي ثانية دون أي ثقل
             this.onDeltaDebounceTimer = setTimeout(() => {
                 this.pushDeltaDbToServer();
-            }, 800);
+            }, 500);
         },
 
         pushDeltaDbToServer: async function() {
@@ -488,8 +726,11 @@
             'bayan_expiry_date'
         ]),
 
-        pushLocalDbToServer: async function() {
+        pushLocalDbToServer: async function(force = false) {
             try {
+                // 🛑 وضع الخمول الذكي: إذا كان الجهاز ماستر ومفيش أي أجهزة مقترنة حالياً، لا داعي نهائياً لحزم ونقل الداتابيز بالكامل
+                if (!force && this.isMasterServer && !this._hasPairedDevices) return;
+
                 // إذا لم تكن البيانات قد تم تحميلها بعد في الرام، نتجاهل الإرسال
                 if (!window.productsDB || !Array.isArray(window.productsDB)) return;
 
@@ -1006,7 +1247,8 @@
             if (this.isPulling) return;
             this.isPulling = true;
             try {
-                const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/pull`);
+                // ⏱️ مهلة وافية (15 ثانية) لضمان سحب كامل بضاعة ومخازن المحل للتابلت حتى مع ضعف الواي فاي
+                const res = await this.fetchWithTimeout(`${this.serverUrl}/api/sync/pull`, {}, 15000);
                 const data = await res.json();
                 if (data.success && data.db) {
                     const db = data.db;
@@ -1229,6 +1471,10 @@
                         updateLogoDisplays((db.settings && db.settings.bayan_business_logo) ? db.settings.bayan_business_logo : null);
                     }
                     console.log(`✅ [NetworkHub] Pulled all master data successfully (${window.productsDB ? window.productsDB.length : 0} products)`);
+                    if (this.hasPendingOfflineSync) {
+                        this.hasPendingOfflineSync = false;
+                        this.pushLocalDbToServer();
+                    }
                 }
             } catch (err) {
                 console.warn('[NetworkHub] pullMasterDb failed:', err.message);
@@ -1249,6 +1495,15 @@
             this.deviceToken = (typeof getStore === 'function' ? getStore('bayan_client_device_token') : null) || null;
             const isSavedPaired = (typeof getStore === 'function' ? getStore('bayan_client_is_paired') : null) === 'true';
             this.isPaired = isSavedPaired || !!this.deviceToken || this.isMasterServer;
+
+            if (typeof getStore === 'function') {
+                const storedLetter = getStore('bayan_terminal_letter');
+                if (storedLetter) this.terminalLetter = storedLetter;
+                const storedName = getStore('bayan_device_name');
+                if (storedName) this.deviceName = storedName;
+                const storedOrder = getStore('bayan_pairing_order');
+                if (storedOrder) this.pairingOrder = parseInt(storedOrder, 10);
+            }
         },
 
         setupMasterListeners: function() {
@@ -1258,7 +1513,7 @@
                 if (isHostedOnServer) {
                     setInterval(async () => {
                         try {
-                            const res = await fetch(`${this.serverUrl}/api/pair-requests/pending`);
+                            const res = await this.fetchWithTimeout(`${this.serverUrl}/api/pair-requests/pending`, {}, 1500);
                             const data = await res.json();
                             if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
                                 data.requests.forEach(req => {
@@ -1276,6 +1531,14 @@
             try {
                 const { ipcRenderer } = require('electron');
                 
+                // فحص أولي لعدد الأجهزة المقترنة لضبط وضع الخمول
+                ipcRenderer.invoke('get-paired-devices').then(list => {
+                    this._hasPairedDevices = Array.isArray(list) && list.length > 0;
+                    if (this._hasPairedDevices) {
+                        setTimeout(() => this.pushLocalDbToServer(), 12000);
+                    }
+                }).catch(() => { this._hasPairedDevices = false; });
+                
                 // تحديث البيانات عند وصول بوش من جهاز تابلت
                 ipcRenderer.on('sync-data-pushed', async (event, { db, sourceDeviceId }) => {
                     // 1. صمام أمان لمنع الدوران المزدوج: إذا كان التحديث صادر من الماستر نفسه لا نعيد الحفظ والرسم
@@ -1285,6 +1548,69 @@
                         if (db.lastUpdated) {
                             this.lastSyncedTimestamp = db.lastUpdated;
                         }
+
+                        const isDelta = (db.isDelta === true || db.syncMode === 'delta');
+
+                        // ⚡ مسار الدلتا الخفيف السريع جداً (أقل من 10ms - حماية تامة للرامات وللهاردسك من قراءة وكتابة السنين السابقة)
+                        if (isDelta) {
+                            let txChanged = false;
+                            let prodChanged = false;
+                            let accChanged = false;
+
+                            if (Array.isArray(db.transactions) && db.transactions.length > 0) {
+                                window.transactions = this.mergeTransactions(window.transactions || [], db.transactions, window.trash || []);
+                                if (typeof transactions !== 'undefined') transactions = window.transactions;
+                                if (window.bayanDB && window.bayanDB.transactions) {
+                                    try { await window.bayanDB.transactions.bulkPut(db.transactions); } catch(e) {}
+                                }
+                                txChanged = true;
+                            }
+
+                            if (Array.isArray(db.products) && db.products.length > 0) {
+                                window.productsDB = this.mergeProducts(window.productsDB || [], db.products, window.trash || []);
+                                if (typeof productsDB !== 'undefined') productsDB = window.productsDB;
+                                if (window.bayanDB && window.bayanDB.products) {
+                                    try { await window.bayanDB.products.bulkPut(db.products); } catch(e) {}
+                                }
+                                prodChanged = true;
+                            }
+
+                            if (Array.isArray(db.accounts) && db.accounts.length > 0) {
+                                window.accounts = this.mergeAccounts(window.accounts || [], db.accounts, window.trash || []);
+                                if (typeof accounts !== 'undefined') accounts = window.accounts;
+                                if (window.bayanDB && window.bayanDB.accounts) {
+                                    try { await window.bayanDB.accounts.bulkPut(db.accounts); } catch(e) {}
+                                }
+                                accChanged = true;
+                            }
+
+                            // تحديث فوري وسريع للواجهة النشطة فقط (0 Lag)
+                            window.accountBalancesCache = {};
+                            if (typeof invalidateStockCache === 'function') invalidateStockCache();
+                            if (typeof updateDatalists === 'function') updateDatalists();
+                            if (prodChanged) {
+                                if (typeof renderCart === 'function') renderCart();
+                                if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                            }
+
+                            const activeSecEl = document.querySelector('.section-view:not(.hidden)');
+                            const currentSecId = activeSecEl ? activeSecEl.id : '';
+                            if (prodChanged && currentSecId === 'inventory-section' && typeof renderInventoryTable === 'function') renderInventoryTable();
+                            if (accChanged && currentSecId === 'accounts-section' && typeof renderAccountsTable === 'function') renderAccountsTable();
+                            if (txChanged) {
+                                if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
+                                if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+                                if (typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                                if (typeof renderDailyReportTable === 'function') renderDailyReportTable();
+                                if (typeof updateDashboardStats === 'function') updateDashboardStats();
+                            }
+
+                            if (typeof showToast === 'function') {
+                                showToast('⚡ تم تحديث حركة جديدة من التابلت لحظياً', 'info');
+                            }
+                            return; // إنهاء فوري بدون لمس toArray() أو الجداول الأخرى
+                        }
+
                         const purgedTrashIds = Array.isArray(db.purgedTrashIds) ? db.purgedTrashIds : [];
                         const mergedTrash = this.mergeTrash(window.trashBin || [], db.trash || [], purgedTrashIds);
                         window.trash = window.trashBin = mergedTrash;
@@ -1398,6 +1724,7 @@
                         if (currentSecId === 'dashboard-section' && typeof updateDashboardStats === 'function') updateDashboardStats();
                         if (currentSecId === 'daily-report-section' && typeof renderDailyReportTable === 'function') renderDailyReportTable();
                         if (currentSecId === 'sales-history-section' && typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                        if (currentSecId === 'invoices-section' && typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
                         if (currentSecId === 'invoices-section' && typeof renderInvoicesTable === 'function') renderInvoicesTable();
                         if (currentSecId === 'warehouses-section' && typeof renderWarehousesTable === 'function') renderWarehousesTable();
                         if (currentSecId === 'settings-section' && typeof updateSettingsWarehouseSelect === 'function') updateSettingsWarehouseSelect();
@@ -1424,13 +1751,14 @@
                 // استقبال طلب إقران جهاز تابلت جديد
                 ipcRenderer.on('device-pairing-request', (event, reqData) => {
                     console.log('🔔 [NetworkHub] New device pairing request:', reqData);
-                    if (!this.shownPairingRequestIds.has(reqData.id) && !document.getElementById('masterPairingAlertModal')) {
-                        this.showMasterPairingAlert(reqData);
-                    }
+                    // إظهار تنبيه الرمز دائماً للماستر لتمكينه من قراءة الرمز وإعطائه للمستخدم
+                    this.showMasterPairingAlert(reqData);
                 });
 
                 // إشعار إتمام الإقران بنجاح
                 ipcRenderer.on('device-paired-success', (event, deviceData) => {
+                    this._hasPairedDevices = true;
+                    this.pushLocalDbToServer(true);
                     if (typeof showToast === 'function') {
                         showToast(`✅ تم إقران واعتماد جهاز (${deviceData.deviceName}) بنجاح!`, 'success');
                     }
@@ -1450,6 +1778,16 @@
                 ipcRenderer.on('transfer-accepted', (event, transferData) => {
                     if (typeof showToast === 'function') {
                         showToast(`✅ قام (${transferData.receivedBy || 'الفرع'}) باستلام إذن التحويل #${transferData.id || ''}!`, 'success');
+                    }
+                    if (typeof window.refreshPendingTransfersUI === 'function') {
+                        window.refreshPendingTransfersUI();
+                    }
+                });
+
+                // إشعار رفض تحويل من الفرع
+                ipcRenderer.on('transfer-rejected', (event, transferData) => {
+                    if (typeof showToast === 'function') {
+                        showToast(`❌ قام (${transferData.rejectedBy || 'الفرع'}) برفض إذن التحويل #${transferData.id || ''}!`, 'error');
                     }
                     if (typeof window.refreshPendingTransfersUI === 'function') {
                         window.refreshPendingTransfersUI();
@@ -1490,26 +1828,31 @@
                     <div style="background:#ecfdf5; border:2px dashed #059669; padding:15px; border-radius:12px; margin-bottom:25px;">
                         <div style="color:#065f46; font-size:0.9rem; font-weight:bold; margin-bottom:5px;">🔑 رمز الإقران السريع (PIN Code):</div>
                         <div style="font-size:2.4rem; font-weight:900; letter-spacing:8px; color:#047857; font-family:monospace;">${reqData.pin || '----'}</div>
-                        <div style="color:#047857; font-size:0.78rem; margin-top:5px;">أدخل هذا الرمز المعروض في شاشة التابلت لإتمام الربط بأمان</div>
+                        <div style="color:#047857; font-size:0.78rem; margin-top:5px;">أدخل هذا الرمز المعروض في شاشة التابلت لإتمام الربط بأمان (صالح لمدة 5 دقائق)</div>
                     </div>
 
-                    <button onclick="window.BayanNetworkHub.dismissPairingAlert('${reqData.id || ''}', '${reqData.deviceId || ''}')" style="background:#047857; color:#ffffff; border:none; padding:12px 30px; border-radius:10px; font-weight:bold; font-size:1rem; cursor:pointer; width:100%; transition:0.2s;">
-                        تم إعطاء الرمز للمستخدم ✓
-                    </button>
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="window.BayanNetworkHub.dismissPairingAlert('${reqData.id || ''}', '${reqData.deviceId || ''}', false)" style="flex:2; background:#047857; color:#ffffff; border:none; padding:12px 15px; border-radius:10px; font-weight:bold; font-size:0.95rem; cursor:pointer; transition:0.2s;">
+                            تم إعطاء الرمز (إغلاق النافذة) ✓
+                        </button>
+                        <button onclick="window.BayanNetworkHub.dismissPairingAlert('${reqData.id || ''}', '${reqData.deviceId || ''}', true)" style="flex:1; background:#ef4444; color:#ffffff; border:none; padding:12px 15px; border-radius:10px; font-weight:bold; font-size:0.95rem; cursor:pointer; transition:0.2s;">
+                            🚫 رفض الطلب
+                        </button>
+                    </div>
                 </div>
             `;
         },
 
-        dismissPairingAlert: function(id, deviceId) {
+        dismissPairingAlert: function(id, deviceId, isReject = false) {
             const modal = document.getElementById('masterPairingAlertModal');
             if (modal) modal.remove();
             if (id) this.shownPairingRequestIds.add(id);
 
-            // إشعار السيرفر بإخفاء الطلب وحذفه من قائمة الانتظار
+            // إشعار السيرفر (في حالة الرفض الصريح يتم إرسال action: 'reject' لإلغائه، وإلا يظل نشطاً لإدخاله في التابلت)
             fetch(`${this.serverUrl}/api/pair-requests/dismiss`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, deviceId })
+                body: JSON.stringify({ id, deviceId, action: isReject ? 'reject' : 'hide' })
             }).catch(() => {});
         },
 
@@ -1517,7 +1860,7 @@
             if (this.isMasterServer || this.isPaired) return;
 
             try {
-                const res = await fetch(`${this.serverUrl}/api/pair-request`, {
+                const res = await this.fetchWithTimeout(`${this.serverUrl}/api/pair-request`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1525,7 +1868,7 @@
                         deviceToken: this.deviceToken,
                         deviceName: navigator.userAgent.includes('Mobile') ? 'تابلت / هاتف محمول' : 'جهاز فرعي'
                     })
-                });
+                }, 1500);
 
                 const data = await res.json();
                 if (data.success && data.isPaired) {
@@ -1578,7 +1921,8 @@
 
                     <input type="text" id="clientPinField" maxlength="4" placeholder="0 0 0 0" 
                         style="width:80%; height:55px; font-size:2.2rem; font-weight:900; text-align:center; letter-spacing:10px; border:2px solid #3b82f6; border-radius:12px; margin-bottom:10px; outline:none; background:#f8fafc; font-family:monospace;"
-                        oninput="this.value = this.value.replace(/[^0-9]/g, ''); if(this.value.length===4) window.BayanNetworkHub.submitPinCode(this.value);">
+                        oninput="this.value = this.value.replace(/[^0-9]/g, ''); if(this.value.length===4) window.BayanNetworkHub.submitPinCode(this.value);"
+                        onkeydown="if(event.key==='Enter') window.BayanNetworkHub.submitPinCode(this.value);">
 
                     <div style="background:#f0f9ff; border:1px solid #bae6fd; padding:8px 12px; border-radius:10px; margin-bottom:15px; font-size:0.8rem; color:#0369a1; font-weight:700;">
                         💡 أدخل الرمز السري المكون من 4 أرقام الظاهر على شاشة السيرفر الرئيسي
@@ -1586,9 +1930,14 @@
 
                     <div id="pinErrorMsg" style="color:#ef4444; font-size:0.85rem; font-weight:bold; margin-bottom:15px; display:none;"></div>
 
-                    <button onclick="window.BayanNetworkHub.submitPinCode(document.getElementById('clientPinField').value)" style="background:#2563eb; color:#ffffff; border:none; padding:12px 30px; border-radius:10px; font-weight:bold; font-size:1rem; cursor:pointer; width:100%; transition:0.2s;">
-                        تأكيد والاتصال بالمنظومة 🚀
-                    </button>
+                    <div style="display:flex; gap:10px; margin-top:5px;">
+                        <button id="clientPinSubmitBtn" onclick="window.BayanNetworkHub.submitPinCode(document.getElementById('clientPinField').value)" style="flex:2; background:#2563eb; color:#ffffff; border:none; padding:12px 20px; border-radius:10px; font-weight:bold; font-size:1rem; cursor:pointer; transition:0.2s;">
+                            تأكيد والاتصال بالمنظومة 🚀
+                        </button>
+                        <button onclick="document.getElementById('clientPinInputModal')?.remove()" style="flex:1; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; padding:12px 15px; border-radius:10px; font-weight:bold; font-size:0.95rem; cursor:pointer; transition:0.2s;">
+                            إلغاء
+                        </button>
+                    </div>
                 </div>
             `;
             setTimeout(() => {
@@ -1597,23 +1946,41 @@
             }, 300);
         },
 
+        _isSubmittingPin: false,
+
         submitPinCode: async function(pin) {
-            if (!pin || pin.length < 4) {
+            if (this._isSubmittingPin) return;
+            const cleanPin = String(pin || '').trim();
+            if (!cleanPin || cleanPin.length < 4) {
                 const err = document.getElementById('pinErrorMsg');
                 if (err) { err.innerText = '⚠️ يرجى إدخال 4 أرقام صحيحة'; err.style.display = 'block'; }
                 return;
             }
 
+            const submitBtn = document.getElementById('clientPinSubmitBtn');
+            const pinField = document.getElementById('clientPinField');
+            const errDiv = document.getElementById('pinErrorMsg');
+            if (errDiv) errDiv.style.display = 'none';
+
+            this._isSubmittingPin = true;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerText = 'جاري التحقق والربط... ⏳';
+                submitBtn.style.opacity = '0.7';
+                submitBtn.style.cursor = 'not-allowed';
+            }
+            if (pinField) pinField.disabled = true;
+
             try {
-                const res = await fetch(`${this.serverUrl}/api/pair-verify`, {
+                const res = await this.fetchWithTimeout(`${this.serverUrl}/api/pair-verify`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         deviceId: this.deviceId,
-                        pin: pin.trim(),
+                        pin: cleanPin,
                         deviceName: navigator.userAgent.includes('Mobile') ? 'تابلت الكاشير' : 'جهاز فرعي'
                     })
-                });
+                }, 2000);
 
                 const data = await res.json();
                 if (data.success) {
@@ -1644,24 +2011,49 @@
                         showToast('🎉 تم إقران واعتماد التابلت بنجاح دائم!', 'success');
                     }
 
-                    // سحب البيانات فوراً وتحديث شاشات البرنامج بدون إعادة تحميل
+                    // سحب البيانات فوراً وتحديث شاشات البرنامج وبدء البث اللحظي
                     await this.pullMasterDb();
+                    this.connectLiveStream();
                 } else {
-                    const err = document.getElementById('pinErrorMsg');
-                    if (err) { err.innerText = '❌ ' + (data.message || 'رمز الإقران غير صحيح'); err.style.display = 'block'; }
+                    if (errDiv) { errDiv.innerText = '❌ ' + (data.message || 'رمز الإقران غير صحيح'); errDiv.style.display = 'block'; }
+                    if (pinField) {
+                        pinField.disabled = false;
+                        pinField.value = '';
+                        pinField.focus();
+                    }
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.innerText = 'تأكيد والاتصال بالمنظومة 🚀';
+                        submitBtn.style.opacity = '1';
+                        submitBtn.style.cursor = 'pointer';
+                    }
                 }
             } catch (err) {
-                const errDiv = document.getElementById('pinErrorMsg');
-                if (errDiv) { errDiv.innerText = '⚠️ تعذر الاتصال بالسيرفر الرئيسي'; errDiv.style.display = 'block'; }
+                if (errDiv) { errDiv.innerText = '⚠️ تعذر الاتصال بالسيرفر الرئيسي، يرجى التأكد من تشغيل السيرفر والاتصال بالشبكة'; errDiv.style.display = 'block'; }
+                if (pinField) {
+                    pinField.disabled = false;
+                    pinField.focus();
+                }
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = 'تأكيد والاتصال بالمنظومة 🚀';
+                    submitBtn.style.opacity = '1';
+                    submitBtn.style.cursor = 'pointer';
+                }
+            } finally {
+                this._isSubmittingPin = false;
             }
         },
 
         startPendingTransfersPolling: function() {
             // جلب أذونات التحويل المعلقة بهدوء دون استهلاك موارد
             setInterval(async () => {
+                if (this.isMasterServer && !this._hasPairedDevices) return;
                 await this.fetchPendingTransfers();
-            }, 20000);
-            this.fetchPendingTransfers();
+            }, 30000);
+            if (!this.isMasterServer || this._hasPairedDevices) {
+                this.fetchPendingTransfers();
+            }
         },
 
         fetchPendingTransfers: async function() {
@@ -1703,7 +2095,7 @@
                     const res = await ipcRenderer.invoke('check-firewall-status');
                     return !!(res && res.isOpen);
                 } else {
-                    const res = await fetch(`${this.serverUrl}/api/check-firewall`);
+                    const res = await this.fetchWithTimeout(`${this.serverUrl}/api/check-firewall`, {}, 1500);
                     const data = await res.json();
                     return !!(data && data.isOpen);
                 }
@@ -1721,52 +2113,7 @@
             const currentRole = this.getTerminalRole();
             const isMaster = (currentRole === 'master');
 
-            // 🔒 صمام أمان للأجهزة الفرعية والتابلت: نافذة معلوماتية مصغرة تمنع نسخ الرابط أو إظهار الـ QR
-            if (!isMaster) {
-                const modalId = 'serverHubModal';
-                let modal = document.getElementById(modalId);
-                if (!modal) {
-                    modal = document.createElement('div');
-                    modal.id = modalId;
-                    modal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background: rgba(15, 23, 42, 0.8) !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 9999999999 !important;';
-                    document.body.appendChild(modal);
-                } else {
-                    modal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background: rgba(15, 23, 42, 0.8) !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 9999999999 !important;';
-                }
-
-                modal.innerHTML = `
-                    <div style="background:#ffffff; padding:28px 24px; border-radius:24px; width:440px; max-width:92%; text-align:center; box-shadow:0 25px 60px rgba(0,0,0,0.35); border:2px solid #94a3b8; direction:rtl; font-family:inherit;">
-                        <div style="font-size:2.8rem; margin-bottom:8px;">🔒</div>
-                        <h3 style="margin:0 0 10px; color:#1e293b; font-size:1.25rem; font-weight:900;">
-                            إعدادات السيرفر والربط الشبكي
-                        </h3>
-                        <p style="color:#64748b; font-size:0.9rem; line-height:1.6; margin-bottom:14px;">
-                            هذا الجهاز يعمل حالياً كـ <strong>كاشير فرعي (Client)</strong> متصل بالمنظومة.<br>
-                            إدارة السيرفر، ومشاركة الروابط، وإقران أجهزة جديدة هي <strong>صلاحية حصرية للجهاز الرئيسي (الماستر)</strong> فقط لحماية أمان وبيانات المنظومة.
-                        </p>
-                        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:12px 16px; margin-bottom:14px; font-size:0.85rem; color:#334155; text-align:right;">
-                            <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-                                <span style="font-weight:bold; color:#64748b;">حالة الاتصال:</span>
-                                <span style="font-weight:900; color:${this.isPaired ? '#10b981' : '#f59e0b'};">
-                                    ${this.isPaired ? '✅ متصل ومقترن بنجاح' : '⏳ بانتظار الإقران من الماستر'}
-                                </span>
-                            </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span style="font-weight:bold; color:#64748b;">معرّف الجهاز:</span>
-                                <span style="font-family:monospace; font-weight:900; color:#0f172a;">${this.deviceId || 'DEV-CLIENT'}</span>
-                            </div>
-                        </div>
-                        <div style="background:#fffbeb; border:1px solid #fef3c7; border-radius:12px; padding:10px 14px; margin-bottom:18px; font-size:0.82rem; color:#92400e; text-align:right; line-height:1.5;">
-                            ℹ️ <strong>ملاحظة أمنية:</strong> لا يمكنك نسخ الرابط أو إقران أجهزة فرعية أخرى من هذا الجهاز. لربط أجهزة إضافية، يرجى التوجه للكمبيوتر الرئيسي.
-                        </div>
-                        <button onclick="document.getElementById('${modalId}').remove()" style="background:#0f172a; color:#ffffff; border:none; padding:11px 30px; border-radius:12px; font-weight:bold; font-size:0.95rem; cursor:pointer; width:100%; transition:0.2s;">
-                            حسناً (إغلاق)
-                        </button>
-                    </div>
-                `;
-                return;
-            }
-
+            // نافذة موحدة للمركز الشبكي تتيح التبديل بين دور الماستر والعميل وضبط الاتصال
             if (isMaster && typeof require !== 'undefined') {
                 try {
                     const { ipcRenderer } = require('electron');
@@ -1778,10 +2125,10 @@
                 } catch(e) {}
             } else if (isMaster) {
                 try {
-                    const res = await fetch(`${this.serverUrl}/api/server-info`);
+                    const res = await this.fetchWithTimeout(`${this.serverUrl}/api/server-info`, {}, 1500);
                     const info = await res.json();
                     if (info && info.ip) serverInfo = info;
-                    const fwRes = await fetch(`${this.serverUrl}/api/check-firewall`).then(r => r.json()).catch(() => ({ isOpen: false }));
+                    const fwRes = await this.fetchWithTimeout(`${this.serverUrl}/api/check-firewall`, {}, 1500).then(r => r.json()).catch(() => ({ isOpen: false }));
                     isFwOpen = !!(fwRes && fwRes.isOpen);
                 } catch(e) {}
             }
@@ -1842,6 +2189,30 @@
                                         امسح الرمز بكاميرا الموبايل/التابلت للفتح فوراً، أو انسخ الرابط واكتبه في خانة الكاشير الفرعي بالكمبيوتر الآخر.
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- 📱 بطاقة بيان فاشون موبايل والداش بورد -->
+                        <div style="background:linear-gradient(135deg, #1e1b4b, #0f172a); border:1.5px solid #8b5cf6; padding:16px; border-radius:16px; margin-bottom:15px; color:#ffffff; box-shadow:0 4px 15px rgba(139,92,246,0.15);">
+                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div style="width:42px; height:42px; border-radius:12px; background:linear-gradient(135deg, #8b5cf6, #6366f1); display:flex; align-items:center; justify-content:center; font-size:1.4rem;">📱</div>
+                                    <div style="text-align:right;">
+                                        <div style="font-weight:900; font-size:1rem; color:#ffffff;">بيان فاشون موبايل (الداش بورد والدرج)</div>
+                                        <div style="font-size:0.75rem; color:#cbd5e1; font-weight:700;">مراقبة الخزينة والكاش واليومية واستعلام الأصناف والبيع من الهاتف</div>
+                                    </div>
+                                </div>
+                                <a href="${connectUrl}/mobile" target="_blank"
+                                    style="background:linear-gradient(135deg, #8b5cf6, #7c3aed); color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:10px; font-weight:900; font-size:0.85rem; display:inline-flex; align-items:center; gap:6px; box-shadow:0 4px 12px rgba(139,92,246,0.35);">
+                                    <span>🌐</span> فتح داش بورد الموبايل
+                                </a>
+                            </div>
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.06); padding:8px 14px; border-radius:10px; font-family:monospace; font-size:0.95rem; font-weight:800; color:#c4b5fd; word-break:break-all;">
+                                <span>${connectUrl}/mobile</span>
+                                <button type="button" onclick="navigator.clipboard.writeText('${connectUrl}/mobile').then(() => { if(typeof showToast==='function') showToast('📋 تم نسخ رابط الموبايل بنجاح!', 'success'); })"
+                                    style="background:rgba(255,255,255,0.12); color:#ffffff; border:none; border-radius:6px; padding:4px 10px; font-size:0.75rem; font-weight:800; cursor:pointer;">
+                                    نسخ
+                                </button>
                             </div>
                         </div>
 
@@ -1978,7 +2349,8 @@
         removeDevice: async function(deviceId) {
             if (this.isMasterServer && typeof require !== 'undefined') {
                 const { ipcRenderer } = require('electron');
-                await ipcRenderer.invoke('remove-paired-device', deviceId);
+                const remaining = await ipcRenderer.invoke('remove-paired-device', deviceId);
+                this._hasPairedDevices = Array.isArray(remaining) && remaining.length > 0;
                 this.openServerHubModal();
                 if (typeof showToast === 'function') showToast('تم إلغاء إقران الجهاز بنجاح', 'info');
             }
@@ -1992,7 +2364,7 @@
                     const { ipcRenderer } = require('electron');
                     await ipcRenderer.invoke('fix-firewall-rule');
                 } else {
-                    const res = await fetch(`${this.serverUrl}/api/fix-firewall`, { method: 'POST' });
+                    const res = await this.fetchWithTimeout(`${this.serverUrl}/api/fix-firewall`, { method: 'POST' }, 2000);
                     await res.json();
                 }
 

@@ -11,6 +11,21 @@
             }
         }
 
+        function updateLoginUsersList() {
+            const uSelect = document.getElementById('loginUsernameInput');
+            if (!uSelect) return;
+            const currentUsers = (window.users && Array.isArray(window.users) && window.users.length > 0)
+                ? window.users
+                : ((typeof users !== 'undefined' && Array.isArray(users)) ? users : []);
+            const prevSelectedUser = uSelect.value;
+            uSelect.innerHTML = '<option value="" disabled selected>-- اختر مستخدم --</option>' + 
+                currentUsers.map(u => '<option value="' + u.name + '">' + u.name + ' (' + (u.role === 'admin' ? 'مدير' : 'كاشير') + ')</option>').join('');
+            if (prevSelectedUser && currentUsers.some(x => x.name === prevSelectedUser)) {
+                uSelect.value = prevSelectedUser;
+            }
+        }
+        window.updateLoginUsersList = updateLoginUsersList;
+
         function initLogin() {
             if (loginClockInterval) clearInterval(loginClockInterval);
             updateLoginClock();
@@ -155,8 +170,8 @@
 
         function getLoginLockoutState() {
             try {
-                const until = parseInt(localStorage.getItem('bayan_login_lockout_until') || '0', 10) || 0;
-                const attempts = parseInt(localStorage.getItem('bayan_login_failed_attempts') || '0', 10) || 0;
+                const until = parseInt((typeof getStore === 'function' ? getStore('bayan_login_lockout_until') : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('bayan_login_lockout_until') : null) || '0', 10) || 0;
+                const attempts = parseInt((typeof getStore === 'function' ? getStore('bayan_login_failed_attempts') : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('bayan_login_failed_attempts') : null) || '0', 10) || 0;
                 return { until, attempts };
             } catch(e) {
                 return { until: 0, attempts: 0 };
@@ -165,12 +180,20 @@
 
         function setLoginLockoutState(until, attempts) {
             try {
-                localStorage.setItem('bayan_login_lockout_until', String(until || 0));
-                localStorage.setItem('bayan_login_failed_attempts', String(attempts || 0));
+                if (typeof setStore === 'function') {
+                    setStore('bayan_login_lockout_until', String(until || 0));
+                    setStore('bayan_login_failed_attempts', String(attempts || 0));
+                }
+                if (typeof localStorage !== 'undefined') {
+                    try {
+                        localStorage.removeItem('bayan_login_lockout_until');
+                        localStorage.removeItem('bayan_login_failed_attempts');
+                    } catch(e) {}
+                }
             } catch(e) {}
         }
 
-        function attemptLogin() {
+        async function attemptLogin() {
             try {
                 const now = Date.now();
                 const errorMsgEl = document.getElementById('loginErrorMsg');
@@ -244,6 +267,11 @@
                 const isPinValid = (pin === foundUser.pin || pin === expectedPin || (window.BayanSecurity && typeof window.BayanSecurity.verifyPin === 'function' && window.BayanSecurity.verifyPin(pin, foundUser.pin)));
 
                 if (isPinValid) {
+                    // 🚀 ضمان اكتمال تحميل كافة بيانات النظام في الخلفية قبل فتح واجهة المبيعات
+                    if (window.loadDataPromise) {
+                        try { await window.loadDataPromise; } catch(e) { console.warn("loadData await:", e); }
+                    }
+
                     // نجاح الدخول: إعادة تعيين عداد المحاولات الخاطئة وحفظها دائماً
                     setLoginLockoutState(0, 0);
 
@@ -260,6 +288,7 @@
 
                     // ✅ أمان: نحفظ في IndexedDB حصراً - الدور والصلاحيات تُحمَّل من DB
                     currentUser = { ...foundUser, warehouseName: whName };
+                    window.currentUser = currentUser;
                     // 🔒 تشفير رمز PIN قبل حفظه في الجلسة المحلية لمنع ظهوره كنص صريح
                     const encPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
                         ? window.BayanSecurity.encryptPin(foundUser.pin)
@@ -299,6 +328,7 @@
                         switchSection('dashboard');
                     }
                     if (typeof applyPermissions === 'function') applyPermissions();
+                    if (typeof updateDashboardPermissions === 'function') updateDashboardPermissions();
                     updateNotifications();
                 } else {
                     failedLoginAttempts++;
@@ -409,6 +439,67 @@
         };
 
         // =========================================================================
+        // 📥 استرداد نسخة احتياطية طارئ مباشر من شاشة تسجيل الدخول
+        // =========================================================================
+        window.triggerLoginEmergencyRestore = function() {
+            const input = document.getElementById('loginEmergencyRestoreInput');
+            if (input) {
+                input.value = '';
+                input.click();
+            }
+        };
+
+        window.resetLoginEmergencyRestoreCard = function() {
+            const card = document.getElementById('loginEmergencyRestoreCard');
+            const title = document.getElementById('loginRestoreTitle');
+            const iconBox = document.getElementById('loginRestoreIconBox');
+            const input = document.getElementById('loginEmergencyRestoreInput');
+            if (input) input.value = '';
+            if (card) {
+                card.style.pointerEvents = 'auto';
+                card.style.opacity = '1';
+            }
+            if (title) {
+                title.innerHTML = '<span>استرداد نسخة احتياطية</span><span id="loginRestoreArrow" class="login-restore-arrow">🔄</span>';
+            }
+            if (iconBox) {
+                iconBox.innerHTML = '📥';
+            }
+        };
+
+        window.executeLoginEmergencyRestore = async function(input) {
+            if (!input || !input.files || input.files.length === 0) return;
+            const card = document.getElementById('loginEmergencyRestoreCard');
+            const title = document.getElementById('loginRestoreTitle');
+            const iconBox = document.getElementById('loginRestoreIconBox');
+
+            if (card) {
+                card.style.pointerEvents = 'none';
+                card.style.opacity = '0.75';
+            }
+            if (title) {
+                title.innerHTML = '<span>جاري فحص النسخة... ⏳</span>';
+            }
+            if (iconBox) {
+                iconBox.innerHTML = '🔄';
+            }
+
+            try {
+                if (typeof restoreData === 'function') {
+                    await restoreData(input, true); // true = isEmergencyBypass
+                } else if (typeof window.restoreData === 'function') {
+                    await window.restoreData(input, true);
+                } else {
+                    alert("❌ محرك استعادة البيانات غير جاهز، يرجى المحاولة بعد قليل.");
+                    window.resetLoginEmergencyRestoreCard();
+                }
+            } catch (err) {
+                console.error("Emergency restore error:", err);
+                window.resetLoginEmergencyRestoreCard();
+            }
+        };
+
+        // =========================================================================
         // 💳 محرك تسجيل الدخول الفوري بكروت NFC / RFID
         // =========================================================================
         function attemptNfcLogin(cardUid) {
@@ -463,6 +554,7 @@
             }
 
             currentUser = { ...foundUser, warehouseName: whName };
+            window.currentUser = currentUser;
             const encNfcPin = (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
                 ? window.BayanSecurity.encryptPin(foundUser.pin)
                 : foundUser.pin;
@@ -506,6 +598,7 @@
                 switchSection('dashboard');
             }
             if (typeof applyPermissions === 'function') applyPermissions();
+            if (typeof updateDashboardPermissions === 'function') updateDashboardPermissions();
             if (typeof updateNotifications === 'function') updateNotifications();
 
             if (typeof showToast === 'function') showToast(`💳 أهلاً بك: ${currentUser.name} (تم الدخول بكارت NFC ✨)`, 'success');
@@ -617,8 +710,10 @@
             }
 
             currentUser = null;
+            window.currentUser = null;
             removeStore('pos_session_user');
             document.body.classList.add('is-logged-out'); // إخفاء كافة العناصر
+            document.querySelectorAll('[data-perm]').forEach(t => t.style.display = '');
             document.getElementById('loginModal').classList.remove('hidden');
             initLogin();
         }
@@ -629,9 +724,8 @@
         function updateDashboardPermissions() {
             if (typeof applyPermissions === 'function') {
                 applyPermissions();
-                return;
             }
-            const tiles = document.querySelectorAll('#dashboard-section [data-perm], #daily-report-section [data-perm]');
+            const tiles = document.querySelectorAll('[data-perm]');
             tiles.forEach(tile => {
                 const perm = tile.getAttribute('data-perm');
                 if (typeof hasPermission === 'function' && hasPermission(perm)) {
@@ -641,6 +735,7 @@
                 }
             });
         }
+        window.updateDashboardPermissions = updateDashboardPermissions;
 
         // Consolidated Wallpaper Function (Moved to line 1392)
 
@@ -864,6 +959,7 @@
 
                 // إتمام تسجيل الدخول للمستخدم الجديد
                 currentUser = { ...memUser, warehouseName: 'المخزن الرئيسي' };
+                window.currentUser = currentUser;
                 setStore('pos_session_user', JSON.stringify({ pin: encPin, warehouseName: 'المخزن الرئيسي' }));
 
                 // تعبئة بيانات كارت النجاح
@@ -1018,7 +1114,7 @@
                 ctx.fillStyle = '#64748b';
                 ctx.font = 'bold 13px "Cairo", "Segoe UI", Tahoma, sans-serif';
                 const todayStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
-                ctx.fillText(`⚡ نظام بَيَان POS (Fashion Edition v${window.appVersion || '1.0.6'}) | تاريخ التفعيل: ${todayStr}`, 340, 460);
+                ctx.fillText(`⚡ نظام بَيَان POS (Fashion Edition v${window.appVersion || '3.1.1'}) | تاريخ التفعيل: ${todayStr}`, 340, 460);
 
                 ctx.fillStyle = '#f59e0b';
                 ctx.font = 'bold 12px "Cairo", "Segoe UI", Tahoma, sans-serif';

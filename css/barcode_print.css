@@ -1,0 +1,927 @@
+/* ============================================================
+ *  مركز طباعة الباركود المخصص لقطاع الملابس والأحذية والأصناف العامة
+ *  Bayan POS - Barcode & Fashion Label Printing Center
+ *  Version: 2.2.0
+ * ============================================================ */
+
+/* الحاوية الأساسية للقسم: ملاء الشاشة التلقائي الكامل والتمدد الذكي */
+#barcode-print-section {
+    display: flex !important;
+    flex-direction: column !important;
+    direction: rtl;
+    text-align: right;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: calc(100vh - 65px) !important;
+    min-height: calc(100vh - 65px) !important;
+    padding: 8px 18px 12px !important;
+    background: transparent;
+    color: #0f172a;
+    box-sizing: border-box !important;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    gap: 10px;
+    overflow: hidden !important;
+    flex: 1;
+}
+
+@media (max-height: 620px) {
+    #barcode-print-section {
+        height: auto !important;
+        min-height: calc(100vh - 65px) !important;
+        overflow-y: auto !important;
+    }
+}
+
+#barcode-print-section.hidden {
+    display: none !important;
+}
+
+/* الترويسة العليا للقسم: كارت أبيض فاخر ومحدد بلمسة ذهبية ملكية */
+.bp-header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    background: #ffffff !important;
+    border: 2px solid #d4af37 !important;
+    border-radius: 16px;
+    padding: 10px 20px;
+    margin-bottom: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 12px rgba(212, 175, 55, 0.12) !important;
+    flex-shrink: 0;
+}
+
+.bp-header-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.bp-icon-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #10b981, #059669);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+}
+
+.bp-title-text h2 {
+    margin: 0;
+    font-size: 1.38rem;
+    font-weight: 900;
+    color: #0f172a !important; /* حبر تقيل صريح */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.bp-title-text p {
+    margin: 3px 0 0;
+    font-size: 0.85rem;
+    color: #475569 !important; /* حبر داكن */
+    font-weight: 800;
+}
+
+.bp-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* عداد الملصقات الإجمالي */
+.bp-total-counter-chip {
+    background: #ecfdf5 !important;
+    border: 2px solid #10b981 !important;
+    color: #065f46 !important;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-weight: 900;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+}
+
+/* أزرار الإجراءات */
+.bp-btn {
+    border: none;
+    border-radius: 12px;
+    padding: 10px 18px;
+    font-weight: 900;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    text-decoration: none;
+}
+
+.bp-btn:hover {
+    transform: translateY(-2px);
+}
+
+.bp-btn:active {
+    transform: translateY(0);
+}
+
+.bp-btn-primary {
+    background: linear-gradient(135deg, #10b981, #059669) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);
+}
+
+.bp-btn-primary:hover {
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.55);
+}
+
+.bp-btn-gold {
+    background: linear-gradient(135deg, #d4af37, #b8860b) !important;
+    color: #0b0f19 !important;
+    box-shadow: 0 4px 15px rgba(212, 175, 55, 0.35);
+}
+
+.bp-btn-gold:hover {
+    box-shadow: 0 8px 25px rgba(212, 175, 55, 0.55);
+}
+
+.bp-btn-danger {
+    background: #fee2e2 !important;
+    color: #dc2626 !important;
+    border: 1.5px solid #fca5a5 !important;
+}
+
+.bp-btn-danger:hover {
+    background: #dc2626 !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 15px rgba(220, 38, 38, 0.35);
+}
+
+.bp-btn-secondary {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    border: 1.5px solid #cbd5e1 !important;
+}
+
+.bp-btn-secondary:hover {
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+    border-color: #94a3b8 !important;
+}
+
+/* زر إظهار / إخفاء المعاينة الحية */
+.bp-btn-toggle-preview {
+    background: #f8fafc !important;
+    border: 1.5px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    padding: 8px 14px;
+    border-radius: 12px;
+    font-weight: 900;
+    font-size: 0.88rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bp-btn-toggle-preview:hover {
+    background: #f1f5f9 !important;
+    border-color: #94a3b8 !important;
+    transform: translateY(-1px);
+}
+
+.bp-btn-toggle-preview.active {
+    background: #ecfdf5 !important;
+    border-color: #10b981 !important;
+    color: #047857 !important;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2) !important;
+}
+
+/* الشبكة الرئيسية للقسم: ملء كامل المساحة المتبقية بنظام الفليكس والجريد الممتد */
+.bp-main-layout-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 12px;
+    align-items: stretch !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    flex: 1;
+    min-height: 0 !important;
+    height: 100%;
+    transition: grid-template-columns 0.3s ease;
+}
+
+/* عندما تكون المعاينة الحية مخفية، يتمدد الجدول ليأخذ كامل مساحة الشاشة 100% */
+.bp-main-layout-grid.preview-hidden {
+    grid-template-columns: 1fr !important;
+}
+
+@media (max-width: 1024px) {
+    .bp-main-layout-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.bp-main-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    min-height: 0 !important;
+    height: 100%;
+}
+
+.bp-sidebar-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    min-height: 0 !important;
+    height: 100%;
+    transition: all 0.3s ease;
+}
+
+.bp-sidebar-col.hidden {
+    display: none !important;
+}
+
+/* الكروت البيضاء الفاخرة العصرية (Bayan Premium Cards) */
+.bp-card {
+    background: #ffffff !important;
+    border: 1.5px solid #cbd5e1 !important;
+    border-radius: 16px;
+    padding: 12px 18px;
+    margin-bottom: 0;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    box-sizing: border-box;
+    width: 100%;
+    color: #0f172a !important;
+}
+
+/* كارت البحث: ارتفاع ثابت مريح */
+.bp-search-card {
+    flex-shrink: 0;
+}
+
+/* كارت جدول الأصناف: يتمدد تلقائياً لملء كامل المساحة المتبقية حتى أسفل الشاشة */
+.bp-queue-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0 !important;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* كارت المعاينة الجانبية: يتمدد أيضاً لموازاة كارت الجدول */
+.bp-preview-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0 !important;
+    height: 100%;
+    overflow: hidden;
+}
+
+.bp-card:hover {
+    border-color: #d4af37 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12) !important;
+}
+
+.bp-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #f1f5f9;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.bp-card-title {
+    font-size: 1.12rem;
+    font-weight: 900;
+    color: #0f172a !important; /* حبر تقيل صريح */
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* القوائم المنسدلة للتصفية السريعة */
+.bp-quick-filters-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bp-filter-select {
+    height: 34px;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1.5px solid #cbd5e1 !important;
+    border-radius: 10px;
+    padding: 0 10px;
+    font-size: 0.84rem;
+    font-weight: 900;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.bp-filter-select:focus, .bp-filter-select:hover {
+    border-color: #10b981 !important;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
+}
+
+/* كارت البحث المباشر */
+.bp-search-container {
+    position: relative;
+    width: 100%;
+}
+
+.bp-search-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.bp-search-input-wrap .bp-search-icon {
+    position: absolute;
+    right: 18px;
+    font-size: 1.35rem;
+    color: #475569;
+    pointer-events: none;
+}
+
+.bp-search-input {
+    width: 100%;
+    height: 52px;
+    background: #f8fafc !important;
+    border: 2px solid #94a3b8 !important;
+    border-radius: 14px;
+    padding: 0 54px 0 110px;
+    color: #0f172a !important; /* حبر تقيل */
+    font-size: 1.05rem;
+    font-weight: 900;
+    outline: none;
+    box-sizing: border-box;
+    transition: all 0.25s ease;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+}
+
+.bp-search-input:focus {
+    background: #ffffff !important;
+    border-color: #10b981 !important;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18), inset 0 2px 4px rgba(0,0,0,0.02) !important;
+}
+
+.bp-search-input::placeholder {
+    color: #64748b !important;
+    font-weight: 700;
+    font-size: 0.92rem;
+}
+
+.bp-search-shortcut-hint {
+    position: absolute;
+    left: 14px;
+    background: #e2e8f0 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    font-size: 0.74rem;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-weight: 900;
+    pointer-events: none;
+}
+
+/* القائمة المنسدلة لنتائج البحث */
+.bp-search-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: 0;
+    background: #ffffff !important;
+    border: 2px solid #10b981 !important;
+    border-radius: 16px;
+    max-height: 400px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.22) !important;
+    display: none;
+}
+
+.bp-search-dropdown.active {
+    display: block;
+    animation: bpFadeDown 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes bpFadeDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.bp-search-result-item {
+    padding: 14px 18px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    transition: background 0.15s ease;
+    color: #0f172a !important;
+}
+
+.bp-search-result-item:last-child {
+    border-bottom: none;
+}
+
+.bp-search-result-item:hover, .bp-search-result-item.selected {
+    background: #f0fdf4 !important;
+}
+
+.bp-res-info-main {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1;
+}
+
+.bp-res-title {
+    font-size: 1.02rem;
+    font-weight: 900;
+    color: #0f172a !important; /* حبر تقيل */
+}
+
+.bp-res-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    color: #475569 !important;
+    font-weight: 800;
+}
+
+.bp-tag-barcode {
+    font-family: monospace;
+    color: #0369a1 !important;
+    background: #e0f2fe !important;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid #bae6fd !important;
+    font-weight: 900;
+}
+
+.bp-tag-fashion {
+    background: #f3e8ff !important;
+    color: #7e22ce !important;
+    border: 1px solid #e9d5ff !important;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 900;
+    font-size: 0.76rem;
+}
+
+.bp-tag-price {
+    color: #059669 !important;
+    font-weight: 900;
+}
+
+.bp-tag-stock {
+    color: #b45309 !important;
+    font-weight: 900;
+}
+
+/* شريط الإجراءات السريعة فوق جدول الطباعة */
+.bp-queue-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    background: #f8fafc !important;
+    padding: 12px 18px;
+    border-radius: 14px;
+    border: 1.5px solid #e2e8f0 !important;
+    margin-bottom: 16px;
+}
+
+.bp-queue-stats {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 0.92rem;
+    font-weight: 900;
+    color: #0f172a !important; /* حبر تقيل */
+}
+
+.bp-queue-tools-btns {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bp-tool-btn {
+    background: #ffffff !important;
+    border: 1.5px solid #cbd5e1 !important;
+    color: #0f172a !important; /* حبر تقيل */
+    padding: 7px 14px;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 900;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.04);
+}
+
+.bp-tool-btn:hover {
+    background: #f0fdf4 !important;
+    border-color: #10b981 !important;
+    color: #047857 !important;
+    transform: translateY(-1px);
+}
+
+/* جدول قائمة الأصناف المجهزة للطباعة: ملء كامل الارتفاع حتى أسفل الشاشة */
+.bp-table-container {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1.5px solid #cbd5e1 !important;
+    background: #ffffff !important;
+    flex: 1;
+    min-height: 0 !important;
+    height: 100%;
+    max-height: none !important;
+    overflow-y: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    position: relative;
+}
+
+/* شرائط تمرير ناعمة وعصرية (Slim Custom Scrollbars) */
+.bp-table-container::-webkit-scrollbar,
+.bp-search-dropdown::-webkit-scrollbar,
+.bp-preview-wrapper::-webkit-scrollbar,
+#barcode-print-section::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+}
+
+.bp-table-container::-webkit-scrollbar-thumb,
+.bp-search-dropdown::-webkit-scrollbar-thumb,
+.bp-preview-wrapper::-webkit-scrollbar-thumb,
+#barcode-print-section::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 8px;
+}
+
+.bp-table-container::-webkit-scrollbar-thumb:hover,
+.bp-search-dropdown::-webkit-scrollbar-thumb:hover,
+.bp-preview-wrapper::-webkit-scrollbar-thumb:hover,
+#barcode-print-section::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.bp-queue-table {
+    width: 100%;
+    min-width: 720px;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.bp-queue-table thead th {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 10 !important;
+    background: #f1f5f9 !important;
+    color: #0f172a !important; /* حبر تقيل */
+    padding: 11px 10px;
+    font-weight: 900;
+    border-bottom: 2px solid #cbd5e1 !important;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.bp-queue-table td:first-child,
+.bp-queue-table th:first-child {
+    padding-left: 12px !important;
+}
+
+.bp-queue-table td {
+    padding: 11px 10px;
+    border-bottom: 1px solid #e2e8f0 !important;
+    vertical-align: middle;
+    color: #0f172a !important; /* حبر تقيل */
+    font-weight: 800;
+    background: #ffffff;
+}
+
+.bp-queue-table tr:hover td {
+    background: #f8fafc !important;
+}
+
+/* حاوية التحكم بعدد النسخ داخل الجدول */
+.bp-qty-stepper {
+    display: inline-flex;
+    align-items: center;
+    background: #ffffff;
+    border: 1.5px solid #94a3b8;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.bp-stepper-btn {
+    background: #f1f5f9;
+    border: none;
+    color: #0f172a;
+    width: 30px;
+    height: 32px;
+    cursor: pointer;
+    font-weight: 900;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
+}
+
+.bp-stepper-btn:hover {
+    background: #e2e8f0;
+    color: #10b981;
+}
+
+.bp-stepper-input {
+    width: 48px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    text-align: center;
+    color: #0f172a; /* حبر تقيل */
+    font-weight: 900;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+/* كبسولة المقاس واللون في الجدول */
+.bp-variant-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    border: 1.5px solid #cbd5e1;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 0.84rem;
+    font-weight: 900;
+    color: #0f172a; /* حبر تقيل */
+}
+
+.bp-variant-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1px solid rgba(0,0,0,0.25);
+}
+
+/* باركود مصغر في الجدول */
+.bp-mini-barcode-svg {
+    max-height: 28px;
+    max-width: 95px;
+    display: block;
+    margin: 0 auto;
+    background: white;
+    padding: 2px;
+    border-radius: 4px;
+}
+
+/* حالة الجدول الفارغ */
+.bp-empty-state {
+    padding: 60px 20px;
+    text-align: center;
+    color: #475569;
+}
+
+.bp-empty-state-icon {
+    font-size: 3.8rem;
+    margin-bottom: 14px;
+    opacity: 0.7;
+}
+
+.bp-empty-state h4 {
+    margin: 0 0 8px;
+    color: #0f172a !important; /* حبر تقيل */
+    font-size: 1.18rem;
+    font-weight: 900;
+}
+
+.bp-empty-state p {
+    margin: 0;
+    font-size: 0.88rem;
+    font-weight: 800;
+    color: #64748b !important;
+}
+
+/* صندوق المعاينة الحية لملصقات الباركود: يتمدد لملء كارت المعاينة بالكامل */
+.bp-preview-wrapper {
+    background: #f8fafc !important;
+    border: 2px dashed #cbd5e1 !important;
+    border-radius: 14px;
+    padding: 14px;
+    flex: 1;
+    min-height: 0 !important;
+    height: 100%;
+    max-height: none !important;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+/* بطاقة ملصق الباركود المحاكية للشريط الحراري */
+.bp-live-sticker {
+    background: #ffffff;
+    color: #000000;
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center;
+    padding: 3px 5px;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    position: relative;
+    border: 1.5px solid #0f172a;
+    overflow: hidden;
+}
+
+.bp-stk-shop {
+    font-size: 8px;
+    font-weight: 900;
+    color: #000000;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+}
+
+.bp-stk-item {
+    font-size: 8.5px;
+    font-weight: 900;
+    color: #000000;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+}
+
+.bp-stk-barcode-svg {
+    display: block;
+    margin: 1px auto;
+    max-width: 100%;
+}
+
+.bp-stk-bottom-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0 4px;
+    font-weight: 900;
+    font-size: 8px;
+    color: #000000;
+    box-sizing: border-box;
+}
+
+.bp-stk-variant {
+    font-size: 8px;
+    font-weight: 900;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    direction: rtl;
+    padding-left: 4px;
+}
+
+.bp-stk-variant bdi {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.bp-stk-price {
+    font-size: 9px;
+    font-weight: 950;
+    white-space: nowrap;
+    flex-shrink: 0;
+    direction: ltr;
+}
+
+/* نافذة اختيار مقاسات وألوان الصنف المنبثقة (Modal) */
+.bp-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.85);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.bp-modal-overlay.hidden {
+    display: none !important;
+}
+
+.bp-modal-box {
+    background: #ffffff !important;
+    border: 2.5px solid #10b981 !important;
+    border-radius: 22px;
+    width: 100%;
+    max-width: 680px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 70px rgba(0, 0, 0, 0.35) !important;
+    overflow: hidden;
+    animation: bpZoomIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    color: #0f172a !important;
+}
+
+@keyframes bpZoomIn {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.bp-modal-header {
+    padding: 16px 22px;
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%) !important;
+    border-bottom: 2px solid rgba(167, 139, 250, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #ffffff !important;
+}
+
+.bp-modal-body {
+    padding: 22px 24px;
+    overflow-y: auto;
+    flex: 1;
+    background: #ffffff !important;
+    color: #0f172a !important;
+}
+
+.bp-modal-footer {
+    padding: 14px 22px;
+    background: #f8fafc !important;
+    border-top: 1.5px solid #e2e8f0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+/* إخفاء أي حاويات طباعة مؤقتة على شاشة البرنامج العادية */
+#bp-print-container,
+#bayan-barcode-isolated-iframe {
+    display: none !important;
+    visibility: hidden !important;
+}
+

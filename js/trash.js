@@ -203,6 +203,8 @@ const trashManager = {
                     typeLabel = 'فاتورة / عملية'; icon = '📄'; typeBg = '#fdf2f8'; typeColor = '#db2777'; break;
                 case 'account': 
                     typeLabel = 'حساب / عميل'; icon = '👤'; typeBg = '#f0fdf4'; typeColor = '#16a34a'; break;
+                case 'user': case 'مستخدم': 
+                    typeLabel = 'موظف / مستخدم'; icon = '👥'; typeBg = '#faf5ff'; typeColor = '#7e22ce'; break;
                 case 'warehouse': case 'مخزن': 
                     typeLabel = 'مخزن / فرع'; icon = '🏭'; typeBg = '#fefce8'; typeColor = '#ca8a04'; break;
                 default: 
@@ -216,29 +218,29 @@ const trashManager = {
             const safeDeletedBy = (typeof window.escapeHtml === 'function' ? window.escapeHtml(item.deletedBy || 'غير معروف') : (item.deletedBy || 'غير معروف'));
 
             tr.innerHTML = `
-                <td style="padding: 10px 14px; font-weight: bold;">
-                    <span style="background:${typeBg}; color:${typeColor}; padding:4px 10px; border-radius:8px; font-size:0.8rem; display:inline-flex; align-items:center; gap:4px; font-weight:800;">
+                <td style="padding: 12px 14px; font-weight: bold;">
+                    <span style="background:${typeBg}; color:#000000; padding:6px 12px; border-radius:8px; font-size:0.92rem; display:inline-flex; align-items:center; gap:6px; font-weight:900; border: 1.5px solid #000000;">
                         ${icon} ${typeLabel}
                     </span>
                 </td>
-                <td style="padding: 10px 14px; font-weight: 800; color: #0f172a; font-size: 0.92rem;">
+                <td style="padding: 12px 14px; font-weight: 900; color: #000000; font-size: 1.05rem;">
                     ${safeLabel}
                 </td>
-                <td style="padding: 10px 14px; text-align: center;">
-                    <span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 3px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 800; display: inline-block;">
+                <td style="padding: 12px 14px; text-align: center;">
+                    <span style="background: #f1f5f9; color: #000000; border: 2px solid #475569; padding: 5px 12px; border-radius: 8px; font-size: 0.95rem; font-weight: 900; display: inline-block;">
                         🏢 ${safeWh}
                     </span>
                 </td>
-                <td style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 0.85rem;">
+                <td style="padding: 12px 14px; font-weight: 900; color: #000000; font-size: 0.95rem;">
                     👤 ${safeDeletedBy}
                 </td>
-                <td style="padding: 10px 14px; color: #64748b; font-size: 0.8rem; font-weight: 600; direction: ltr; text-align: right;">
+                <td style="padding: 12px 14px; color: #000000; font-size: 0.95rem; font-weight: 900; direction: ltr; text-align: right;">
                     🕒 ${deleteDate}
                 </td>
-                <td style="padding: 8px 14px; text-align: center;">
+                <td style="padding: 10px 14px; text-align: center;">
                     <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
-                        <button onclick="trashManager.restore(${item.id})" class="action-btn" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; padding: 6px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 6px rgba(16,185,129,0.3); transition: 0.2s;" title="استعادة إلى النظام">🔄 استعادة</button>
-                        <button onclick="trashManager.permanentDelete(${item.id})" class="action-btn" style="background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; padding: 5px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer; white-space: nowrap; transition: 0.2s;" title="حذف نهائي لا رجعة فيه">🗑️ حذف نهائي</button>
+                        <button onclick="trashManager.restore(${item.id})" class="action-btn" style="background: #dcfce7; color: #000000; border: 2.5px solid #16a34a; padding: 7px 14px; border-radius: 8px; font-size: 0.95rem; font-weight: 900; cursor: pointer; white-space: nowrap;" title="استعادة إلى النظام">🔄 استعادة</button>
+                        <button onclick="trashManager.permanentDelete(${item.id})" class="action-btn" style="background: #fee2e2; color: #000000; border: 2.5px solid #dc2626; padding: 7px 14px; border-radius: 8px; font-size: 0.95rem; font-weight: 900; cursor: pointer; white-space: nowrap;" title="حذف نهائي لا رجعة فيه">🗑️ حذف نهائي</button>
                     </div>
                 </td>
             `;
@@ -250,13 +252,13 @@ const trashManager = {
             loadMoreTr.id = 'trashLoadMoreRow';
             loadMoreTr.style.cssText = "background: #f8fafc; text-align: center;";
             loadMoreTr.innerHTML = `
-                <td colspan="6" style="padding: 14px; border-top: 2px solid #e2e8f0;">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 15px; font-weight: 800; font-size: 0.95rem; flex-wrap: wrap;">
-                        <span style="color: #475569;">تم عرض <b>${itemsToDisplay.length}</b> من أصل <b>${totalItems}</b> عنصر محذوف</span>
-                        <button type="button" onclick="window.loadMoreTrash(50)" class="tool-btn" style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border-radius: 8px; padding: 7px 18px; cursor: pointer; border: none; font-weight: 800; box-shadow: 0 2px 6px rgba(239,68,68,0.3); font-family: 'Cairo', sans-serif; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s;">
+                <td colspan="6" style="padding: 16px; border-top: 2px solid #e2e8f0;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 15px; font-weight: 900; font-size: 1.05rem; flex-wrap: wrap;">
+                        <span style="color: #000000;">تم عرض <b>${itemsToDisplay.length}</b> من أصل <b>${totalItems}</b> عنصر محذوف</span>
+                        <button type="button" onclick="window.loadMoreTrash(50)" class="tool-btn" style="background: #fee2e2; color: #000000; border: 2.5px solid #dc2626; border-radius: 10px; padding: 10px 22px; cursor: pointer; font-weight: 900; font-size: 1.05rem; font-family: 'Cairo', sans-serif; display: inline-flex; align-items: center; gap: 6px;">
                             ⬇️ عرض المزيد (+50 عنصر)
                         </button>
-                        <button type="button" onclick="window.loadMoreTrash(0)" class="tool-btn" style="background: white; color: #475569; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 7px 16px; cursor: pointer; font-weight: 800; font-family: 'Cairo', sans-serif; transition: 0.2s;">
+                        <button type="button" onclick="window.loadMoreTrash(0)" class="tool-btn" style="background: #ffffff; color: #000000; border: 2.5px solid #475569; border-radius: 10px; padding: 10px 22px; cursor: pointer; font-weight: 900; font-size: 1.05rem; font-family: 'Cairo', sans-serif;">
                             ⚡ عرض الكل (${totalItems})
                         </button>
                     </div>
@@ -390,7 +392,11 @@ const trashManager = {
                 if (typeof db !== 'undefined' && db.products && typeof productsDB !== 'undefined' && productsDB.length > 0) {
                     await db.products.bulkPut(productsDB);
                 }
-                window.transactions = await db.transactions.toArray();
+                // دمج الحركات المستعادة في الذاكرة بذكاء لمنع استهلاك الرام بسحب كامل قاعدة البيانات
+                const restoredItems = Array.isArray(data) ? data : [data];
+                const existingMap = new Map((window.transactions || []).map(t => [t.id, t]));
+                restoredItems.forEach(t => { if (t && t.id) existingMap.set(t.id, t); });
+                window.transactions = Array.from(existingMap.values());
                 if (typeof invalidateStockCache === 'function') invalidateStockCache();
                 if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
                 window.accountBalancesCache = {};
@@ -433,6 +439,28 @@ const trashManager = {
                 if (typeof renderWarehousesTable === 'function') renderWarehousesTable();
                 if (typeof updateSettingsWarehouseSelect === 'function') updateSettingsWarehouseSelect();
                 if (typeof renderInventoryTable === 'function') renderInventoryTable();
+            } else if (itemType === 'user' || itemType === 'مستخدم') {
+                const userToRestore = Array.isArray(data) ? data[0] : data;
+                if (userToRestore) {
+                    const cleanU = typeof userToRestore === 'object' ? { ...userToRestore } : userToRestore;
+                    if (typeof users !== 'undefined' && Array.isArray(users)) {
+                        if (!users.some(u => String(u.id) === String(cleanU.id) || u.name === cleanU.name)) {
+                            users.push(cleanU);
+                            window.users = users;
+                        }
+                    }
+                    if (typeof db !== 'undefined' && db.users) {
+                        const secureU = {
+                            ...cleanU,
+                            pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                                ? window.BayanSecurity.encryptPin(cleanU.pin)
+                                : cleanU.pin
+                        };
+                        await db.users.put(secureU);
+                    }
+                    if (typeof renderUsersTable === 'function') renderUsersTable();
+                    if (typeof updateLoginUsersList === 'function') updateLoginUsersList();
+                }
             } else {
                 const itemsToRestore = Array.isArray(data) ? data : [data];
                 for (const obj of itemsToRestore) {

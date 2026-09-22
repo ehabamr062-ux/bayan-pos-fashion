@@ -492,6 +492,16 @@
             color: #b35600 !important;
         }
 
+        /* 2.5 تنزيل مربعات المبالغ لتستقر مباشرة فوق الست أزرار السفلية (الحفظ والطباعة والجديد) */
+        #sales-section .checkout-panel .amounts-grid {
+            margin-top: auto !important;
+            margin-bottom: 8px !important;
+        }
+
+        #sales-section .checkout-panel .action-bar {
+            margin-top: 0 !important;
+        }
+
         /* 3. شريط التحكم السفلي المودرن الفاخر (Modern Action Toolbar) */
         .action-bar {
             display: grid;
@@ -500,6 +510,63 @@
             margin-top: auto !important;
             padding-top: 10px;
             border-top: 1.5px solid rgba(226, 232, 240, 0.8);
+        }
+
+        /* ضبط حاوية وزر المشاركة ليتطابق حجمه تماماً مع بقية أزرار الشريط دون أي انضغاط */
+        .action-bar .share-btn-container,
+        .action-bar > div[style*="position:relative"] {
+            width: 100% !important;
+            height: 100% !important;
+            display: flex !important;
+            align-items: stretch !important;
+            justify-content: stretch !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        .action-bar .btn-share-trigger {
+            width: 100% !important;
+            height: 100% !important;
+            box-sizing: border-box !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* 🌟 نمط العرض المبسط لأزرار العمليات (صفين: حفظ كامل بالأعلى، ثم طباعة وإلغاء 50/50 بالأسفل) */
+        .action-bar.simplified-pos-actions {
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 10px !important;
+            align-items: stretch !important;
+        }
+
+        .action-bar.simplified-pos-actions .btn-save {
+            grid-column: 1 / -1 !important;
+            order: 1 !important;
+            min-height: 48px !important;
+            max-height: 52px !important;
+            font-size: 1rem !important;
+        }
+
+        .action-bar.simplified-pos-actions .btn-print {
+            grid-column: 1 !important;
+            order: 2 !important;
+            min-height: 48px !important;
+            max-height: 52px !important;
+            font-size: 0.92rem !important;
+        }
+
+        .action-bar.simplified-pos-actions .btn-cancel-sales {
+            grid-column: 2 !important;
+            order: 3 !important;
+            min-height: 48px !important;
+            max-height: 52px !important;
+            font-size: 0.92rem !important;
+        }
+
+        /* في الشاشات التي لا تحتوي زر إلغاء (مثل المرتجع)، يأخذ زر الطباعة العرض كاملاً */
+        #sales-return-section .action-bar.simplified-pos-actions .btn-print,
+        #purchase-return-section .action-bar.simplified-pos-actions .btn-print {
+            grid-column: 1 / -1 !important;
+            order: 2 !important;
         }
 
         .action-btn {
@@ -1194,6 +1261,558 @@
             background-color: rgba(26, 26, 28, 0.95);
             border-color: rgba(212, 175, 55, 0.3);
             box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        /* صندوق مشاركة الواتساب بالصورة ورقم الهاتف */
+        .wa-share-card {
+            width: 100% !important;
+            box-sizing: border-box !important;
+            background: #f0fdf4 !important;
+            border: 2px solid #22c55e !important;
+            border-radius: 18px !important;
+            padding: 12px 14px !important;
+            margin-bottom: 14px !important;
+            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.12) !important;
+            transition: all 0.25s ease !important;
+        }
+
+        .wa-share-header {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            margin-bottom: 8px !important;
+        }
+
+        .wa-share-title {
+            font-weight: 900 !important;
+            color: #15803d !important;
+            font-size: 1.05rem !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+        }
+
+        .wa-share-partner {
+            font-size: 0.85rem !important;
+            font-weight: bold !important;
+            color: #475569 !important;
+            max-width: 160px !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+
+        .wa-share-body {
+            display: flex !important;
+            gap: 8px !important;
+            align-items: center !important;
+        }
+
+        .wa-share-body input {
+            flex: 1 !important;
+            min-width: 0 !important;
+            padding: 10px 12px !important;
+            margin: 0 !important;
+            border: 1.5px solid #86efac !important;
+            border-radius: 12px !important;
+            font-size: 1.1rem !important;
+            font-weight: bold !important;
+            text-align: center !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            outline: none !important;
+            transition: border-color 0.2s, box-shadow 0.2s !important;
+        }
+
+        .wa-share-body input:focus {
+            border-color: #22c55e !important;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25) !important;
+        }
+
+        .wa-share-body button {
+            background: #22c55e !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 12px !important;
+            padding: 10px 18px !important;
+            font-weight: 900 !important;
+            font-size: 1.05rem !important;
+            cursor: pointer !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            white-space: nowrap !important;
+            transition: 0.2s ease !important;
+            box-shadow: 0 3px 10px rgba(34, 197, 94, 0.3) !important;
+        }
+
+        .wa-share-body button:hover {
+            background: #16a34a !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 16px rgba(34, 197, 94, 0.4) !important;
+        }
+
+        .wa-share-body button:active {
+            transform: translateY(0) !important;
+        }
+
+        /* أزرار المشاركة المزدوجة (صورة ونص) */
+        .wa-share-dual-actions {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+            margin-top: 10px !important;
+        }
+
+        .btn-wa-action {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 6px !important;
+            padding: 10px 8px !important;
+            border-radius: 12px !important;
+            font-weight: 900 !important;
+            font-size: 0.88rem !important;
+            cursor: pointer !important;
+            border: none !important;
+            transition: 0.2s ease !important;
+            white-space: nowrap !important;
+            text-align: center !important;
+        }
+
+        .btn-wa-image {
+            background: linear-gradient(135deg, #16a34a, #15803d) !important;
+            color: #ffffff !important;
+            box-shadow: 0 3px 10px rgba(22, 163, 74, 0.3) !important;
+        }
+
+        .btn-wa-image:hover {
+            background: linear-gradient(135deg, #15803d, #166534) !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 16px rgba(22, 163, 74, 0.4) !important;
+        }
+
+        .btn-wa-text {
+            background: linear-gradient(135deg, #0284c7, #0369a1) !important;
+            color: #ffffff !important;
+            box-shadow: 0 3px 10px rgba(2, 132, 199, 0.3) !important;
+        }
+
+        .btn-wa-text:hover {
+            background: linear-gradient(135deg, #0369a1, #075985) !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 16px rgba(2, 132, 199, 0.4) !important;
+        }
+
+        .btn-wa-action:disabled {
+            opacity: 0.75 !important;
+            cursor: not-allowed !important;
+            transform: none !important;
+        }
+
+        /* شريط التنبيه للكاشير لاختصار اللصق */
+        .wa-paste-hint-badge {
+            margin-top: 10px !important;
+            padding: 8px 12px !important;
+            background: rgba(34, 197, 94, 0.12) !important;
+            border: 1px dashed #22c55e !important;
+            border-radius: 10px !important;
+            font-size: 0.8rem !important;
+            font-weight: 700 !important;
+            color: #166534 !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            text-align: right !important;
+            line-height: 1.4 !important;
+        }
+
+        .wa-paste-hint-badge kbd {
+            background: #ffffff !important;
+            border: 1px solid #86efac !important;
+            border-bottom: 2px solid #22c55e !important;
+            border-radius: 5px !important;
+            padding: 1px 6px !important;
+            font-size: 0.82rem !important;
+            font-weight: 900 !important;
+            color: #15803d !important;
+        }
+
+        /* نافذة المساعد المنبثقة للاختصار Ctrl + V */
+        .wa-paste-helper-dialog {
+            background: #ffffff !important;
+            border-radius: 24px !important;
+            padding: 26px 30px !important;
+            max-width: 440px !important;
+            width: 90% !important;
+            text-align: center !important;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45) !important;
+            border: 2.5px solid #22c55e !important;
+            animation: modalSlideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+            direction: rtl !important;
+            color: #0f172a !important;
+        }
+
+        .wa-paste-helper-icon {
+            font-size: 3.2rem !important;
+            margin-bottom: 8px !important;
+            display: inline-block !important;
+        }
+
+        .wa-paste-helper-title {
+            font-size: 1.35rem !important;
+            font-weight: 900 !important;
+            color: #15803d !important;
+            margin-bottom: 8px !important;
+        }
+
+        .wa-paste-helper-desc {
+            font-size: 0.95rem !important;
+            color: #475569 !important;
+            margin-bottom: 12px !important;
+            line-height: 1.5 !important;
+        }
+
+        .wa-keyboard-keys {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 12px !important;
+            margin: 16px 0 !important;
+        }
+
+        .kbd-key {
+            background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%) !important;
+            border: 2px solid #34d399 !important;
+            border-bottom: 5px solid #059669 !important;
+            border-radius: 12px !important;
+            padding: 8px 20px !important;
+            font-size: 1.55rem !important;
+            font-weight: 900 !important;
+            color: #065f46 !important;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25) !important;
+            letter-spacing: 1px !important;
+        }
+
+        .kbd-plus {
+            font-size: 1.8rem !important;
+            font-weight: 900 !important;
+            color: #10b981 !important;
+        }
+
+        .kbd-small {
+            font-size: 0.85rem !important;
+            padding: 2px 8px !important;
+            border-bottom-width: 3px !important;
+            display: inline-block !important;
+        }
+
+        .wa-paste-helper-sub {
+            font-size: 0.88rem !important;
+            color: #64748b !important;
+            margin-bottom: 20px !important;
+            line-height: 1.4 !important;
+        }
+
+        .wa-paste-helper-close-btn {
+            background: #22c55e !important;
+            color: #ffffff !important;
+            font-weight: 900 !important;
+            font-size: 1.1rem !important;
+            border: none !important;
+            border-radius: 14px !important;
+            padding: 11px 32px !important;
+            cursor: pointer !important;
+            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4) !important;
+            transition: 0.2s ease !important;
+        }
+
+        .wa-paste-helper-close-btn:hover {
+            background: #16a34a !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(34, 197, 94, 0.5) !important;
+        }
+
+        .wa-spin {
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Dark mode for wa-share-card */
+        body.dark-mode .wa-share-card {
+            background: rgba(34, 197, 94, 0.12) !important;
+            border-color: #22c55e !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        body.dark-mode .wa-share-title {
+            color: #4ade80 !important;
+        }
+
+        body.dark-mode .wa-share-partner {
+            color: #cbd5e1 !important;
+        }
+
+        body.dark-mode .wa-share-body input {
+            background: #1e293b !important;
+            color: #22c55e !important;
+            border-color: #334155 !important;
+        }
+
+        body.dark-mode .wa-share-body input:focus {
+            border-color: #22c55e !important;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.35) !important;
+        }
+
+        body.dark-mode .wa-paste-hint-badge {
+            background: rgba(34, 197, 94, 0.15) !important;
+            border-color: #22c55e !important;
+            color: #86efac !important;
+        }
+
+        body.dark-mode .wa-paste-hint-badge kbd {
+            background: #1e293b !important;
+            border-color: #334155 !important;
+            border-bottom-color: #22c55e !important;
+            color: #4ade80 !important;
+        }
+
+        body.dark-mode .wa-paste-helper-dialog {
+            background: #1e293b !important;
+            color: #f8fafc !important;
+            border-color: #22c55e !important;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7) !important;
+        }
+
+        body.dark-mode .wa-paste-helper-title {
+            color: #4ade80 !important;
+        }
+
+        body.dark-mode .wa-paste-helper-desc {
+            color: #cbd5e1 !important;
+        }
+
+        body.dark-mode .wa-paste-helper-sub {
+            color: #94a3b8 !important;
+        }
+
+        body.dark-mode .kbd-key {
+            background: linear-gradient(180deg, #064e3b 0%, #022c22 100%) !important;
+            border-color: #10b981 !important;
+            border-bottom-color: #047857 !important;
+            color: #6ee7b7 !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        /* ========================================================= */
+        /* النافذة الأفقية العريضة لخيارات الفاتورة (Landscape Share Dialog) */
+        /* ========================================================= */
+        .share-menu.horizontal-popup,
+        .centered-popup.horizontal-popup,
+        .centered-modal.horizontal-popup {
+            width: 780px !important;
+            max-width: 95vw !important;
+            padding: 30px 24px 22px 24px !important;
+            border-radius: 22px !important;
+        }
+
+        .share-menu.horizontal-popup .modal-title,
+        .centered-popup.horizontal-popup .modal-title {
+            margin-bottom: 16px !important;
+            padding-bottom: 8px !important;
+            font-size: 1.35rem !important;
+        }
+
+        .share-modal-grid {
+            display: grid !important;
+            grid-template-columns: 1.12fr 1fr !important;
+            gap: 14px !important;
+            align-items: stretch !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+        }
+
+        .share-grid-col-wa {
+            display: flex !important;
+            flex-direction: column !important;
+            height: 100% !important;
+        }
+
+        .share-grid-col-wa .wa-share-card {
+            margin-bottom: 0 !important;
+            height: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            box-sizing: border-box !important;
+        }
+
+        .share-grid-col-options {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 10px !important;
+            align-content: stretch !important;
+            height: 100% !important;
+        }
+
+        .share-action-card {
+            background: #ffffff !important;
+            border: 1.5px solid #e2e8f0 !important;
+            border-radius: 14px !important;
+            padding: 12px 10px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            text-align: center !important;
+            cursor: pointer !important;
+            transition: all 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+            gap: 5px !important;
+            box-sizing: border-box !important;
+            user-select: none !important;
+            position: relative !important;
+            overflow: hidden !important;
+            min-height: 85px !important;
+        }
+
+        .share-action-card:hover {
+            transform: translateY(-3px) scale(1.02) !important;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+        }
+
+        .share-action-card:active {
+            transform: translateY(0) scale(0.98) !important;
+        }
+
+        .share-action-card .card-icon {
+            font-size: 1.7rem !important;
+            line-height: 1 !important;
+            display: inline-block !important;
+        }
+
+        .share-action-card .card-title {
+            font-weight: 900 !important;
+            font-size: 0.92rem !important;
+            color: #0f172a !important;
+            line-height: 1.2 !important;
+        }
+
+        .share-action-card .card-desc {
+            font-size: 0.72rem !important;
+            color: #64748b !important;
+            font-weight: 700 !important;
+            line-height: 1.2 !important;
+        }
+
+        /* تمييز الكروت الأربعة بألوان واضحة وبراقة */
+        .share-action-card.card-print {
+            border: 2px solid #3b82f6 !important;
+            background: linear-gradient(135deg, #eff6ff, #dbeafe) !important;
+        }
+        .share-action-card.card-print .card-title {
+            color: #1d4ed8 !important;
+        }
+        .share-action-card.card-print:hover {
+            background: linear-gradient(135deg, #dbeafe, #bfdbfe) !important;
+            box-shadow: 0 8px 22px rgba(37, 99, 235, 0.25) !important;
+        }
+
+        .share-action-card.card-pdf {
+            border: 1.5px solid #fca5a5 !important;
+            background: linear-gradient(135deg, #fff5f5, #fee2e2) !important;
+        }
+        .share-action-card.card-pdf .card-title {
+            color: #b91c1c !important;
+        }
+        .share-action-card.card-pdf:hover {
+            border-color: #ef4444 !important;
+            box-shadow: 0 8px 22px rgba(239, 68, 68, 0.22) !important;
+        }
+
+        .share-action-card.card-excel {
+            border: 1.5px solid #86efac !important;
+            background: linear-gradient(135deg, #f0fdf4, #dcfce7) !important;
+        }
+        .share-action-card.card-excel .card-title {
+            color: #15803d !important;
+        }
+        .share-action-card.card-excel:hover {
+            border-color: #22c55e !important;
+            box-shadow: 0 8px 22px rgba(34, 197, 94, 0.22) !important;
+        }
+
+        .share-action-card.card-tg {
+            border: 1.5px solid #7dd3fc !important;
+            background: linear-gradient(135deg, #f0f9ff, #e0f2fe) !important;
+        }
+        .share-action-card.card-tg .card-title {
+            color: #0369a1 !important;
+        }
+        .share-action-card.card-tg:hover {
+            border-color: #0284c7 !important;
+            box-shadow: 0 8px 22px rgba(2, 132, 199, 0.22) !important;
+        }
+
+        /* Dark Mode للمظهر الأفقي */
+        body.dark-mode .share-menu.horizontal-popup,
+        body.dark-mode .centered-popup.horizontal-popup {
+            background: rgba(15, 23, 42, 0.96) !important;
+            border-color: var(--accent-gold) !important;
+        }
+
+        body.dark-mode .share-action-card {
+            background: #1e293b !important;
+            border-color: #334155 !important;
+        }
+
+        body.dark-mode .share-action-card.card-print {
+            background: linear-gradient(135deg, #1e3a8a, #172554) !important;
+            border-color: #3b82f6 !important;
+        }
+        body.dark-mode .share-action-card.card-print .card-title {
+            color: #93c5fd !important;
+        }
+
+        body.dark-mode .share-action-card.card-pdf {
+            background: linear-gradient(135deg, #7f1d1d, #450a0a) !important;
+            border-color: #ef4444 !important;
+        }
+        body.dark-mode .share-action-card.card-pdf .card-title {
+            color: #fca5a5 !important;
+        }
+
+        body.dark-mode .share-action-card.card-excel {
+            background: linear-gradient(135deg, #064e3b, #022c22) !important;
+            border-color: #10b981 !important;
+        }
+        body.dark-mode .share-action-card.card-excel .card-title {
+            color: #86efac !important;
+        }
+
+        body.dark-mode .share-action-card.card-tg {
+            background: linear-gradient(135deg, #0c4a6e, #082f49) !important;
+            border-color: #0ea5e9 !important;
+        }
+        body.dark-mode .share-action-card.card-tg .card-title {
+            color: #7dd3fc !important;
+        }
+
+        body.dark-mode .share-action-card .card-desc {
+            color: #94a3b8 !important;
+        }
+
+        /* استجابة الشاشات الصغيرة */
+        @media (max-width: 768px) {
+            .share-menu.horizontal-popup,
+            .centered-popup.horizontal-popup {
+                width: 95vw !important;
+                padding: 24px 14px 18px 14px !important;
+                max-height: 90vh !important;
+                overflow-y: auto !important;
+            }
+            .share-modal-grid {
+                grid-template-columns: 1fr !important;
+            }
         }
 
         /* تحويل جميع الخانات والمداخل للوضع الذهبي */

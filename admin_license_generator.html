@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>أداة الإدارة الرسمية - مولد تراخيص بَيَان POS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --success: #10b981;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: var(--bg);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 550px;
+            padding: 35px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 900;
+            color: #fff;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+        .badge-secure {
+            display: inline-block;
+            background: rgba(99, 102, 241, 0.15);
+            color: #818cf8;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-top: 10px;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #cbd5e1;
+        }
+        input, select {
+            width: 100%;
+            padding: 14px 16px;
+            background: #0f172a;
+            border: 1.5px solid var(--border);
+            border-radius: 12px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus, select:focus {
+            border-color: var(--accent);
+        }
+        .btn-generate {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 900;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            margin-top: 10px;
+        }
+        .btn-generate:hover {
+            opacity: 0.95;
+            transform: translateY(-2px);
+        }
+        .btn-generate:active {
+            transform: translateY(0);
+        }
+        .result-box {
+            display: none;
+            margin-top: 25px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1.5px solid rgba(16, 185, 129, 0.3);
+            border-radius: 14px;
+            padding: 20px;
+        }
+        .result-title {
+            color: var(--success);
+            font-size: 0.9rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        .key-display {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #34d399;
+            background: #064e3b;
+            padding: 14px;
+            border-radius: 10px;
+            text-align: center;
+            letter-spacing: 2px;
+            user-select: all;
+            margin-bottom: 15px;
+            border: 1px dashed rgba(52, 211, 153, 0.4);
+        }
+        .btn-copy {
+            width: 100%;
+            padding: 12px;
+            background: #10b981;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn-copy:hover { background: #059669; }
+        .details-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            margin-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ مولد تراخيص بَيَان POS</h1>
+            <p>أداة الإدارة المستقلة لتوليد أكواد التفعيل الآمنة للعملاء</p>
+            <div class="badge-secure">نسخة الإدارة المشفرة فقط 🔒</div>
+        </div>
+
+        <div class="form-group">
+            <label for="machineId">معرف الجهاز (Machine ID / HWID):</label>
+            <input type="text" id="machineId" placeholder="مثال: A1B2-C3D4-E5F6 أو HWID-..." required autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="planSelect">باقة الاشتراك:</label>
+            <select id="planSelect">
+                <option value="M">باقة شهرية (30 يوماً)</option>
+                <option value="A">باقة سنوية (365 يوماً)</option>
+                <option value="L" selected>باقة مدى الحياة (Lifetime)</option>
+            </select>
+        </div>
+
+        <button class="btn-generate" onclick="generateKey()">⚡ توليد كود التفعيل الآن</button>
+
+        <div class="result-box" id="resultBox">
+            <div class="result-title">✅ تم إنشاء كود التفعيل بنجاح:</div>
+            <div class="key-display" id="keyDisplay">---</div>
+            <button class="btn-copy" onclick="copyKey()">📋 نسخ الكود لإرساله للعميل</button>
+            <div class="details-row">
+                <span>تاريخ انتهاء الصلاحية:</span>
+                <b id="expiryDisplay" style="color:#fff;">---</b>
+            </div>
+            <div class="details-row">
+                <span>الباقة المعتمدة:</span>
+                <b id="planDisplay" style="color:#818cf8;">---</b>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SECRET_KEY = atob("QkFZQU5fUE9TX1NFQ1JFVF9LRVlfMjAyNg==");
+
+        async function generateKey() {
+            const mId = document.getElementById('machineId').value.trim();
+            if (!mId) {
+                alert('⚠️ يرجى إدخال Machine ID الخاص بجهاز العميل أولاً.');
+                document.getElementById('machineId').focus();
+                return;
+            }
+
+            const planChar = document.getElementById('planSelect').value;
+            let expiryDate = new Date();
+            let planName = 'الباقة مدى الحياة';
+
+            if (planChar === 'M') {
+                planName = 'الباقة الشهرية';
+                expiryDate.setDate(expiryDate.getDate() + 30);
+            } else if (planChar === 'A') {
+                planName = 'الباقة السنوية';
+                expiryDate.setDate(expiryDate.getDate() + 365);
+            } else {
+                planName = 'الباقة مدى الحياة';
+                expiryDate = new Date(2099, 11, 31);
+            }
+
+            const dd = String(expiryDate.getDate()).padStart(2, '0');
+            const mm = String(expiryDate.getMonth() + 1).padStart(2, '0');
+            const yy = String(expiryDate.getFullYear()).slice(-2);
+            const dateStr = dd + mm + yy;
+
+            const payload = dateStr + planChar;
+            const fullDataStr = mId.toUpperCase() + payload;
+
+            // HMAC-SHA256 via SubtleCrypto
+            try {
+                const encoder = new TextEncoder();
+                const keyData = encoder.encode(SECRET_KEY);
+                const cryptoKey = await window.crypto.subtle.importKey(
+                    "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+                );
+                const signature = await window.crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(fullDataStr));
+                const hashArray = Array.from(new Uint8Array(signature));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+                const hash8 = hashHex.substring(0, 8);
+
+                const finalKey = `BYN-${dateStr}-${planChar}-${hash8}`;
+
+                document.getElementById('keyDisplay').innerText = finalKey;
+                document.getElementById('expiryDisplay').innerText = expiryDate.toLocaleDateString('ar-EG');
+                document.getElementById('planDisplay').innerText = planName;
+                document.getElementById('resultBox').style.display = 'block';
+            } catch (err) {
+                alert('❌ حدث خطأ في معالجة التشفير: ' + err.message);
+            }
+        }
+
+        function copyKey() {
+            const key = document.getElementById('keyDisplay').innerText;
+            if (!key || key === '---') return;
+            navigator.clipboard.writeText(key).then(() => {
+                alert('✅ تم نسخ الكود بنجاح إلى الحافظة!');
+            }).catch(() => {
+                prompt('انسخ الكود من هنا:', key);
+            });
+        }
+    </script>
+</body>
+</html>

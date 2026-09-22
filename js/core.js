@@ -3,7 +3,7 @@ function openExternalUrl(url) {
     if (!url || typeof url !== 'string') return;
     const cleanUrl = url.trim();
     // 🔒 صمام الأمان الفولاذي: حصر الفتح بالبروتوكولات الآمنة ومنع تشغيل أي ملفات أو أوامر تنفيذية
-    if (!/^https?:\/\//i.test(cleanUrl) && !/^mailto:/i.test(cleanUrl) && !/^tel:/i.test(cleanUrl)) {
+    if (!/^https?:\/\//i.test(cleanUrl) && !/^mailto:/i.test(cleanUrl) && !/^tel:/i.test(cleanUrl) && !/^anydesk:/i.test(cleanUrl)) {
         console.warn('⚠️ [Security Shield] Blocked opening untrusted external URL protocol:', cleanUrl);
         return;
     }
@@ -47,11 +47,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '1.0.6';
-window.APP_VERSION = '1.0.6';
+window.appVersion = '3.1.1';
+window.APP_VERSION = '3.1.1';
 
 async function fetchAppVersion() {
-    let version = '1.0.6';
+    let version = '3.1.1';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -65,7 +65,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '1.0.6';
+    if (!version) version = window.appVersion || '3.1.1';
     window.appVersion = version;
     window.APP_VERSION = version;
 
@@ -154,6 +154,16 @@ db.version(101).stores({
     syncQueue: "++id, timestamp, action, type, status",
     warehouses: "++id, name"
 });
+
+// 🛡️ حماية قاعدة البيانات من التعليق والأقفال المتعارضة (Anti-Block & VersionChange Auto-Release)
+db.on('blocked', () => {
+    console.warn("⚠️ [Dexie] تم رصد قفل معلق على قاعدة البيانات من نافذة أخرى. جاري المتابعة لتفادي توقف البرنامج...");
+});
+db.on('versionchange', () => {
+    console.warn("⚠️ [Dexie] تم رصد ترقية نسخة قاعدة البيانات. إغلاق الاتصال المؤقت بسلاسة لمنع التعليق...");
+    try { db.close(); } catch(e) {}
+});
+
 window.db = db;
 if (typeof window.bayanDB === 'undefined' || !window.bayanDB) {
     window.bayanDB = db;
@@ -238,16 +248,162 @@ window.auditLogs = []; // سجل التدقيق للعمليات الحساسة
 window.selectedAccountID = null; // الحساب المحدد في الجدول
 
 /**
-
- * دالة تسجيل العمليات الحساسة (Audit Logger)
-
+ * دوال مساعدة موحدة للتحقق من حسابات مديري النظام ديناميكياً لدعم خصوصية الفواتير
  */
+window.getAdminUserNames = function() {
+    const adminSet = new Set(['المدير', 'المدير العام', 'مدير النظام', 'admin', 'administrator']);
+    const uList = (window.users && Array.isArray(window.users) && window.users.length > 0)
+        ? window.users
+        : ((typeof users !== 'undefined' && Array.isArray(users)) ? users : []);
+    uList.forEach(u => {
+        if (u && u.role === 'admin' && u.name) {
+            adminSet.add(String(u.name).trim().toLowerCase());
+        }
+    });
+    return adminSet;
+};
+
+window.isUserAdminName = function(userName) {
+    if (!userName) return false;
+    const clean = String(userName).trim().toLowerCase();
+    const adminSet = window.getAdminUserNames();
+    return adminSet.has(clean);
+};
+
+/**
+ * ⚡ نظام التحميل الذكي عند الطلب ومزامنة الفواتير (Lazy & On-Demand Loader)
+ * لحماية الذاكرة والسرعة الخارقة لأقل من 1 ثانية مع الاحتفاظ بكافة فواتير السنين في IndexedDB
+ */
+window.ensureInvoiceLoaded = async function(invoiceId) {
+    if (!invoiceId || invoiceId === '---') return [];
+    const sId = String(invoiceId).trim();
+    if (!sId) return [];
+    
+    // هل الفاتورة موجودة بالفعل في الذاكرة؟
+    const inMem = (window.transactions || []).filter(t => t && String(t.invoiceId) === sId);
+    if (inMem.length > 0) return inMem;
+    
+    // استدعاء فوري للفاتورة من IndexedDB عبر الفهرس السريع
+    try {
+        if (!window.db || !window.db.transactions) return [];
+        const numId = Number(sId);
+        const queryKeys = !isNaN(numId) ? [sId, numId] : [sId];
+        const fromDB = await window.db.transactions.where('invoiceId').anyOf(queryKeys).toArray();
+        if (fromDB && fromDB.length > 0) {
+            const existingIds = new Set((window.transactions || []).map(t => t ? t.id : null));
+            fromDB.forEach(row => {
+                if (row && row.id && !existingIds.has(row.id)) {
+                    window.transactions.push(row);
+                    existingIds.add(row.id);
+                }
+            });
+            return fromDB;
+        }
+    } catch(e) {
+        console.warn("⚠️ ensureInvoiceLoaded notice:", e);
+    }
+    return [];
+};
+
+window.loadTransactionsForDateRange = async function(fromDate, toDate) {
+    if (!fromDate && !toDate) return;
+    try {
+        if (!window.db || !window.db.transactions) return;
+        let q;
+        if (fromDate && toDate) {
+            q = window.db.transactions.where('dateISO').between(fromDate, toDate, true, true);
+        } else if (fromDate) {
+            q = window.db.transactions.where('dateISO').aboveOrEqual(fromDate);
+        } else {
+            q = window.db.transactions.where('dateISO').belowOrEqual(toDate);
+        }
+        const records = await q.toArray();
+        if (records && records.length > 0) {
+            const existingIds = new Set((window.transactions || []).map(t => t ? t.id : null));
+            records.forEach(row => {
+                if (row && row.id && !existingIds.has(row.id)) {
+                    window.transactions.push(row);
+                    existingIds.add(row.id);
+                }
+            });
+        }
+    } catch(e) {
+        console.warn("⚠️ loadTransactionsForDateRange notice:", e);
+    }
+};
+
+window.syncMaxSequencesFromDB = async function() {
+    try {
+        if (!window.db || !window.db.transactions) return;
+
+        // فحص عدد الحركات وقراءة الأحدث لتحديد أقصى رقم مسجل فعلياً لكل نوع
+        const totalCount = await window.db.transactions.count().catch(() => 0);
+        let recent = [];
+        if (totalCount <= 3000) {
+            recent = await window.db.transactions.toArray().catch(() => []);
+        } else {
+            recent = await window.db.transactions.orderBy('id').reverse().limit(1500).toArray().catch(() => []);
+        }
+        
+        const types = ['بيع', 'شراء', 'مرتجع بيع', 'مرتجع شراء', 'تسوية', 'قبض', 'صرف'];
+        const savedPrefix = (typeof getStore === 'function') ? getStore('bayan_device_prefix') : null;
+        let devPrefix = (savedPrefix !== null && savedPrefix !== undefined && savedPrefix !== '') ? savedPrefix : '';
+        if (!devPrefix && typeof window.BayanNetworkHub !== 'undefined' && !window.BayanNetworkHub.isMasterServer) {
+            const dId = (window.BayanNetworkHub && window.BayanNetworkHub.deviceId) ? String(window.BayanNetworkHub.deviceId) : '';
+            const shortCode = dId ? dId.replace(/^DEV-/i, '').substring(0, 3).toUpperCase() : '';
+            devPrefix = shortCode ? `T${shortCode}-` : 'T-';
+        }
+        
+        const memList = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
+
+        types.forEach(tp => {
+            const key = 'bayan_last_seq_' + (devPrefix || '') + tp;
+            let realMax = 0;
+
+            // 1. فحص الحركات الحقيقية في قاعدة البيانات
+            if (recent && recent.length > 0) {
+                recent.forEach(t => {
+                    const matchesType = (typeof window.isTransactionOfType === 'function')
+                        ? window.isTransactionOfType(t, tp)
+                        : (t && t.type && t.type.includes(tp) && (!tp.includes('بيع') || !t.type.includes('مرتجع')));
+                    if (matchesType) {
+                        const n = (typeof window.extractNumericInvoiceId === 'function')
+                            ? window.extractNumericInvoiceId(t.invoiceId, devPrefix)
+                            : parseInt(String(t.invoiceId || '').replace(/\D+/g, ''), 10);
+                        if (!isNaN(n) && n > realMax) realMax = n;
+                    }
+                });
+            }
+
+            // 2. فحص الحركات المحملة بالذاكرة
+            if (memList && memList.length > 0) {
+                memList.forEach(t => {
+                    const matchesType = (typeof window.isTransactionOfType === 'function')
+                        ? window.isTransactionOfType(t, tp)
+                        : (t && t.type && t.type.includes(tp) && (!tp.includes('بيع') || !t.type.includes('مرتجع')));
+                    if (matchesType) {
+                        const n = (typeof window.extractNumericInvoiceId === 'function')
+                            ? window.extractNumericInvoiceId(t.invoiceId, devPrefix)
+                            : parseInt(String(t.invoiceId || '').replace(/\D+/g, ''), 10);
+                        if (!isNaN(n) && n > realMax) realMax = n;
+                    }
+                });
+            }
+
+            // 3. تصحيح الذاكرة الدائمة وتصفير أو تعديل الأرقام التالفة المتضخمة فورياً
+            if (typeof setStore === 'function') setStore(key, String(realMax));
+            try { localStorage.setItem(key, String(realMax)); } catch(e) {}
+        });
+    } catch(e) {
+        console.warn("⚠️ syncMaxSequencesFromDB notice:", e);
+    }
+};
 
 let currentLanguage = 'ar'; // اللغة الافتراضية
 
 // --- نظام تخصيص أعمدة المخزن (Inventory Column Visibility) ---
 
-let inventoryColumnVisibility = JSON.parse(getStore('pos_inv_cols') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true,"12":true,"13":true,"margin":true,"detailed":true}');
+let inventoryColumnVisibility = JSON.parse(getStore('pos_inv_cols') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"image":true,"10":true,"11":true,"12":true,"13":true,"margin":true,"detailed":true}');
 
 // قوائم أسباب الخصم والإضافة (للحفظ الذكي)
 
@@ -285,11 +441,14 @@ async function loadData() {
         initInvoicesColumns();
     }
 
-    // 📡 التحقق من ترخيص الاشتراك محلياً بطريقة مؤمنة
+    // 📡 التحقق من ترخيص الاشتراك محلياً بطريقة مؤمنة وسريعة في الخلفية دون تعطيل قراءة البيانات
     try {
         if (typeof LicenseService !== 'undefined' && LicenseService.verifyLicense) {
-            await LicenseService.verifyLicense();
-            setInterval(() => LicenseService.verifyLicense(), 5 * 60 * 1000);
+            LicenseService.verifyLicense().catch(err => console.warn("License verify notice:", err));
+            if (!window._licenseCheckIntervalSet) {
+                window._licenseCheckIntervalSet = true;
+                setInterval(() => LicenseService.verifyLicense(), 5 * 60 * 1000);
+            }
         }
     } catch(err) {
         console.warn("⚠️ LicenseService verify notice:", err);
@@ -299,31 +458,73 @@ async function loadData() {
     const savedSession = getStore('pos_session_user');
 
     try {
-        await db.open();
+        await Promise.race([
+            db.open(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('db.open timeout after 3s')), 3000))
+        ]);
     } catch (openError) {
-        console.error("⚠️ خطأ في فتح قاعدة البيانات في core.js:", openError);
-        // تم إزالة Dexie.delete("BayanDatabase") لحماية قاعدة البيانات من الحذف التلقائي
+        console.warn("⚠️ [Dexie] ملاحظة فتح قاعدة البيانات:", openError.message || openError);
     }
 
     try {
-        // 1. تحميل كافة البيانات من IndexedDB بالتوازي لتسريع بدء التشغيل والتحميل 100%
-        const [pData, tData, aData, uData, trData, logData, wData] = await Promise.all([
-            db.products.toArray(),
-            db.transactions.toArray(),
-            db.accounts.toArray(),
-            db.users.toArray(),
-            db.trash.toArray(),
-            db.auditLogs.toArray(),
-            db.warehouses.toArray()
+        // 1. تحميل بيانات اليوم بيومه من IndexedDB بالتوازي لتسريع بدء التشغيل لأقل من ثانية مهما كبرت الداتا عبر السنين
+        const todayDateISO = new Date().toLocaleDateString('en-CA');
+        const [pData, tTodayData, tPendingTransfers, aData, uData, trData, logData, wData] = await Promise.all([
+            db.products.toArray().catch(e => { console.warn("products load:", e); return []; }),
+            db.transactions.where('dateISO').aboveOrEqual(todayDateISO).toArray().catch(e => { console.warn("transactions today load:", e); return []; }),
+            db.transactions.where('type').startsWith('تحويل').filter(t => t && t.transferStatus === 'pending').toArray().catch(e => { console.warn("pending transfers load:", e); return []; }),
+            db.accounts.toArray().catch(e => { console.warn("accounts load:", e); return []; }),
+            db.users.toArray().catch(e => { console.warn("users load:", e); return []; }),
+            db.trash.filter(t => t && (t.type === 'user' || String(t.type || '').includes('مستخدم'))).toArray().catch(e => { console.warn("trash users load:", e); return []; }),
+            db.auditLogs.orderBy('id').reverse().limit(100).toArray().catch(e => { console.warn("auditLogs load:", e); return []; }),
+            db.warehouses.toArray().catch(e => { console.warn("warehouses load:", e); return []; })
         ]);
 
         productsDB = pData || [];
-        transactions = tData || [];
+        
+        // دمج فواتير اليوم الحالي مع التحويلات المعلقة بأمان بدون تكرار
+        const initialTxMap = new Map();
+        (tTodayData || []).forEach(t => { if (t && t.id) initialTxMap.set(t.id, t); });
+        (tPendingTransfers || []).forEach(t => { if (t && t.id) initialTxMap.set(t.id, t); });
+        transactions = Array.from(initialTxMap.values());
+        window.transactions = transactions;
+
+        // 🛡️ مزامنة أقصى تسلسل للفواتير من قاعدة البيانات لضمان عدم تكرار الأرقام حتى لو فواتير اليوم فارغة
+        await window.syncMaxSequencesFromDB();
+
         accounts = aData || [];
 
-        // 🔒 فك تشفير رموز الـ PIN في الذاكرة لتسهيل المقارنة مع ترقية أي رموز غير مشفرة في IndexedDB
+        trashBin = trData || [];
+        auditLogs = logData || [];
+        warehouses = (wData && wData.length > 0) ? wData : [{ id: 1, name: 'المخزن الرئيسي', address: 'المقر الرئيسي' }];
+
+        // 🗑️ فحص وتنقية المستخدمين المحذوفين مسبقاً الموجودين في سلة المحذوفات لمنع ظهورهم
+        const trashedUserKeys = new Set();
+        (trashBin || []).forEach(t => {
+            if (!t) return;
+            const tp = String(t.type || '').toLowerCase();
+            if (tp === 'user' || tp.includes('مستخدم')) {
+                const d = t.originalData || t;
+                if (d.id) trashedUserKeys.add(String(d.id));
+                if (d.name) trashedUserKeys.add(String(d.name).trim());
+            }
+        });
+
+        // 🔒 فك تشفير رموز الـ PIN في الذاكرة لتسهيل المقارنة مع استبعاد أي مستخدم تم حذفه
         let pinMigrationNeeded = false;
-        users = (uData || []).map(u => {
+        const orphanedUserIdsToDelete = [];
+        users = (uData || []).filter(u => {
+            if (!u) return false;
+            // حماية حساب المدير الأساسي رقم 1 دائماً
+            if (u.id === 1 || u.id === '1' || (u.role === 'admin' && u.id === 1)) return true;
+            const sId = String(u.id);
+            const sName = String(u.name || '').trim();
+            if (trashedUserKeys.has(sId) || trashedUserKeys.has(sName)) {
+                orphanedUserIdsToDelete.push(u.id);
+                return false;
+            }
+            return true;
+        }).map(u => {
             if (!u) return u;
             const rawPin = u.pin;
             const decryptedPin = (window.BayanSecurity && typeof window.BayanSecurity.decryptPin === 'function')
@@ -334,6 +535,13 @@ async function loadData() {
             }
             return { ...u, pin: decryptedPin };
         });
+
+        window.users = users;
+
+        // تنظيف أي سجلات قديمة لمستخدمين محذوفين من جدول db.users نهائياً
+        if (orphanedUserIdsToDelete.length > 0 && db && db.users) {
+            db.users.bulkDelete(orphanedUserIdsToDelete).catch(() => {});
+        }
 
         if (pinMigrationNeeded && users.length > 0) {
             try {
@@ -349,10 +557,6 @@ async function loadData() {
                 console.warn("⚠️ [Security] تعذر التحديث التلقائي لتشفير رموز PIN في IndexedDB:", migErr);
             }
         }
-
-        trashBin = trData || [];
-        auditLogs = logData || [];
-        warehouses = (wData && wData.length > 0) ? wData : [{ id: 1, name: 'المخزن الرئيسي', address: 'المقر الرئيسي' }];
 
         // 🛠️ تصحيح تلقائي لأي فواتير نقدية/بنكية/شبكة سابقة حُفظت بمدفوع صفر بسبب خطأ الحفظ السابق
         let txMigrationNeeded = false;
@@ -506,9 +710,12 @@ async function loadData() {
 
     initConfirmModal();
 
-    // إجبار تسجيل الدخول عند كل تحميل للمتصفح بناءً على طلب المستخدم
-
-    initLogin();
+    // تحديث أو إظهار شاشة تسجيل الدخول
+    if (typeof updateLoginUsersList === 'function') {
+        updateLoginUsersList();
+    } else if (typeof initLogin === 'function' && !window.currentUser) {
+        initLogin();
+    }
 
     // ✅ أمان: استعادة الجلسة من IndexedDB عبر PIN فقط (لا نثق بالبيانات المخزنة في localStorage)
     if (savedSession) {
@@ -552,15 +759,7 @@ async function loadData() {
     // ✅ تطبيق صلاحيات وإعدادات التاريخ فور تحميل البيانات فورياً وبدون تأخير لمنع الوميض
     if (typeof applyPermissions === 'function') applyPermissions();
 
-    // تشغيل النسخ الاحتياطي التلقائي عند التحميل فقط إذا كان مفعلاً صراحة في الإعدادات
-    setTimeout(() => {
-        const settings = JSON.parse(getStore('pos_settings') || '{}');
-        if (settings.autoBackup === true && typeof BackupService !== 'undefined') {
-            BackupService.createAutoBackup();
-        }
-    }, 4000);
-
-    // تشغيل النسخ الاحتياطي التلقائي عند إغلاق البرنامج فقط إذا كان مفعلاً صراحة في الإعدادات
+    // 🛡️ تشغيل النسخ الاحتياطي التلقائي بهدوء عند إغلاق البرنامج لمنع أي استهلاك للمعالج أو تجميد للداتابيز عند الإقلاع
     window.addEventListener('beforeunload', () => {
         const settings = JSON.parse(getStore('pos_settings') || '{}');
         if (settings.autoBackup === true && typeof BackupService !== 'undefined') {
@@ -573,7 +772,8 @@ async function loadData() {
 window.deletedItemIds = {
     transactions: [],
     products: [],
-    accounts: []
+    accounts: [],
+    users: []
 };
 
 let isSavingDbData = false;
@@ -591,7 +791,7 @@ function runDbSaveTask(task) {
     return nextTask;
 }
 
-async function saveData() {
+async function saveData(targetTables = null) {
     if (isSavingDbData) {
         pendingSaveDbRequest = true;
         return;
@@ -600,12 +800,25 @@ async function saveData() {
 
     return runDbSaveTask(async () => {
         try {
-            const tablesToTransact = (db.tables && db.tables.length > 0)
-                ? db.tables
-                : [db.products, db.accounts, db.transactions, db.users, db.trash, db.auditLogs, db.settings, db.treasuryAudit, db.warehouses];
+            const requested = targetTables ? (Array.isArray(targetTables) ? targetTables : [targetTables]) : null;
+            const shouldSave = (tbl) => !requested || requested.includes(tbl);
+
+            const tablesToTransact = [];
+            if (shouldSave('products') && db.products) tablesToTransact.push(db.products);
+            if (shouldSave('accounts') && db.accounts) tablesToTransact.push(db.accounts);
+            if (shouldSave('transactions') && db.transactions) tablesToTransact.push(db.transactions);
+            if (shouldSave('users') && db.users) tablesToTransact.push(db.users);
+            if (shouldSave('trash') && db.trash) tablesToTransact.push(db.trash);
+            if (shouldSave('auditLogs') && db.auditLogs) tablesToTransact.push(db.auditLogs);
+            if (shouldSave('settings') && db.settings) tablesToTransact.push(db.settings);
+            if (shouldSave('warehouses') && db.warehouses) tablesToTransact.push(db.warehouses);
+            if (shouldSave('treasuryAudit') && db.treasuryAudit) tablesToTransact.push(db.treasuryAudit);
+
+            if (tablesToTransact.length === 0) return;
+
             await db.transaction('rw', tablesToTransact, async () => {
                 // 1. حفظ وتحديث الأصناف
-                if (Array.isArray(productsDB)) {
+                if (shouldSave('products') && Array.isArray(productsDB)) {
                     if (window.deletedItemIds.products && window.deletedItemIds.products.length > 0) {
                         await db.products.bulkDelete(window.deletedItemIds.products);
                         window.deletedItemIds.products = [];
@@ -616,7 +829,7 @@ async function saveData() {
                 }
 
                 // 2. حفظ وتحديث الحسابات (عملاء وموردين)
-                if (Array.isArray(accounts)) {
+                if (shouldSave('accounts') && Array.isArray(accounts)) {
                     if (window.deletedItemIds.accounts && window.deletedItemIds.accounts.length > 0) {
                         await db.accounts.bulkDelete(window.deletedItemIds.accounts);
                         window.deletedItemIds.accounts = [];
@@ -627,7 +840,7 @@ async function saveData() {
                 }
 
                 // 3. حفظ وتحديث العمليات والفواتير
-                if (Array.isArray(transactions)) {
+                if (shouldSave('transactions') && Array.isArray(transactions)) {
                     if (window.deletedItemIds.transactions && window.deletedItemIds.transactions.length > 0) {
                         await db.transactions.bulkDelete(window.deletedItemIds.transactions);
                         window.deletedItemIds.transactions = [];
@@ -637,19 +850,27 @@ async function saveData() {
                     }
                 }
 
-                // 4. حفظ المستخدمين مع تشفير رمز الـ PIN في قاعدة البيانات لمنع ظهوره كنص صريح
-                if (Array.isArray(users) && users.length > 0) {
-                    const secureUsers = users.map(u => ({
-                        ...u,
-                        pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
-                            ? window.BayanSecurity.encryptPin(u.pin)
-                            : u.pin
-                    }));
-                    await db.users.bulkPut(secureUsers);
+                // 4. حفظ وتحديث المستخدمين ومزامنة جدول IndexedDB 100% لمنع بقاء أي مستخدم محذوف
+                if (shouldSave('users') && Array.isArray(users)) {
+                    window.users = users;
+                    if (window.deletedItemIds && window.deletedItemIds.users && window.deletedItemIds.users.length > 0) {
+                        await db.users.bulkDelete(window.deletedItemIds.users);
+                        window.deletedItemIds.users = [];
+                    }
+                    if (users.length > 0) {
+                        const secureUsers = users.map(u => ({
+                            ...u,
+                            pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                                ? window.BayanSecurity.encryptPin(u.pin)
+                                : u.pin
+                        }));
+                        await db.users.clear();
+                        await db.users.bulkPut(secureUsers);
+                    }
                 }
 
                 // 5. حفظ المهملات
-                if (Array.isArray(trashBin) && trashBin.length > 0) {
+                if (shouldSave('trash') && Array.isArray(trashBin) && trashBin.length > 0) {
                     if (trashBin.length > 500) {
                         trashBin = trashBin.slice(-500);
                         window.trashBin = trashBin;
@@ -658,7 +879,7 @@ async function saveData() {
                 }
 
                 // 6. حفظ سجل التدقيق
-                if (Array.isArray(auditLogs) && auditLogs.length > 0) {
+                if (shouldSave('auditLogs') && Array.isArray(auditLogs) && auditLogs.length > 0) {
                     if (auditLogs.length > 500) {
                         auditLogs = auditLogs.slice(-500);
                         window.auditLogs = auditLogs;
@@ -667,11 +888,13 @@ async function saveData() {
                 }
 
                 // 7. حفظ الإعدادات
-                const settings = JSON.parse(getStore('pos_settings') || '{}');
-                await db.settings.put({ id: 'main', ...settings });
+                if (shouldSave('settings')) {
+                    const settings = JSON.parse(getStore('pos_settings') || '{}');
+                    await db.settings.put({ id: 'main', ...settings });
+                }
 
                 // 8. حفظ المخازن
-                if (Array.isArray(warehouses) && warehouses.length > 0) {
+                if (shouldSave('warehouses') && Array.isArray(warehouses) && warehouses.length > 0) {
                     await db.warehouses.bulkPut(warehouses);
                 }
             });

@@ -288,7 +288,20 @@ function handleAdjSearchEnter(query, event) {
         return;
     }
 
-    // 2. بحث بالباركود الأساسي أو الكود
+    // 2. بحث بالتطابق التام للاسم أولاً أو الباركود الأساسي أو الكود
+    if (!pMatch) {
+        const normClean = (typeof window.normalizeSearchQuery === 'function')
+            ? window.normalizeSearchQuery(cleanQuery)
+            : cleanQuery.trim().toLowerCase();
+
+        pMatch = productsDB.find(p => {
+            const pNorm = (typeof window.normalizeSearchQuery === 'function')
+                ? window.normalizeSearchQuery(p.name)
+                : String(p.name || '').trim().toLowerCase();
+            return pNorm === normClean;
+        });
+    }
+
     if (!pMatch) {
         pMatch = productsDB.find(p => String(p.barcode || '').trim() === cleanQuery || String(p.code || '').trim() === cleanQuery);
     }
@@ -298,10 +311,11 @@ function handleAdjSearchEnter(query, event) {
         pMatch = productsDB.find(p => p.units && p.units.some(u => String(u.unitBarcode || '').trim() === cleanQuery));
     }
 
-    // 4. بحث بالاسم
+    // 4. بحث عبر محرك البحث المرتب
     if (!pMatch) {
-        const queryLower = cleanQuery.toLowerCase();
-        const matches = productsDB.filter(p => p.name && p.name.toLowerCase().includes(queryLower));
+        const matches = (typeof window.searchProductsRanked === 'function')
+            ? window.searchProductsRanked(cleanQuery, { limit: 10 })
+            : productsDB.filter(p => p.name && p.name.toLowerCase().includes(cleanQuery.toLowerCase()));
         
         if (matches.length === 1) {
             pMatch = matches[0];
@@ -384,13 +398,9 @@ function handleAdjSearch(query) {
 
     if (!query) { resultsDiv.style.display = 'none'; return; }
 
-    const queryLower = query.toLowerCase();
-    const filtered = productsDB.filter(p => 
-        p.name.toLowerCase().includes(queryLower) || 
-        (p.barcode && String(p.barcode).toLowerCase().includes(queryLower)) ||
-        (p.code && String(p.code).toLowerCase().includes(queryLower)) ||
-        (p.units && p.units.some(u => String(u.unitBarcode).toLowerCase().includes(queryLower)))
-    ).slice(0, 10);
+    const filtered = (typeof window.searchProductsRanked === 'function')
+        ? window.searchProductsRanked(query)
+        : (productsDB || []).filter(p => (p.name && p.name.includes(query)) || (p.barcode && String(p.barcode).includes(query)));
 
     if (filtered.length > 0) {
         const priceTitle = (typeof window.getAdjustmentPriceLabel === 'function') ? window.getAdjustmentPriceLabel() : 'سعر القطاعي';
@@ -405,6 +415,12 @@ function handleAdjSearch(query) {
                         const priceVal = (typeof window.getEffectiveAdjustmentPrice === 'function') ? window.getEffectiveAdjustmentPrice(p) : (parseFloat(p.price) || 0);
                         const activeWhName = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
                         const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWhName) : (parseFloat(p.stock) || 0);
+                        const sizesList = (p.variants && Array.isArray(p.variants)) 
+                            ? [...new Set(p.variants.map(v => String(v.size || '').trim()).filter(s => s && s !== '-' && s !== 'موحد' && s !== 'قياسي'))] 
+                            : [];
+                        const sizesHtml = sizesList.length > 0 
+                            ? `<span style="background: #ecfdf5; color: #047857; padding: 2px 6px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; border: 1px solid #a7f3d0;">📏 مقاسات: ${sizesList.slice(0, 5).join(', ')}${sizesList.length > 5 ? '...' : ''}</span>`
+                            : '';
                         return `
                             <div class="pos-search-row adj-search-row" onclick="
                                 document.getElementById('adjSearchResults').style.display='none';
@@ -419,7 +435,10 @@ function handleAdjSearch(query) {
                                 style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: all 0.15s ease; border-radius: 10px; gap: 8px;">
                                 <div style="flex: 1.5; min-width: 180px;">
                                     <div style="font-weight: 900; font-size: 0.98rem; color: #1e293b;">${p.name}</div>
-                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">🏷️ كود: <b style="color:#047857;">${p.code || p.id}</b> | باركود: <b>${p.barcode || '---'}</b></div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+                                        <span>🏷️ كود: <b style="color:#047857;">${p.code || p.id}</b> | باركود: <b>${p.barcode || '---'}</b></span>
+                                        ${sizesHtml}
+                                    </div>
                                 </div>
                                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                                     <div style="text-align: center; background: rgba(59, 130, 246, 0.08); padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.25);">
@@ -806,8 +825,15 @@ async function saveAdjustment() {
             adjId = typeof getNextSequence === 'function' ? getNextSequence('تسوية') : ('ADJ-' + Date.now());
         }
         let grandTotal = 0;
-        const dt = (isEditing && typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+        const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
             ? editingOriginalDate
+            : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+        const inputDateVal = document.getElementById('adjDate')?.value;
+        const isDateManuallyChanged = (isEditing || isEditMode) && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+        const dt = ((isEditing || isEditMode) && origDt && !isDateManuallyChanged)
+            ? origDt
             : (typeof getTransactionDateTime === 'function' ? getTransactionDateTime('adjDate', 'adjTime') : { full: new Date().toLocaleString('ar-EG'), iso: new Date().toISOString(), time: '' });
 
         const activeWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
@@ -920,6 +946,10 @@ async function saveAdjustment() {
             await saveData();
         }
 
+        if (!isEditing && !isEditMode && typeof window.updateLastSavedSequence === 'function') {
+            window.updateLastSavedSequence('تسوية', adjId);
+        }
+
         // إبطال كاش الأرصدة وحركات المخزون لضمان انعكاس التسوية فوراً في أرصدة المخازن وحركة الصنف
         if (typeof invalidateStockCache === 'function') invalidateStockCache();
         if (typeof window.invalidateStockCache === 'function') window.invalidateStockCache();
@@ -932,13 +962,21 @@ async function saveAdjustment() {
 
         alert("✅ تم الحفظ بنجاح!!");
 
-        if (typeof isEditMode !== 'undefined') window.isEditMode = false;
-        if (typeof editingInvoiceId !== 'undefined') window.editingInvoiceId = null;
+        if (typeof isEditMode !== 'undefined') { isEditMode = false; window.isEditMode = false; }
+        if (typeof editingInvoiceId !== 'undefined') { editingInvoiceId = null; window.editingInvoiceId = null; }
+        if (typeof editingOriginalDate !== 'undefined') { editingOriginalDate = null; window.editingOriginalDate = null; }
 
         resetAdjustment();
+        if (typeof window.clearRevertedInvoiceBackup === 'function') {
+            window.clearRevertedInvoiceBackup();
+        }
+
         return true;
     } catch (err) {
         console.error("❌ خطأ أثناء حفظ التسوية المخزنية:", err);
+        if (isEditing && typeof window.rollbackLastRevertedInvoice === 'function') {
+            await window.rollbackLastRevertedInvoice();
+        }
         if (itemsToProcess && itemsToProcess.length > 0) {
             window.adjCart = itemsToProcess;
             if (typeof renderAdjustmentCart === 'function') renderAdjustmentCart();
@@ -946,8 +984,10 @@ async function saveAdjustment() {
         if (typeof showCustomAlert === 'function') {
             showCustomAlert({
                 type: 'error',
-                titleText: 'خطأ في الحفظ',
-                msg: 'حدث خطأ غير متوقع أثناء حفظ التسوية المخزنية. تم الاحتفاظ بالأصناف في القائمة، يرجى المحاولة مرة أخرى.'
+                titleText: isEditing ? '⚠️ تعذر حفظ التعديل' : 'خطأ في الحفظ',
+                msg: isEditing 
+                    ? ('حدث خطأ أثناء حفظ التعديل، وتم الحفاظ على حركة التسوية الأصلية واستعادتها بالكامل دون أي فقدان للبيانات.\n\nتفاصيل الخطأ: ' + (err?.message || err))
+                    : 'حدث خطأ غير متوقع أثناء حفظ التسوية المخزنية. تم الاحتفاظ بالأصناف في القائمة، يرجى المحاولة مرة أخرى.'
             });
         } else {
             alert('❌ حدث خطأ أثناء محاولة حفظ التسوية المخزنية. تم الاحتفاظ بالأصناف.');
@@ -1127,6 +1167,27 @@ function openPriceAdjustmentModal() {
         const selectedIds = Array.from(window.selectedInventoryIds || []);
         loadPriceAdjustmentData(selectedIds);
 
+        if (document.getElementById('priceAdjBulkPercent')) {
+            document.getElementById('priceAdjBulkPercent').value = '0';
+        }
+
+        window.priceAdjUndoStack = [];
+        if (typeof updateUndoButtonState === 'function') updateUndoButtonState();
+
+        if (!window._priceAdjUndoKeyAttached) {
+            window._priceAdjUndoKeyAttached = true;
+            document.addEventListener('keydown', (e) => {
+                const modal = document.getElementById('priceAdjustmentModal');
+                if (!modal || modal.classList.contains('hidden') || modal.style.display === 'none') return;
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                    const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+                    if (activeTag === 'input' || activeTag === 'textarea') return;
+                    e.preventDefault();
+                    if (typeof undoLastPriceAdjustment === 'function') undoLastPriceAdjustment();
+                }
+            });
+        }
+
         if (typeof applyPriceAdjColumnVisibility === 'function') {
             setTimeout(applyPriceAdjColumnVisibility, 100);
         }
@@ -1147,8 +1208,11 @@ function closePriceAdjustmentModal() {
     if (document.getElementById('priceAdjSearch')) document.getElementById('priceAdjSearch').value = '';
     if (document.getElementById('priceAdjSizeFilter')) document.getElementById('priceAdjSizeFilter').value = 'all';
     if (document.getElementById('priceAdjColorFilter')) document.getElementById('priceAdjColorFilter').value = 'all';
+    if (document.getElementById('priceAdjBulkPercent')) document.getElementById('priceAdjBulkPercent').value = '0';
     window.priceAdjData = [];
     window.priceAdjCurrentFiltered = null;
+    window.priceAdjUndoStack = [];
+    if (typeof updateUndoButtonState === 'function') updateUndoButtonState();
 }
 window.closePriceAdjustmentModal = closePriceAdjustmentModal;
 
@@ -1159,12 +1223,12 @@ function loadPriceAdjustmentData(selectedIds = []) {
     const tbody = document.getElementById('priceAdjustmentTableBody');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; padding:60px; font-size:1.1rem; color:#4338ca; font-weight:bold;">⏳ جاري فحص ومزامنة بيانات الموديلات والتشكيلات...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" style="text-align:center; padding:60px; font-size:1.1rem; color:#4338ca; font-weight:bold;">⏳ جاري فحص ومزامنة بيانات الموديلات والتشكيلات...</td></tr>';
 
     try {
         const allProds = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? productsDB : (window.productsDB || []);
         if (!Array.isArray(allProds) || allProds.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; padding:50px; color:#ef4444; font-weight:bold;">⚠️ قاعدة بيانات الأصناف غير متوفرة حالياً، يرجى إعادة المحاولة.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="15" style="text-align:center; padding:50px; color:#ef4444; font-weight:bold;">⚠️ قاعدة بيانات الأصناف غير متوفرة حالياً، يرجى إعادة المحاولة.</td></tr>';
             return;
         }
 
@@ -1211,11 +1275,26 @@ function loadPriceAdjustmentData(selectedIds = []) {
             }
         }
 
+        const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
+            ? currentUser.warehouseName
+            : ((typeof getStore === 'function' ? getStore('activeWarehouse') : localStorage.getItem('activeWarehouse')) || 'المخزن الرئيسي')).trim();
+
         targets.forEach(p => {
             const itemName = p.name || 'صنف غير مسمى';
             const itemCode = p.code || '';
             const itemBarcode = p.barcode || '';
-            const liveStock = parseFloat(p.stock) || 0;
+            
+            // حساب الرصيد الحي الفعلي للصنف في المخزن النشط
+            let liveStock = 0;
+            if (typeof getWarehouseStock === 'function') {
+                const st = getWarehouseStock(itemName, activeWH);
+                if (st !== undefined && !isNaN(st)) liveStock = Number(st);
+            } else if (p.warehouseStocks && typeof p.warehouseStocks === 'object' && p.warehouseStocks[activeWH] !== undefined) {
+                liveStock = parseFloat(p.warehouseStocks[activeWH]) || 0;
+            } else if (activeWH === 'المخزن الرئيسي' || !p.warehouseStocks || Object.keys(p.warehouseStocks).length === 0) {
+                liveStock = parseFloat(p.stock) || 0;
+            }
+
             const liveAvgCost = parseFloat(p.cost) || 0; 
             const lastPPrice = lastBuyMap[itemName] !== undefined ? lastBuyMap[itemName] : liveAvgCost;
 
@@ -1227,8 +1306,18 @@ function loadPriceAdjustmentData(selectedIds = []) {
                     const vPrice = parseFloat(v.price) || parseFloat(p.price) || 0;
                     const vWholesale = parseFloat(v.wholesale) || parseFloat(v.wholesalePrice) || parseFloat(p.wholesale) || 0;
                     const vMinPrice = parseFloat(v.minPrice) || parseFloat(p.minPrice) || 0;
-                    const vStock = parseFloat(v.stock) || 0;
+                    
+                    // حساب رصيد التشكيلة الفعلي في المخزن النشط
+                    let vStock = 0;
+                    if (v.warehouseStocks && typeof v.warehouseStocks === 'object' && v.warehouseStocks[activeWH] !== undefined) {
+                        vStock = parseFloat(v.warehouseStocks[activeWH]) || 0;
+                    } else if (activeWH === 'المخزن الرئيسي' || !v.warehouseStocks || Object.keys(v.warehouseStocks).length === 0) {
+                        vStock = parseFloat(v.stock) || 0;
+                    } else {
+                        vStock = 0;
+                    }
                     vStockSum += vStock;
+
                     return {
                         variantIndex: vIdx,
                         size: String(v.size || '').trim(),
@@ -1246,6 +1335,7 @@ function loadPriceAdjustmentData(selectedIds = []) {
                 window.priceAdjData.push({
                     id: p.id,
                     name: itemName,
+                    image: p.image || null,
                     code: itemCode,
                     sysCode: p.sysCode || p.id,
                     barcode: itemBarcode,
@@ -1257,7 +1347,7 @@ function loadPriceAdjustmentData(selectedIds = []) {
                     retail: parseFloat(p.price) || 0,
                     minPrice: parseFloat(p.minPrice) || 0,
                     discount: parseFloat(p.discount) || 0,
-                    stock: liveStock > 0 ? liveStock : vStockSum,
+                    stock: (liveStock > 0 || (p.warehouseStocks && p.warehouseStocks[activeWH] !== undefined)) ? liveStock : vStockSum,
                     hasVariants: true,
                     variantsCount: variantsCopy.length,
                     variants: variantsCopy,
@@ -1268,6 +1358,7 @@ function loadPriceAdjustmentData(selectedIds = []) {
                 window.priceAdjData.push({
                     id: p.id,
                     name: itemName,
+                    image: p.image || null,
                     code: itemCode,
                     sysCode: p.sysCode || p.id,
                     barcode: itemBarcode,
@@ -1292,6 +1383,7 @@ function loadPriceAdjustmentData(selectedIds = []) {
                 window.priceAdjData.push({
                     id: p.id,
                     name: itemName,
+                    image: p.image || null,
                     code: itemCode,
                     sysCode: p.sysCode || p.id,
                     barcode: itemBarcode,
@@ -1320,7 +1412,7 @@ function loadPriceAdjustmentData(selectedIds = []) {
         }
     } catch (err) {
         console.error("Price Adjustment Data Load Error:", err);
-        tbody.innerHTML = `<tr><td colspan="14" style="text-align:center; padding:50px; color:#ef4444; font-weight:bold;">❌ حدث خطأ أثناء المعالجة: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="15" style="text-align:center; padding:50px; color:#ef4444; font-weight:bold;">❌ حدث خطأ أثناء المعالجة: ${err.message}</td></tr>`;
     }
 }
 
@@ -1332,7 +1424,7 @@ function renderPriceAdjustmentTable(filteredData = null) {
     const dataToRender = filteredData || window.priceAdjData;
 
     if (!dataToRender || dataToRender.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; padding:60px; color:#64748b; font-size:1.1rem; font-weight:800;">ℹ️ لا توجد موديلات أو أصناف مطابقة للبحث أو الفلتر الحالي.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="15" style="text-align:center; padding:60px; color:#64748b; font-size:1.1rem; font-weight:800;">ℹ️ لا توجد موديلات أو أصناف مطابقة للبحث أو الفلتر الحالي.</td></tr>';
         if (document.getElementById('priceAdjCount')) document.getElementById('priceAdjCount').innerText = '0';
         if (document.getElementById('priceAdjVariantsCount')) document.getElementById('priceAdjVariantsCount').innerText = '0';
         return;
@@ -1370,6 +1462,22 @@ function renderPriceAdjustmentTable(filteredData = null) {
                 <td class="col-adj-1" style="text-align:center; font-weight:bold; color:#64748b; padding:8px 4px; border-right: ${p.hasVariants ? '3px solid #6366f1' : '1px solid #e2e8f0'};">
                     ${renderIndex + 1}
                 </td>
+                <td class="col-adj-image" style="text-align:center; padding: 6px 8px; width: 145px; min-width: 140px;">
+                    ${p.image ? `
+                        <div style="display:inline-flex; align-items:center; justify-content:center;">
+                            <img src="${p.image}" alt="${(p.name || '').replace(/"/g, '&quot;')}" 
+                                 style="width: 88px; height: 88px; object-fit: cover; border-radius: 10px; border: 2px solid #cbd5e1; box-shadow: 0 3px 8px rgba(0,0,0,0.14); cursor: pointer; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; vertical-align: middle;" 
+                                 onmouseover="this.style.transform='scale(1.15)'; this.style.borderColor='#6366f1'; this.style.boxShadow='0 6px 16px rgba(99,102,241,0.35)';" 
+                                 onmouseout="this.style.transform='scale(1)'; this.style.borderColor='#cbd5e1'; this.style.boxShadow='0 3px 8px rgba(0,0,0,0.14)';"
+                                 onclick="event.stopPropagation(); if(typeof window.openProductImagePreview==='function') window.openProductImagePreview(${p.id}, event);"
+                                 title="🔍 اضغط لتكبير ومعاينة صورة الموديل">
+                        </div>
+                    ` : `
+                        <span style="display: inline-flex; align-items: center; justify-content: center; width: 82px; height: 82px; border-radius: 10px; background: #f8fafc; border: 2px dashed #cbd5e1; color: #94a3b8; font-size: 2.3rem; user-select: none;" title="لا توجد صورة لهذا الموديل">
+                            👗
+                        </span>
+                    `}
+                </td>
                 <td class="col-adj-internal" style="text-align:center; font-weight:bold; color:#64748b; font-size:0.82rem;">
                     ${p.sysCode || p.id}
                 </td>
@@ -1391,10 +1499,10 @@ function renderPriceAdjustmentTable(filteredData = null) {
                     ${p.unit || 'قطعة'}
                 </td>
                 <td class="col-adj-12" style="text-align:center; padding:4px;">
-                    <input type="number" data-field="avgBuyPrice" data-row="${renderIndex}" step="0.5" value="${p.avgBuyPrice}" 
-                        style="width:95%; height:32px; border:1.5px solid #fed7aa; border-radius:6px; text-align:center; font-weight:900; color:#9a3412; background:#fffaf0; font-size:0.88rem;"
-                        onchange="updateRowPriceAdj(${originalIndex}, 'avgBuyPrice', this.value)"
-                        onkeydown="handlePriceAdjKeyNav(event, this)">
+                    <div style="display:inline-flex; align-items:center; justify-content:center; gap:4px; width:95%; height:32px; background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:6px; font-weight:900; color:#64748b; font-size:0.88rem; cursor:not-allowed;" title="متوسط التكلفة محسوب تلقائياً من فواتير الشراء (للقراءة فقط لمنع الأخطاء)">
+                        <span style="font-size:0.75rem; opacity:0.6;">🔒</span>
+                        <span>${Number(p.avgBuyPrice || 0).toFixed(2)}</span>
+                    </div>
                 </td>
                 <td class="col-adj-11" style="text-align:center; font-weight:bold; color:#991b1b; font-size:0.84rem; background:rgba(254,226,226,0.2);">
                     ${p.lastBuyPrice ? p.lastBuyPrice.toFixed(2) : '0.00'}
@@ -1452,6 +1560,7 @@ function handlePriceAdjKeyNav(e, input) {
 window.handlePriceAdjKeyNav = handlePriceAdjKeyNav;
 
 async function updateRowPriceAdj(adjIndex, field, value) {
+    if (field === 'avgBuyPrice') return; // 🔒 حماية مطلقة: متوسط التكلفة للقراءة فقط ويتحدث آلياً من فواتير الشراء
     const item = window.priceAdjData[adjIndex];
     if (!item) return;
 
@@ -1559,7 +1668,7 @@ function setFvpMatrixPriceMode(mode) {
     const modes = [
         { id: 'price', bg: '#0284c7', text: '#ffffff', shadow: 'rgba(2,132,199,0.35)' },
         { id: 'wholesale', bg: '#4f46e5', text: '#ffffff', shadow: 'rgba(79,70,229,0.35)' },
-        { id: 'cost', bg: '#ea580c', text: '#ffffff', shadow: 'rgba(234,88,12,0.35)' },
+        { id: 'cost', bg: '#475569', text: '#ffffff', shadow: 'rgba(71,85,105,0.35)' },
         { id: 'minPrice', bg: '#e11d48', text: '#ffffff', shadow: 'rgba(225,29,72,0.35)' }
     ];
 
@@ -1669,8 +1778,18 @@ function openFashionVariantsPriceModal(itemIndex) {
     const nameEl = document.getElementById('fvpModelName');
     if (nameEl) nameEl.innerText = item.name || '-';
 
+    const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
+        ? currentUser.warehouseName
+        : ((typeof getStore === 'function' ? getStore('activeWarehouse') : localStorage.getItem('activeWarehouse')) || 'المخزن الرئيسي')).trim();
+
     const codeEl = document.getElementById('fvpModelCode');
-    if (codeEl) codeEl.innerText = item.code ? `كود: ${item.code}` : (item.barcode ? `باركود: ${item.barcode}` : '');
+    if (codeEl) {
+        const parts = [];
+        if (item.code) parts.push(`كود: ${item.code}`);
+        if (item.barcode) parts.push(`باركود: ${item.barcode}`);
+        parts.push(`المخزن: [${activeWH}]`);
+        codeEl.innerText = parts.join(' | ');
+    }
 
     // تعبئة حقول التسعير الموحد الافتراضية
     const defRetail = document.getElementById('fvpUniformRetail');
@@ -1789,10 +1908,10 @@ function renderFvpListTable(item) {
                     </span>
                 </td>
                 <td style="text-align: center; padding: 4px;">
-                    <input type="number" step="0.5" value="${v.cost}" data-field="cost" data-vidx="${idx}"
-                        style="width: 95%; height: 32px; border: 1.5px solid #fed7aa; border-radius: 6px; text-align: center; font-weight: 900; color: #9a3412; background: #fffaf0; font-size: 0.88rem;"
-                        onchange="updateSingleVariantPrice(${idx}, 'cost', this.value)"
-                        onkeydown="handleFvpKeyNav(event, this)">
+                    <div style="display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 95%; height: 32px; background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; font-weight: 900; color: #64748b; font-size: 0.88rem; cursor: not-allowed;" title="سعر التكلفة محدد آلياً من فواتير الشراء (للقراءة فقط)">
+                        <span style="font-size: 0.75rem; opacity: 0.6;">🔒</span>
+                        <span>${Number(v.cost || 0).toFixed(2)}</span>
+                    </div>
                 </td>
                 <td style="text-align: center; padding: 4px;">
                     <input type="number" step="0.5" value="${v.wholesale}" data-field="wholesale" data-vidx="${idx}"
@@ -1880,7 +1999,7 @@ function renderFvpMatrixGrid(item) {
     const modeMeta = {
         price: { title: 'سعر القطاعي', border: '#38bdf8', bg: '#f0f9ff', text: '#0369a1' },
         wholesale: { title: 'سعر الجملة', border: '#818cf8', bg: '#eef2ff', text: '#3730a3' },
-        cost: { title: 'سعر التكلفة', border: '#fb923c', bg: '#fffaf0', text: '#9a3412' },
+        cost: { title: 'سعر التكلفة (للقراءة فقط 🔒)', border: '#cbd5e1', bg: '#f8fafc', text: '#475569' },
         minPrice: { title: 'أدنى سعر', border: '#f43f5e', bg: '#fff1f2', text: '#be123c' }
     }[mode] || { title: 'سعر القطاعي', border: '#38bdf8', bg: '#f0f9ff', text: '#0369a1' };
 
@@ -1927,11 +2046,17 @@ function renderFvpMatrixGrid(item) {
                 tableHtml += `
                     <td style="text-align: center; padding: 6px 8px; border-left: 1px solid #f1f5f9; vertical-align: middle;">
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-                            <input type="number" step="0.5" value="${activeVal}" data-vidx="${foundIdx}" data-field="${mode}" data-col="${col}" data-sz="${sz}"
-                                style="width: 82px; height: 32px; border: 1.5px solid ${modeMeta.border}; border-radius: 7px; text-align: center; font-weight: 900; color: ${modeMeta.text}; background: ${modeMeta.bg}; font-size: 0.92rem; outline: none; transition: 0.15s;"
-                                onfocus="this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.25)';" onblur="this.style.boxShadow='none';"
-                                onchange="updateSingleVariantPrice(${foundIdx}, '${mode}', this.value); renderFvpListTable(window.activeFashionItem);"
-                                onkeydown="handleFvpMatrixKeyNav(event, this)">
+                            ${mode === 'cost' ? `
+                                <div style="width: 82px; height: 32px; border: 1.5px solid #e2e8f0; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-weight: 900; color: #64748b; background: #f8fafc; font-size: 0.88rem; cursor: not-allowed;" title="سعر التكلفة محدد آلياً من فواتير الشراء (للقراءة فقط)">
+                                    🔒 ${Number(activeVal || 0).toFixed(2)}
+                                </div>
+                            ` : `
+                                <input type="number" step="0.5" value="${activeVal}" data-vidx="${foundIdx}" data-field="${mode}" data-col="${col}" data-sz="${sz}"
+                                    style="width: 82px; height: 32px; border: 1.5px solid ${modeMeta.border}; border-radius: 7px; text-align: center; font-weight: 900; color: ${modeMeta.text}; background: ${modeMeta.bg}; font-size: 0.92rem; outline: none; transition: 0.15s;"
+                                    onfocus="this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.25)';" onblur="this.style.boxShadow='none';"
+                                    onchange="updateSingleVariantPrice(${foundIdx}, '${mode}', this.value); renderFvpListTable(window.activeFashionItem);"
+                                    onkeydown="handleFvpMatrixKeyNav(event, this)">
+                            `}
                             <div style="font-size: 0.71rem; color: #64748b; font-weight: 700; white-space: nowrap; margin-top: 1px;">
                                 ${subInfo}
                             </div>
@@ -1974,6 +2099,7 @@ function handleFvpMatrixKeyNav(e, input) {
 window.handleFvpMatrixKeyNav = handleFvpMatrixKeyNav;
 
 function updateSingleVariantPrice(vIndex, field, value) {
+    if (field === 'cost') return; // 🔒 حماية مطلقة: سعر التكلفة للتشكيلة للقراءة فقط ويتحدث آلياً من فواتير الشراء
     const item = window.activeFashionItem;
     if (!item || !item.variants || !item.variants[vIndex]) return;
 
@@ -2011,13 +2137,11 @@ function applyUniformVariantPrice() {
 
     const rVal = parseFloat(document.getElementById('fvpUniformRetail')?.value);
     const wVal = parseFloat(document.getElementById('fvpUniformWholesale')?.value);
-    const cVal = parseFloat(document.getElementById('fvpUniformCost')?.value);
 
     let appliedCount = 0;
     item.variants.forEach(v => {
         if (!isNaN(rVal) && rVal > 0) v.price = rVal;
         if (!isNaN(wVal) && wVal > 0) v.wholesale = wVal;
-        if (!isNaN(cVal) && cVal > 0) v.cost = cVal;
         appliedCount++;
     });
 
@@ -2059,7 +2183,7 @@ async function saveFashionVariantsPrice() {
                 if (pInDB.variants[targetIdx]) {
                     pInDB.variants[targetIdx].price = parseFloat(v.price) || 0;
                     pInDB.variants[targetIdx].wholesale = parseFloat(v.wholesale) || 0;
-                    pInDB.variants[targetIdx].cost = parseFloat(v.cost) || 0;
+                    pInDB.variants[targetIdx].cost = (pInDB.variants[targetIdx].cost !== undefined && pInDB.variants[targetIdx].cost !== null && pInDB.variants[targetIdx].cost > 0) ? pInDB.variants[targetIdx].cost : (parseFloat(v.cost) || 0);
                     pInDB.variants[targetIdx].minPrice = parseFloat(v.minPrice) || 0;
                     if (v.barcode) pInDB.variants[targetIdx].barcode = v.barcode;
                 }
@@ -2069,7 +2193,7 @@ async function saveFashionVariantsPrice() {
             if (item.variants.length > 0) {
                 pInDB.price = parseFloat(item.variants[0].price) || pInDB.price;
                 pInDB.wholesale = parseFloat(item.variants[0].wholesale) || pInDB.wholesale;
-                pInDB.cost = parseFloat(item.variants[0].cost) || pInDB.cost;
+                pInDB.cost = (pInDB.cost !== undefined && pInDB.cost !== null && pInDB.cost > 0) ? pInDB.cost : (parseFloat(item.variants[0].cost) || pInDB.cost || 0);
                 item.retail = pInDB.price;
                 item.wholesale = pInDB.wholesale;
                 item.avgBuyPrice = pInDB.cost;
@@ -2223,6 +2347,28 @@ async function applyBulkPriceAdjustment(direction = 1) {
     const targetTypeName = targetType === 'retail' ? 'سعر القطاعي' : (targetType === 'wholesale' ? 'سعر الجملة' : 'سعر القطاعي والجملة معاً');
     const factor = 1 + (percent / 100);
 
+    // 📸 حفظ نسخة احتياطية فورية (Snapshot) قبل تطبيق التعديل لتمكين التراجع
+    window.priceAdjUndoStack = window.priceAdjUndoStack || [];
+    const snapshot = targetItems.map(p => ({
+        id: p.id,
+        retail: p.retail,
+        wholesale: p.wholesale,
+        minPrice: p.minPrice,
+        profitMargin: p.profitMargin,
+        variants: (p.hasVariants && Array.isArray(p.variants))
+            ? p.variants.map(v => ({
+                variantIndex: v.variantIndex,
+                price: v.price,
+                wholesale: v.wholesale
+            }))
+            : null
+    }));
+    window.priceAdjUndoStack.push({
+        items: snapshot,
+        targetTypeName: targetTypeName,
+        percent: percent
+    });
+
     // تطبيق التعديل الفوري
     targetItems.forEach(p => {
         if (targetType === 'retail' || targetType === 'both') {
@@ -2256,12 +2402,84 @@ async function applyBulkPriceAdjustment(direction = 1) {
 
     renderPriceAdjustmentTable(window.priceAdjCurrentFiltered);
     updatePriceAdjStats();
+    updateUndoButtonState();
 
     if (typeof showToast === 'function') {
-        showToast(`✅ تم تطبيق ${percent > 0 ? 'زيادة' : 'خفض'} (${Math.abs(percent)}%) على ${targetTypeName} بنجاح! اضغط "حفظ كافة التعديلات" لتثبيتها.`, 'success');
+        showToast(`✅ تم تطبيق ${percent > 0 ? 'زيادة' : 'خفض'} (${Math.abs(percent)}%) على ${targetTypeName} بنجاح! يمكنك التراجع في أي وقت أو حفظ التعديلات.`, 'success');
     }
 }
 window.applyBulkPriceAdjustment = applyBulkPriceAdjustment;
+
+window.priceAdjUndoStack = window.priceAdjUndoStack || [];
+
+function updateUndoButtonState() {
+    const btn = document.getElementById('priceAdjUndoBtn');
+    if (!btn) return;
+    const count = (window.priceAdjUndoStack && Array.isArray(window.priceAdjUndoStack)) ? window.priceAdjUndoStack.length : 0;
+    if (count > 0) {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        btn.style.background = '#d97706';
+        btn.style.boxShadow = '0 2px 6px rgba(217,119,6,0.35)';
+        btn.innerHTML = `<span>↩️ تراجع (${count})</span>`;
+        btn.title = `تراجع عن آخر تعديل واسترجاع الأسعار السابقة (${count} عملية محفوظة)`;
+    } else {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        btn.style.background = '#64748b';
+        btn.style.boxShadow = 'none';
+        btn.innerHTML = `<span>↩️ تراجع واسترجاع</span>`;
+        btn.title = 'لا توجد عمليات سابقة للتراجع عنها';
+    }
+}
+window.updateUndoButtonState = updateUndoButtonState;
+
+function undoLastPriceAdjustment() {
+    if (!window.priceAdjUndoStack || window.priceAdjUndoStack.length === 0) {
+        if (typeof showToast === 'function') showToast("ℹ️ لا توجد عمليات سابقة للتراجع عنها", "info");
+        return;
+    }
+
+    const lastAction = window.priceAdjUndoStack.pop();
+    const snapItems = lastAction.items || [];
+    const snapMap = new Map();
+    snapItems.forEach(s => {
+        if (s.id !== undefined && s.id !== null) snapMap.set(String(s.id), s);
+    });
+
+    let restoredCount = 0;
+    const allItems = window.priceAdjData || [];
+    allItems.forEach(p => {
+        const snap = snapMap.get(String(p.id));
+        if (snap) {
+            p.retail = snap.retail;
+            p.wholesale = snap.wholesale;
+            p.minPrice = snap.minPrice;
+            p.profitMargin = snap.profitMargin;
+
+            if (snap.variants && Array.isArray(p.variants)) {
+                snap.variants.forEach((sv, idx) => {
+                    if (p.variants[idx]) {
+                        p.variants[idx].price = sv.price;
+                        p.variants[idx].wholesale = sv.wholesale;
+                    }
+                });
+            }
+            restoredCount++;
+        }
+    });
+
+    renderPriceAdjustmentTable(window.priceAdjCurrentFiltered);
+    updatePriceAdjStats();
+    updateUndoButtonState();
+
+    if (typeof showToast === 'function') {
+        showToast(`↩️ تم التراجع بنجاح واسترجاع الأسعار السابقة لـ (${restoredCount}) صنف!`, "success");
+    }
+}
+window.undoLastPriceAdjustment = undoLastPriceAdjustment;
 
 function updatePriceAdjStats() {
     let totalCost = 0;
@@ -2321,7 +2539,7 @@ async function savePriceAdjustments() {
                 if (!touchedProducts.includes(p)) touchedProducts.push(p);
                 p.price = parseFloat(item.retail) || 0;
                 p.wholesale = parseFloat(item.wholesale) || 0;
-                p.cost = parseFloat(item.avgBuyPrice) || 0;
+                p.cost = (p.cost !== undefined && p.cost !== null && p.cost > 0) ? p.cost : (parseFloat(item.avgBuyPrice) || 0);
                 p.minPrice = parseFloat(item.minPrice) || 0;
                 if (item.barcode) p.barcode = String(item.barcode).trim();
 
@@ -2332,7 +2550,7 @@ async function savePriceAdjustments() {
                         if (p.variants[targetIdx]) {
                             p.variants[targetIdx].price = parseFloat(v.price) || 0;
                             p.variants[targetIdx].wholesale = parseFloat(v.wholesale) || 0;
-                            p.variants[targetIdx].cost = parseFloat(v.cost) || 0;
+                            p.variants[targetIdx].cost = (p.variants[targetIdx].cost !== undefined && p.variants[targetIdx].cost !== null && p.variants[targetIdx].cost > 0) ? p.variants[targetIdx].cost : (parseFloat(v.cost) || 0);
                             p.variants[targetIdx].minPrice = parseFloat(v.minPrice) || 0;
                             if (v.barcode) p.variants[targetIdx].barcode = String(v.barcode).trim();
                         }
@@ -2461,67 +2679,153 @@ function exportPriceAdjToExcel() {
 }
 window.exportPriceAdjToExcel = exportPriceAdjToExcel;
 
-// --- إدارة تخصيص أعمدة شاشة الأسعار المستقلة ---
-if (typeof window.togglePriceAdjColumnManager === 'undefined') {
-    const priceAdjColumnsList = [
-        { id: 1, name: "المسلسل (#)" },
-        { id: 'internal', name: "الكود الداخلي" },
-        { id: 2, name: "كود الصنف" },
-        { id: 3, name: "اسم الصنف / الموديل" },
-        { id: 'fashion', name: "المقاسات والتشكيلات" },
-        { id: 4, name: "الباركود" },
-        { id: 6, name: "الوحدة" },
-        { id: 12, name: "متوسط التكلفة" },
-        { id: 11, name: "آخر شراء" },
-        { id: 13, name: "سعر الجملة" },
-        { id: 10, name: "سعر القطاعي" },
-        { id: 'profit', name: "الربح %" },
-        { id: 'min', name: "أدنى سعر" },
-        { id: 9, name: "الرصيد الكلي" }
-    ];
+// =========================================================================
+// ⚙️ إدارة وتخصيص أعمدة شاشة إدارة وتسعير الموديلات (مودال شيك بالمنتصف مطابق لقسم البضاعة)
+// =========================================================================
+const priceAdjColumnsList = [
+    { id: 1, name: "المسلسل (#)" },
+    { id: 'image', name: "صورة الموديل 🖼️" },
+    { id: 'internal', name: "الكود الداخلي" },
+    { id: 2, name: "كود الصنف" },
+    { id: 3, name: "اسم الصنف / الموديل" },
+    { id: 'fashion', name: "المقاسات والتشكيلات" },
+    { id: 4, name: "الباركود" },
+    { id: 6, name: "الوحدة" },
+    { id: 12, name: "متوسط التكلفة" },
+    { id: 11, name: "آخر شراء" },
+    { id: 13, name: "سعر الجملة" },
+    { id: 10, name: "سعر القطاعي" },
+    { id: 'profit', name: "الربح %" },
+    { id: 'min', name: "أدنى سعر" },
+    { id: 9, name: "الرصيد الكلي" }
+];
+window.priceAdjColumnsList = priceAdjColumnsList;
 
-    window.togglePriceAdjColumnManager = function() {
-        const manager = document.getElementById('priceAdjColumnManager');
-        if (manager) {
-            manager.classList.toggle('hidden');
-            if (!manager.classList.contains('hidden')) {
-                window.initPriceAdjColumnManager();
-            }
-        }
-    };
+function openPriceAdjColumnModal() {
+    // إغلاق أي نافذة سابقة لمنع التكرار
+    const oldModal = document.querySelector('.price-adj-col-modal-overlay');
+    if (oldModal) oldModal.remove();
 
-    window.initPriceAdjColumnManager = function() {
-        const container = document.getElementById('priceAdjColumnChecklist');
-        if (!container) return;
-        let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
-        let hiddenCols = saved ? JSON.parse(saved) : [];
-        container.innerHTML = '';
-        priceAdjColumnsList.forEach(col => {
-            const isChecked = !hiddenCols.includes(String(col.id));
-            const div = document.createElement('div');
-            div.style.cssText = 'display: flex; align-items: center; gap: 10px; font-size: 0.85rem; padding: 4px 0;';
-            div.innerHTML = `
-                <input type="checkbox" id="chkColAdj${col.id}" ${isChecked ? 'checked' : ''} onchange="window.applyPriceAdjColumnVisibility()">
-                <label for="chkColAdj${col.id}" style="cursor:pointer; user-select:none; font-weight:bold; color:#1e293b;">${col.name}</label>
-            `;
-            container.appendChild(div);
-        });
-    };
+    let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
+    if (!saved && typeof localStorage !== 'undefined') saved = localStorage.getItem('priceAdjHiddenCols');
+    let hiddenCols = [];
+    try {
+        if (saved) hiddenCols = JSON.parse(saved);
+    } catch(e) {}
 
-    window.applyPriceAdjColumnVisibility = function() {
-        let hiddenCols = [];
-        priceAdjColumnsList.forEach(col => {
-            const chk = document.getElementById(`chkColAdj${col.id}`);
-            const isVisible = chk ? chk.checked : true;
-            const cells = document.querySelectorAll(`.col-adj-${col.id}`);
-            cells.forEach(c => {
-                c.style.display = isVisible ? '' : 'none';
-            });
-            if (!isVisible) hiddenCols.push(String(col.id));
-        });
-        if (typeof setStore === 'function') setStore('priceAdjHiddenCols', JSON.stringify(hiddenCols));
-    };
+    let gridHtml = `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 16px; max-height: 55vh; overflow-y: auto;">`;
+    priceAdjColumnsList.forEach(col => {
+        const isChecked = !hiddenCols.includes(String(col.id));
+        gridHtml += `
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: #f8fafc; border-radius: 10px; border: 1.5px solid #e2e8f0; font-size: 0.88rem; font-weight: 800; color: #1e293b; transition: all 0.2s;"
+                   onmouseover="this.style.background='#eff6ff'; this.style.borderColor='#6366f1';"
+                   onmouseout="this.style.background='#f8fafc'; this.style.borderColor='#e2e8f0';">
+                <input type="checkbox" class="price-adj-col-custom-chk" data-col-id="${col.id}" ${isChecked ? 'checked' : ''}
+                       onchange="window.toggleSinglePriceAdjColumn('${col.id}', this.checked)"
+                       style="width: 18px; height: 18px; cursor: pointer; accent-color: #6366f1;">
+                <span>${col.name}</span>
+            </label>
+        `;
+    });
+    gridHtml += `</div>`;
+
+    const modal = document.createElement('div');
+    modal.className = 'price-adj-col-modal-overlay modal-overlay';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center; z-index: 9999999; animation: fadeIn 0.2s ease-out; direction: rtl; font-family: Cairo, sans-serif;';
+
+    modal.innerHTML = `
+        <div style="width: 530px; max-width: 95vw; background: #ffffff; border-radius: 20px; box-shadow: 0 25px 60px rgba(0,0,0,0.4); border: 2.5px solid #6366f1; overflow: hidden; display: flex; flex-direction: column; text-align: right;">
+            <!-- هيدر النافذة الملكي -->
+            <div style="background: linear-gradient(135deg, #1e1b4b, #312e81, #0f172a); padding: 14px 20px; border-bottom: 2.5px solid #6366f1; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.3rem;">⚙️</span>
+                    <div>
+                        <h3 style="margin: 0; color: #ffffff; font-size: 1.15rem; font-weight: 900;">تخصيص أعمدة إدارة وتسعير الموديلات</h3>
+                        <small style="color: #a5b4fc; font-size: 0.78rem; font-weight: bold;">تحكم في إظهار وإخفاء الأعمدة في جدول الأسعار المجمع</small>
+                    </div>
+                </div>
+                <button type="button" onclick="this.closest('.price-adj-col-modal-overlay').remove()" 
+                        style="background: rgba(255,255,255,0.15); border: none; border-radius: 50%; width: 32px; height: 32px; font-size: 1.1rem; cursor: pointer; color: #ffffff; display: flex; align-items: center; justify-content: center; transition: 0.2s;"
+                        onmouseover="this.style.background='rgba(239, 68, 68, 0.8)';"
+                        onmouseout="this.style.background='rgba(255,255,255,0.15)';">&times;</button>
+            </div>
+
+            <!-- شريط الإجراءات السريعة (تحديد الكل / إلغاء الكل) -->
+            <div style="padding: 10px 20px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.84rem; font-weight: 800; color: #475569;">اختر الأعمدة التي ترغب في إظهارها:</span>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" onclick="document.querySelectorAll('.price-adj-col-custom-chk').forEach(chk => { chk.checked = true; window.toggleSinglePriceAdjColumn(chk.getAttribute('data-col-id'), true); });"
+                            style="padding: 4px 12px; font-size: 0.78rem; font-weight: 800; background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 6px; cursor: pointer; transition: 0.2s;">
+                        تحديد الكل
+                    </button>
+                    <button type="button" onclick="document.querySelectorAll('.price-adj-col-custom-chk').forEach(chk => { chk.checked = false; window.toggleSinglePriceAdjColumn(chk.getAttribute('data-col-id'), false); });"
+                            style="padding: 4px 12px; font-size: 0.78rem; font-weight: 800; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 6px; cursor: pointer; transition: 0.2s;">
+                        إلغاء الكل
+                    </button>
+                </div>
+            </div>
+
+            <!-- شبكة الأعمدة -->
+            ${gridHtml}
+
+            <!-- فوتر الحفظ والإغلاق -->
+            <div style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+                <button type="button" style="width: 100%; height: 44px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: white; border: none; border-radius: 12px; font-weight: 900; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); transition: all 0.2s;"
+                        onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 18px rgba(99, 102, 241, 0.45)';"
+                        onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 14px rgba(99, 102, 241, 0.35)';"
+                        onclick="this.closest('.price-adj-col-modal-overlay').remove()">
+                    💾 حفظ التخصيص وإغلاق
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
 }
+window.openPriceAdjColumnModal = openPriceAdjColumnModal;
+window.togglePriceAdjColumnManager = openPriceAdjColumnModal;
+
+window.toggleSinglePriceAdjColumn = function(colId, isVisible) {
+    const cells = document.querySelectorAll(`.col-adj-${colId}`);
+    cells.forEach(c => {
+        c.style.display = isVisible ? '' : 'none';
+    });
+
+    let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
+    if (!saved && typeof localStorage !== 'undefined') saved = localStorage.getItem('priceAdjHiddenCols');
+    let hiddenCols = [];
+    try {
+        if (saved) hiddenCols = JSON.parse(saved);
+    } catch(e) {}
+
+    const sColId = String(colId);
+    if (!isVisible && !hiddenCols.includes(sColId)) {
+        hiddenCols.push(sColId);
+    } else if (isVisible && hiddenCols.includes(sColId)) {
+        hiddenCols = hiddenCols.filter(id => id !== sColId);
+    }
+
+    const jsonStr = JSON.stringify(hiddenCols);
+    if (typeof setStore === 'function') setStore('priceAdjHiddenCols', jsonStr);
+    if (typeof localStorage !== 'undefined') localStorage.setItem('priceAdjHiddenCols', jsonStr);
+};
+
+window.applyPriceAdjColumnVisibility = function() {
+    let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
+    if (!saved && typeof localStorage !== 'undefined') saved = localStorage.getItem('priceAdjHiddenCols');
+    let hiddenCols = [];
+    try {
+        if (saved) hiddenCols = JSON.parse(saved);
+    } catch(e) {}
+
+    priceAdjColumnsList.forEach(col => {
+        const isVisible = !hiddenCols.includes(String(col.id));
+        const cells = document.querySelectorAll(`.col-adj-${col.id}`);
+        cells.forEach(c => {
+            c.style.display = isVisible ? '' : 'none';
+        });
+    });
+};
 
 // ============================================================
 //  إدارة وتخصيص أعمدة جدول التسوية والجرد (Adjustment Column Manager)

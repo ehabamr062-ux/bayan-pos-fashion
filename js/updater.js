@@ -18,8 +18,8 @@
     const GITHUB_REPO_OWNER = 'ehabamr062-ux';
     const GITHUB_REPO_NAME = 'bayan_fashion_website';
     const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
-    const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
-    const GITHUB_BROADCAST_URL = `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/main/announcements.json`;
+    const GITHUB_BROADCAST_REPO = GITHUB_REPO_NAME;
+    const GITHUB_BROADCAST_URL = `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_BROADCAST_REPO}/main/announcements.json`;
 
     let ipcRenderer = null;
     try {
@@ -237,7 +237,7 @@
     // حالة نظام التحديث
     // =========================================================================
     const state = {
-        currentVersion: window.appVersion || '1.0.6',
+        currentVersion: window.appVersion || '3.1.1',
         latestVersion: null,
         releaseNotes: '',
         downloadUrl: '',
@@ -266,7 +266,7 @@
     }
 
     function getCurrentAppVersion() {
-        return window.appVersion || '1.0.6';
+        return window.appVersion || '3.1.1';
     }
 
     function fmtNotes(notes) {
@@ -800,8 +800,9 @@
             const url = GITHUB_BROADCAST_URL + '?t=' + Date.now();
             const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) return;
-            const data = await res.json();
-            if (!Array.isArray(data)) return;
+            const rawData = await res.json();
+            const data = Array.isArray(rawData) ? rawData : (rawData && typeof rawData === 'object' ? [rawData] : []);
+            if (data.length === 0) return;
 
             let hasNewActive = false;
 
@@ -811,6 +812,7 @@
 
                 const formattedItem = {
                     id: itemId,
+                    icon: item.icon || '📢',
                     title: item.title || 'تنبيه من إدارة بيان POS',
                     message: item.message || '',
                     date: item.date || new Date().toISOString(),
@@ -871,11 +873,12 @@
         const message = item.message || '';
         const link = item.link || '';
         const linkText = item.linkText || 'معرفة المزيد 🔗';
+        const modalIcon = item.icon || '📢';
 
         overlay.innerHTML = `
             <div style="background: linear-gradient(135deg, #0f172a, #1e293b); border: 2px solid rgba(212, 175, 55, 0.5); border-radius: 24px; padding: 28px; width: 90%; max-width: 480px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; color: white;">
                 <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 16px;">
-                    <div style="font-size: 2.2rem;">📢</div>
+                    <div style="font-size: 2.2rem;">${modalIcon}</div>
                     <div>
                         <div style="font-weight: 900; font-size: 1.2rem; color: #fbbf24;">${title}</div>
                         <p style="margin: 4px 0 0; font-size: 0.8rem; color: #cbd5e1; font-weight: 700;">رسالة مباشرة من فريق التطوير</p>
@@ -900,7 +903,7 @@
     // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر IndexedDB و Electron Disk
     // =========================================================================
     function updateAutoUpdatesPolicyDOM(isEnabled) {
-        const curVer = window.appVersion || '1.0.6';
+        const curVer = window.appVersion || '3.1.1';
         const badge = document.getElementById('updatePolicyBadge');
         const text = document.getElementById('toggleAutoUpdatesText');
         const toggle = document.getElementById('toggleAutoUpdatesSwitch');
@@ -970,7 +973,7 @@
 
     window.toggleAutoUpdatesPolicy = async function(isEnabled) {
         const disabled = !isEnabled;
-        const curVer = window.appVersion || '1.0.6';
+        const curVer = window.appVersion || '3.1.1';
         window.__isAutoUpdatesFrozen = disabled;
 
         // 💾 1. التخزين اللحظي في AppStore و IndexedDB

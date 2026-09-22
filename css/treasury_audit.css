@@ -85,8 +85,9 @@
 
 /* الألوان الزاهية جداً والفاخرة للكروت */
 .tr-card-red {
-    background: linear-gradient(135deg, #ef4444, #991b1b);
-    border: 1px solid rgba(239, 68, 68, 0.6);
+    background: linear-gradient(135deg, #b91c1c, #7f1d1d);
+    border: 1.5px solid #f87171;
+    box-shadow: 0 8px 24px rgba(185, 28, 28, 0.45);
 }
 
 .tr-card-green {
@@ -671,3 +672,741 @@ body.dark-mode .tr-table tbody tr:hover {
 body.dark-mode .tr-table tbody tr:hover td {
     color: #6ee7b7 !important;
 }
+
+/* ===================================================
+   🌟 مكوّن: المشاركة والإعدادات — RadialActionMenu (Circular Action Menu)
+   =================================================== */
+.radial-action-menu {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+/* الزر الرئيسي الثابت الأنيق في المركز */
+.radial-trigger-btn {
+    position: relative;
+    height: 42px;
+    padding: 0 18px;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    border: 1.5px solid #38bdf8;
+    border-radius: 14px;
+    color: #ffffff;
+    font-size: 0.88rem;
+    font-weight: 900;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);
+    transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    outline: none;
+    white-space: nowrap;
+    z-index: 1010;
+}
+
+.radial-trigger-btn:hover {
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    border-color: #7dd3fc;
+    box-shadow: 0 6px 20px rgba(2, 132, 199, 0.45);
+    transform: translateY(-2px);
+}
+
+.radial-trigger-btn:active {
+    transform: translateY(0) scale(0.97);
+}
+
+.radial-trigger-icon {
+    font-size: 1.18rem;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    display: inline-block;
+}
+
+.radial-trigger-arrow {
+    font-size: 0.75rem;
+    color: #38bdf8;
+    transition: transform 0.3s ease;
+    display: inline-block;
+}
+
+/* حالة الفتح: الزر الرئيسي يتوهج والأيقونة تدور */
+.radial-action-menu.is-open .radial-trigger-btn {
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35), 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.radial-action-menu.is-open .radial-trigger-icon {
+    transform: rotate(90deg);
+}
+
+.radial-action-menu.is-open .radial-trigger-arrow {
+    transform: rotate(180deg);
+    color: #ffffff;
+}
+
+/* ⚪ الحاوية الدائرية البيضاء الفاخرة التي تحتوي الأزرار الدائرية الستة */
+.radial-white-plate {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 340px;
+    height: 340px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #ffffff 68%, #f8fafc 100%);
+    border: 3.5px solid #e2e8f0;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45), 0 0 0 5px rgba(255, 255, 255, 0.95), 0 0 0 8px rgba(56, 189, 248, 0.35), inset 0 0 25px rgba(0, 0, 0, 0.04);
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: all 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 1001;
+}
+
+.radial-action-menu.is-open .radial-white-plate {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+/* حاوية الأزرار الدائرية المنبثقة */
+.radial-items-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    z-index: 1002;
+}
+
+/* 🎯 الأزرار الدائرية الستة بحجم مكبّر وواضح 66px */
+.radial-item-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 66px;
+    height: 66px;
+    border-radius: 50%;
+    border: 2.8px solid #ffffff;
+    color: #ffffff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    outline: none;
+    user-select: none;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(0.2);
+    transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.3s;
+    z-index: 1005;
+}
+
+.radial-item-btn * {
+    pointer-events: none !important;
+    user-select: none;
+}
+
+.radial-item-btn .radial-item-icon {
+    font-size: 1.45rem;
+    line-height: 1;
+}
+
+.radial-item-btn .radial-item-text {
+    font-size: 0.74rem;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    letter-spacing: -0.2px;
+}
+
+/* 🎨 توزيع الأزرار الستة بتناغم سداسي دائري حول المركز */
+/* 1. خيارات: أعلى اليسار */
+.radial-item-btn.item-options {
+    --tx: -62px;
+    --ty: -106px;
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    border-color: #ffffff;
+}
+
+/* 2. الطباعة: أعلى اليمين */
+.radial-item-btn.item-print {
+    --tx: 62px;
+    --ty: -106px;
+    background: linear-gradient(135deg, #6366f1, #4338ca);
+    border-color: #ffffff;
+}
+
+/* 3. تصدير PDF: أقصى اليمين */
+.radial-item-btn.item-pdf {
+    --tx: 124px;
+    --ty: 0px;
+    background: linear-gradient(135deg, #dc2626, #991b1b);
+    border-color: #ffffff;
+}
+
+/* 4. واتساب: أسفل اليمين */
+.radial-item-btn.item-whatsapp {
+    --tx: 62px;
+    --ty: 106px;
+    background: linear-gradient(135deg, #10b981, #047857);
+    border-color: #ffffff;
+}
+
+/* 5. تيليجرام: أسفل اليسار */
+.radial-item-btn.item-telegram {
+    --tx: -62px;
+    --ty: 106px;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    border-color: #ffffff;
+}
+
+/* 6. سجل: أقصى اليسار */
+.radial-item-btn.item-log {
+    --tx: -124px;
+    --ty: 0px;
+    background: linear-gradient(135deg, #f59e0b, #b45309);
+    border-color: #ffffff;
+}
+
+/* ظهور الأزرار بحركة Radial ناعمة وسريعة بتوزيع زمني */
+.radial-action-menu.is-open .radial-item-btn {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(1);
+    transition: transform 0.16s ease-out, filter 0.16s ease-out, box-shadow 0.16s ease-out, border-color 0.16s ease-out;
+}
+
+.radial-action-menu.is-open .item-options { transition-delay: 0.02s; }
+.radial-action-menu.is-open .item-print { transition-delay: 0.05s; }
+.radial-action-menu.is-open .item-pdf { transition-delay: 0.08s; }
+.radial-action-menu.is-open .item-whatsapp { transition-delay: 0.11s; }
+.radial-action-menu.is-open .item-telegram { transition-delay: 0.14s; }
+.radial-action-menu.is-open .item-log { transition-delay: 0.17s; }
+
+/* 🛡️ ثبات كامل وتام للأزرار عند وقوف الماوس (Hover) بدون أي اهتزاز أو حركة إطلاقاً */
+.radial-action-menu.is-open .radial-item-btn:hover {
+    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(1.05) !important;
+    filter: brightness(1.22);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+    border-color: #ffffff;
+    z-index: 1020;
+}
+
+.radial-action-menu.is-open .radial-item-btn:active {
+    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0.95) !important;
+}
+
+.radial-action-menu.is-open .radial-trigger-btn:hover {
+    transform: none !important;
+}
+
+/* طبقة شفافة ناعمة عند الفتح لإغلاق القائمة فور النقر خارجها */
+.radial-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 998;
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(2.5px);
+    display: none;
+}
+
+.radial-backdrop.is-active {
+    display: block;
+}
+
+/* 📱 التجاوب الممتاز مع الشاشات الصغيرة */
+@media (max-width: 768px) {
+    .radial-white-plate {
+        width: 270px;
+        height: 270px;
+    }
+    .radial-item-btn {
+        width: 52px;
+        height: 52px;
+    }
+    .radial-item-btn .radial-item-icon {
+        font-size: 1.15rem;
+    }
+    .radial-item-btn .radial-item-text {
+        font-size: 0.62rem;
+    }
+    .radial-item-btn.item-options { --tx: -48px; --ty: -82px; }
+    .radial-item-btn.item-print { --tx: 48px; --ty: -82px; }
+    .radial-item-btn.item-pdf { --tx: 96px; --ty: 0px; }
+    .radial-item-btn.item-whatsapp { --tx: 48px; --ty: 82px; }
+    .radial-item-btn.item-telegram { --tx: -48px; --ty: 82px; }
+    .radial-item-btn.item-log { --tx: -96px; --ty: 0px; }
+}
+
+/* =======================================================
+   💎 نافذة المشاركة والإعدادات الأفقية الفاخرة
+   ======================================================= */
+.tr-share-modal-box {
+    background: #0d152a;
+    border: 2px solid #38bdf8;
+    border-radius: 24px;
+    width: 840px;
+    max-width: 95vw;
+    padding: 24px 28px;
+    color: #ffffff;
+    box-shadow: 0 25px 70px rgba(0, 0, 0, 0.9), 0 0 25px rgba(56, 189, 248, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-sizing: border-box;
+    direction: rtl;
+    animation: trModalZoomIn 0.22s ease-out;
+}
+
+.tr-share-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tr-share-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.tr-share-icon {
+    font-size: 1.8rem;
+    background: rgba(56, 189, 248, 0.15);
+    padding: 10px;
+    border-radius: 16px;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    line-height: 1;
+}
+
+.tr-share-title {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 900;
+    color: #38bdf8;
+    letter-spacing: 0.3px;
+}
+
+.tr-share-subtitle {
+    margin: 4px 0 0 0;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.tr-share-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+
+@media (max-width: 640px) {
+    .tr-share-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.tr-share-card {
+    background: #14203e;
+    border: 1.5px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.tr-share-card:hover {
+    transform: translateY(-3px) scale(1.01);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.tr-share-card.card-options:hover {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+}
+
+.tr-share-card.card-print:hover {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.tr-share-card.card-pdf:hover {
+    border-color: #a855f7;
+    background: rgba(168, 85, 247, 0.12);
+}
+
+.tr-share-card.card-whatsapp:hover {
+    border-color: #25d366;
+    background: rgba(37, 211, 102, 0.12);
+}
+
+.tr-share-card.card-telegram:hover {
+    border-color: #229ed9;
+    background: rgba(34, 158, 217, 0.12);
+}
+
+.tr-share-card.card-notes:hover {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+}
+
+.share-card-icon-wrap {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.45rem;
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+}
+
+.tr-share-card:hover .share-card-icon-wrap {
+    transform: scale(1.12);
+}
+
+.icon-blue { background: rgba(56, 189, 248, 0.18); border: 1px solid #38bdf8; color: #38bdf8; }
+.icon-green { background: rgba(16, 185, 129, 0.18); border: 1px solid #10b981; color: #10b981; }
+.icon-purple { background: rgba(168, 85, 247, 0.18); border: 1px solid #a855f7; color: #a855f7; }
+.icon-whatsapp { background: rgba(37, 211, 102, 0.18); border: 1px solid #25d366; color: #25d366; }
+.icon-telegram { background: rgba(34, 158, 217, 0.18); border: 1px solid #229ed9; color: #229ed9; }
+.icon-amber { background: rgba(245, 158, 11, 0.18); border: 1px solid #f59e0b; color: #f59e0b; }
+
+.share-card-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.share-card-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #ffffff;
+}
+
+.share-card-desc {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.share-card-arrow {
+    font-size: 1.1rem;
+    color: rgba(255, 255, 255, 0.35);
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.tr-share-card:hover .share-card-arrow {
+    color: #ffffff;
+    transform: translateX(-4px);
+}
+
+.tr-share-footer {
+    text-align: center;
+    font-size: 0.78rem;
+    color: #64748b;
+    font-weight: 700;
+    padding-top: 4px;
+}
+
+/* =======================================================
+   💎 نافذة تفاصيل الكاش وانستا باي الفاخرة (مطابقة للصورة 100%)
+   ======================================================= */
+.tr-details-modal-box {
+    background: #0d152a;
+    border: 2px solid #22c55e;
+    border-radius: 24px;
+    width: 780px;
+    max-width: 95vw;
+    padding: 22px 24px;
+    color: #ffffff;
+    box-shadow: 0 25px 65px rgba(0, 0, 0, 0.9), 0 0 25px rgba(34, 197, 94, 0.22);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+    direction: rtl;
+    animation: trModalZoomIn 0.22s ease-out;
+}
+
+@keyframes trModalZoomIn {
+    from { opacity: 0; transform: scale(0.93); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.tr-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tr-details-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tr-details-icon {
+    font-size: 1.35rem;
+}
+
+.tr-details-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #4ade80;
+    letter-spacing: 0.3px;
+}
+
+.tr-details-close-btn {
+    background: none;
+    border: none;
+    color: #ef4444;
+    font-size: 1.6rem;
+    cursor: pointer;
+    font-weight: 900;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 8px;
+    transition: all 0.18s ease;
+}
+
+.tr-details-close-btn:hover {
+    color: #ff6b6b;
+    transform: scale(1.18);
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.tr-details-divider {
+    height: 1.5px;
+    background: rgba(255, 255, 255, 0.12);
+    margin: 4px 0 6px 0;
+}
+
+.tr-details-search-box {
+    position: relative;
+    width: 100%;
+}
+
+.tr-details-search-input {
+    width: 100%;
+    background: #131f38;
+    border: 1.5px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    color: #ffffff;
+    padding: 10px 42px 10px 14px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.tr-details-search-input:focus {
+    border-color: #22c55e;
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
+    background: #162442;
+}
+
+.tr-details-search-icon {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.05rem;
+    color: #94a3b8;
+    pointer-events: none;
+}
+
+/* كارت إجمالي ربحك من الخدمة */
+.tr-details-profit-banner {
+    background: rgba(18, 30, 60, 0.7);
+    border: 1.5px solid rgba(251, 191, 36, 0.35);
+    border-radius: 14px;
+    padding: 10px 16px;
+    text-align: center;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.tr-details-profit-banner .profit-label {
+    color: #fbbf24;
+    font-weight: 800;
+    font-size: 0.92rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.tr-details-profit-banner .profit-value {
+    color: #f59e0b;
+    font-weight: 900;
+    font-size: 1.95rem;
+    font-family: 'Segoe UI', system-ui, monospace;
+    margin-top: 2px;
+    text-shadow: 0 2px 10px rgba(245, 158, 11, 0.3);
+}
+
+/* شبكة كروت الإحصائيات */
+.tr-details-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.stats-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stat-mini-card {
+    background: #14203e;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    padding: 9px 14px;
+    text-align: center;
+    transition: transform 0.15s ease;
+}
+
+.stat-mini-card:hover {
+    transform: translateY(-2px);
+}
+
+.stat-mini-title {
+    font-size: 0.78rem;
+    color: #cbd5e1;
+    font-weight: 700;
+}
+
+.stat-mini-val {
+    font-size: 1.25rem;
+    font-weight: 900;
+    margin-top: 3px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.stat-mini-val.text-cyan {
+    color: #38bdf8;
+}
+
+.stat-mini-val.text-white {
+    color: #ffffff;
+}
+
+.stat-mini-card.stat-card-green {
+    background: linear-gradient(135deg, #10b981, #059669);
+    border: none;
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);
+}
+
+.stat-mini-card.stat-card-green .stat-mini-title {
+    color: #ecfdf5;
+}
+
+.stat-mini-card.stat-card-red {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    border: none;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.35);
+}
+
+.stat-mini-card.stat-card-red .stat-mini-title {
+    color: #fef2f2;
+}
+
+/* جدول تفاصيل العمليات */
+.tr-details-table-wrapper {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-height: 250px;
+    overflow-y: auto;
+    background: #0e172e;
+}
+
+.tr-details-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+.tr-details-table thead {
+    background: #14b8a6;
+    color: #ffffff;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+}
+
+.tr-details-table th {
+    padding: 10px 12px;
+    font-weight: 900;
+    font-size: 0.88rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.tr-details-table th:last-child {
+    border-left: none;
+}
+
+.tr-details-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    color: #f1f5f9;
+    font-weight: 700;
+}
+
+.tr-details-table td:last-child {
+    border-left: none;
+}
+
+.tr-details-table tbody tr {
+    transition: background 0.15s ease;
+}
+
+.tr-details-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.tr-details-table tbody tr:hover {
+    background: rgba(45, 212, 191, 0.12);
+}
+
+/* شريط الملخص السفلي المينت */
+.tr-details-footer-bar {
+    background: rgba(45, 212, 191, 0.22);
+    border: 1.5px solid rgba(45, 212, 191, 0.5);
+    border-radius: 20px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #5eead4;
+    font-weight: 800;
+    font-size: 0.88rem;
+    box-shadow: 0 2px 10px rgba(45, 212, 191, 0.15);
+}
+
+

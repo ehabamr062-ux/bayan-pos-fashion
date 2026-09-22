@@ -308,7 +308,8 @@
                 { id: 11, name: "آخر شراء" },
                 { id: 12, name: "متوسط التكلفة" },
                 { id: "detailed", name: "الوحدات والعبوات" },
-                { id: 9, name: "الرصيد النهائي" }
+                { id: 9, name: "الرصيد النهائي" },
+                { id: "image", name: "صورة الموديل 🖼️" }
             ];
 
             let html = `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 15px; max-height: 55vh; overflow-y: auto;">`;
@@ -1459,7 +1460,7 @@
             }
         };
 
-        function generateAccountStatement(accountId) {
+        async function generateAccountStatement(accountId) {
             if (!checkPermission('accounts_statement')) return;
 
             let targetId = accountId;
@@ -1553,13 +1554,31 @@
             const targetPartnerClean = cleanAr(acc.name);
             const targetAccCode = (acc.code || '').toString().trim();
 
-            // فلترة العمليات من سجل الحركات (transactions) مع مطابقة مرنة للأسماء والهمزات والكود لضمان تطابق تام مع الحسابات
-            const accTrans = (typeof transactions !== 'undefined' ? transactions : []).filter(t => {
-                if (!t) return false;
-                if (t.partner === acc.name || cleanAr(t.partner) === targetPartnerClean) return true;
-                if (targetAccCode && (String(t.partnerCode || '').trim() === targetAccCode || String(t.accountCode || '').trim() === targetAccCode)) return true;
-                return false;
+            // ⚡ جلب فوري لحركات الشريك من IndexedDB عبر الفهرس السريع O(log N) لضمان استيعاب مئات الآلاف من الفواتير
+            let dbPartnerTxs = [];
+            if (typeof db !== 'undefined' && db.transactions) {
+                try {
+                    const indexedTxs = await db.transactions.where('partner').equals(acc.name).toArray();
+                    dbPartnerTxs = indexedTxs || [];
+                } catch (err) {
+                    console.warn("⚠️ Query partner transactions notice:", err);
+                }
+            }
+
+            // دمج حركات IndexedDB مع حركات الذاكرة الحالية بأمان وبدون أي تكرار
+            const txMap = new Map();
+            (dbPartnerTxs || []).forEach(t => { if (t && t.id) txMap.set(t.id, t); });
+            (typeof transactions !== 'undefined' && Array.isArray(transactions) ? transactions : []).forEach(t => {
+                if (!t) return;
+                const matchName = t.partner === acc.name || cleanAr(t.partner) === targetPartnerClean;
+                const matchCode = targetAccCode && (String(t.partnerCode || '').trim() === targetAccCode || String(t.accountCode || '').trim() === targetAccCode);
+                if (matchName || matchCode) {
+                    if (t.id) txMap.set(t.id, t);
+                    else txMap.set(`mem_${Math.random()}`, t);
+                }
             });
+
+            const accTrans = Array.from(txMap.values());
 
             // ترتيب العمليات حسب التاريخ والوقت لضمان دقة تسلسل الرصيد التراكمي
             accTrans.sort((a, b) => {

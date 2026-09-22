@@ -3,9 +3,9 @@
 //  النسخة المطورة للعمل أوفلاين 100%
 // ============================================================
 
-const CACHE_NAME = 'bayan-pos-v1.0.6';
-const STATIC_CACHE = 'bayan-static-v1.0.6';
-const DYNAMIC_CACHE = 'bayan-dynamic-v1.0.6';
+const CACHE_NAME = 'bayan-pos-v3.1.1';
+const STATIC_CACHE = 'bayan-static-v3.1.1';
+const DYNAMIC_CACHE = 'bayan-dynamic-v3.1.1';
 
 // كافة ملفات النظام الأساسية المتوفرة محلياً (بدون تكرار لتفادي خطأ Entry already exists على GitHub Pages)
 const STATIC_FILES = [
@@ -22,12 +22,18 @@ const STATIC_FILES = [
     './css/scrollbars.css',
     './css/premium.css',
     './css/treasury_audit.css',
+    './css/barcode_print.css',
+    './mobile/index.html',
+    './mobile/css/mobile_fashion.css',
+    './mobile/js/mobile_fashion.js',
     './js/store.js',
+    './js/barcode_print.js',
     './js/core.js',
     './js/utils_helpers.js',
     './js/app_units_payments.js',
     './js/app_backup.js',
     './js/app_license.js',
+    './js/cloud_telemetry.js',
     './js/app_export_share.js',
     './js/security.js',
     './js/ui_theme_custom.js',

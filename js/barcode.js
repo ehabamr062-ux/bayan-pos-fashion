@@ -144,49 +144,59 @@ const BayanBarcode = (function () {
             ? productsDB
             : ((typeof getStore === 'function') ? (getStore('bayan_products') || []) : []);
 
-        // 1. أولوية مطلقة للبحث في باركود التشكيلات الفريدة (Variant Barcode Match)
-        for (const p of list) {
+        let matchedUnitResult = null;
+        let matchedParentResult = null;
+
+        // فحص مدمج فائق السرعة بدورة واحدة فقط Single Pass بدلاً من الدوران 3 مرات
+        for (let i = 0; i < list.length; i++) {
+            const p = list[i];
+            if (!p) continue;
+
+            // 1. الأولوية المطلقة لباركود التشكيلات (المقاسات والألوان)
             if (p.variants && Array.isArray(p.variants)) {
-                const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === clean);
-                if (vFound) {
-                    return {
-                        product: p,
-                        variant: vFound,
-                        unit: null,
-                        matchType: 'variant'
-                    };
+                for (let j = 0; j < p.variants.length; j++) {
+                    const v = p.variants[j];
+                    if (v && v.barcode && String(v.barcode).trim() === clean) {
+                        return {
+                            product: p,
+                            variant: v,
+                            unit: null,
+                            matchType: 'variant'
+                        };
+                    }
                 }
             }
-        }
 
-        // 2. البحث في باركود الوحدات المتعددة (Unit Barcode Match)
-        for (const p of list) {
-            if (p.units && Array.isArray(p.units)) {
-                const uFound = p.units.find(u => String(u.unitBarcode || '').trim() === clean);
-                if (uFound) {
-                    return {
+            // 2. باركود الوحدات المتعددة
+            if (!matchedUnitResult && p.units && Array.isArray(p.units)) {
+                for (let k = 0; k < p.units.length; k++) {
+                    const u = p.units[k];
+                    if (u && String(u.unitBarcode || '').trim() === clean) {
+                        matchedUnitResult = {
+                            product: p,
+                            variant: null,
+                            unit: u,
+                            matchType: 'unit'
+                        };
+                        break;
+                    }
+                }
+            }
+
+            // 3. باركود أو كود الصنف الأساسي
+            if (!matchedParentResult) {
+                if (String(p.barcode || '').trim() === clean || String(p.code || '').trim() === clean) {
+                    matchedParentResult = {
                         product: p,
                         variant: null,
-                        unit: uFound,
-                        matchType: 'unit'
+                        unit: null,
+                        matchType: 'parent'
                     };
                 }
             }
         }
 
-        // 3. البحث في باركود الصنف الرئيسي أو الكود (Parent Barcode / Code Match)
-        for (const p of list) {
-            if (String(p.barcode || '').trim() === clean || String(p.code || '').trim() === clean) {
-                return {
-                    product: p,
-                    variant: null,
-                    unit: null,
-                    matchType: 'parent'
-                };
-            }
-        }
-
-        return null;
+        return matchedUnitResult || matchedParentResult || null;
     }
 
     /**
@@ -1111,15 +1121,16 @@ window.dispatchSearchBarcode = function(code, context) {
     if (context === 'sales') {
         cleanSearchUI('productSearch', 'searchResults');
         let added = false;
+        const defU = (product.units && product.units.length > 0) ? (product.units.find(u => u.isBaseUnit) || product.units[0]) : null;
         if (variant) {
             if (typeof completeAddToCart === 'function') {
-                added = completeAddToCart(product, null, variant);
+                added = completeAddToCart(product, defU, variant);
             } else if (typeof addToCart === 'function') {
-                added = addToCart(product.id, null, variant);
+                added = addToCart(product.id, defU, variant);
             }
         } else {
             if (typeof completeAddToCart === 'function') {
-                added = completeAddToCart(product, unit, null);
+                added = completeAddToCart(product, unit || defU, null);
             } else if (typeof addToCart === 'function') {
                 added = addToCart(product.id);
             }
@@ -1132,6 +1143,16 @@ window.dispatchSearchBarcode = function(code, context) {
         }
         return false;
     }
+
+    // دالة مساعدة لمعايرة المقاسات والألوان وتوحيد القيم الافتراضية
+    const cleanAttr = (val) => {
+        const s = String(val || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
+        if (!s || s === 'قياسي' || s === 'موحد' || s === 'عام' || s === '-') return '';
+        return s;
+    };
+    const cSize = cleanAttr(vSize);
+    const cColor = cleanAttr(vColor);
+    const vBarcode = variant && variant.barcode ? String(variant.barcode).trim() : '';
 
     if (context === 'purchase') {
         cleanSearchUI('purchaseSearch', 'purchaseSearchResults');
@@ -1147,11 +1168,12 @@ window.dispatchSearchBarcode = function(code, context) {
     if (context === 'adj') {
         cleanSearchUI('adjSearch', 'adjSearchResults');
         if (!window.adjCart) window.adjCart = [];
-        const existing = window.adjCart.find(it =>
-            it.id === product.id &&
-            ((it.size || it.selectedSize || '') === vSize) &&
-            ((it.color || it.selectedColor || '') === vColor)
-        );
+        const existing = window.adjCart.find(it => {
+            if (vBarcode && String(it.code || '').trim() === vBarcode) return true;
+            const isSame = (it.id === product.id || String(it.id) === String(product.id) || it.name === product.name);
+            if (!isSame) return false;
+            return cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor;
+        });
         if (existing) {
             existing.qty = (parseFloat(existing.qty) || 0) + 1;
         } else {
@@ -1214,17 +1236,38 @@ window.dispatchSearchBarcode = function(code, context) {
             }
         }
 
-        const existing = window.transferItemsBatch.find(it =>
-            it.id === product.id &&
-            ((it.size || it.selectedSize || '') === vSize) &&
-            ((it.color || it.selectedColor || '') === vColor)
-        );
-        const currentBatchQty = existing ? (parseFloat(existing.qty) || 0) : 0;
+        const existing = window.transferItemsBatch.find(it => {
+            if (vBarcode && String(it.code || '').trim() === vBarcode) return true;
+            const isSame = (it.id === product.id || String(it.id) === String(product.id) || it.name === product.name);
+            if (!isSame) return false;
+            return cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor;
+        });
 
-        if (currentWhStock <= 0 || (currentBatchQty + 1) > currentWhStock) {
+        // 🛡️ الحراسة التراكمية الفورية للتحويل المخزني
+        let currentBatchBaseQty = 0;
+        window.transferItemsBatch.forEach(it => {
+            let isMatch = false;
+            if (vBarcode && String(it.code || '').trim() === vBarcode) isMatch = true;
+            if (!isMatch) {
+                const isSame = (it.id === product.id || String(it.id) === String(product.id) || it.name === product.name);
+                if (isSame && cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor) {
+                    isMatch = true;
+                }
+            }
+            if (isMatch) {
+                const itFactor = parseFloat(it.unitFactor) || 1;
+                currentBatchBaseQty += (parseFloat(it.qty) || 0) * itFactor;
+            }
+        });
+
+        const newTransferFactor = (unit && unit.factor) ? (parseFloat(unit.factor) || 1) : 1;
+        const totalRequestedTransferQty = currentBatchBaseQty + (1 * newTransferFactor);
+
+        if (currentWhStock <= 0 || totalRequestedTransferQty > currentWhStock) {
             if (typeof BayanBarcode !== 'undefined') BayanBarcode.playBeep(false);
             if (typeof showToast === 'function') {
-                showToast(`🚫 لا يمكن التحويل: رصيد الصنف [${product.name}${vDetails}] في مخزن (${fromWh}) هو (${currentWhStock}) فقط!`, 'error');
+                const currDisplay = (currentBatchBaseQty / newTransferFactor).toFixed(2).replace(/\.?0+$/, '');
+                showToast(`🚫 لا يمكن التحويل: متاح بمخزن (${fromWh}) للصنف [${product.name}${vDetails}] هو (${currentWhStock}) فقط، وموجود بقائمة التحويل حالياً (${currDisplay})!`, 'error', 5000);
             }
             return false;
         }
@@ -1263,11 +1306,12 @@ window.dispatchSearchBarcode = function(code, context) {
         cleanSearchUI('returnProductSearch', 'returnSearchResults');
         const pPrice = variant ? (parseFloat(variant.price) || parseFloat(product.price) || 0) : (parseFloat(product.price) || 0);
         if (typeof returnCart !== 'undefined' && Array.isArray(returnCart)) {
-            const existing = returnCart.find(it =>
-                it.id === product.id &&
-                ((it.size || it.selectedSize || '') === vSize) &&
-                ((it.color || it.selectedColor || '') === vColor)
-            );
+            const existing = returnCart.find(it => {
+                if (vBarcode && String(it.code || '').trim() === vBarcode) return true;
+                const isSame = (it.id === product.id || String(it.id) === String(product.id) || it.name === product.name);
+                if (!isSame) return false;
+                return cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor;
+            });
             if (existing) {
                 existing.qty = (parseFloat(existing.qty) || 0) + 1;
             } else {
@@ -1296,11 +1340,12 @@ window.dispatchSearchBarcode = function(code, context) {
         cleanSearchUI('purReturnProductSearch', 'purReturnSearchResults');
         const pCost = variant ? (parseFloat(variant.cost) || parseFloat(product.cost) || 0) : (parseFloat(product.cost) || 0);
         if (typeof purReturnCart !== 'undefined' && Array.isArray(purReturnCart)) {
-            const existing = purReturnCart.find(it =>
-                it.id === product.id &&
-                ((it.size || it.selectedSize || '') === vSize) &&
-                ((it.color || it.selectedColor || '') === vColor)
-            );
+            const existing = purReturnCart.find(it => {
+                if (vBarcode && String(it.code || '').trim() === vBarcode) return true;
+                const isSame = (it.id === product.id || String(it.id) === String(product.id) || it.name === product.name);
+                if (!isSame) return false;
+                return cleanAttr(it.size || it.selectedSize || '') === cSize && cleanAttr(it.color || it.selectedColor || '') === cColor;
+            });
             if (existing) {
                 existing.qty = (parseFloat(existing.qty) || 0) + 1;
             } else {

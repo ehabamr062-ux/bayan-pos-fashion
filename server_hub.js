@@ -13,13 +13,28 @@ let pairedDevices = []; // [{ deviceId, deviceName, ip, pairedAt, token, status 
 let pendingPairingRequests = []; // [{ id, deviceId, deviceName, ip, requestedAt, pin }]
 let inTransitTransfers = []; // Shared in-memory and persisted pending transfers cache
 
+// 📡 اتصالات البث الحي الفوري المفتوحة (Server-Sent Events) لجميع الأجهزة المتصلة
+const liveStreamClients = new Set();
+
+function broadcastLiveStreamEvent(eventName, payload) {
+    if (!liveStreamClients || liveStreamClients.size === 0) return;
+    const msg = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const client of Array.from(liveStreamClients)) {
+        try {
+            client.res.write(msg);
+        } catch (e) {
+            liveStreamClients.delete(client);
+        }
+    }
+}
+
 // 🛡️ جداول الحماية من هجمات التخمين وتتبع أمان رمز الـ PIN
 const pinFailedAttempts = new Map(); // ip -> failed attempts count
 const pinLockouts = new Map(); // ip -> lockout expiry timestamp
 
 function cleanExpiredPairingRequests() {
-    const twoMinAgo = Date.now() - 120000; // صلاحية رمز الـ PIN دقيقتان فقط
-    pendingPairingRequests = pendingPairingRequests.filter(r => new Date(r.requestedAt).getTime() > twoMinAgo);
+    const fiveMinAgo = Date.now() - 300000; // صلاحية رمز الـ PIN 5 دقائق كاملة لمنح المستخدم وقتاً كافياً ومريحاً
+    pendingPairingRequests = pendingPairingRequests.filter(r => new Date(r.requestedAt).getTime() > fiveMinAgo);
 }
 
 // مسار حفظ بيانات الأجهزة المقترنة محلياً
@@ -133,25 +148,46 @@ let masterDbData = {
 };
 const masterDbFile = path.join(appDataPath, 'master_sync_db.json');
 
-try {
-    if (fs.existsSync(masterDbFile)) {
-        masterDbData = JSON.parse(fs.readFileSync(masterDbFile, 'utf8') || '{}');
-    }
-} catch (e) {
-    console.warn('[ServerHub] Load master db error:', e.message);
+// 🚀 تحميل غير متزامن في الخلفية لضمان عدم حجز أو تجميد ثواني تشغيل البرنامج الأولى
+function loadMasterDbAsync() {
+    fs.readFile(masterDbFile, 'utf8', (err, data) => {
+        if (!err && data) {
+            try {
+                masterDbData = JSON.parse(data || '{}');
+            } catch (e) {
+                console.warn('[ServerHub] Parse master db error:', e.message);
+            }
+        }
+    });
+}
+if (typeof setImmediate === 'function') {
+    setImmediate(loadMasterDbAsync);
+} else {
+    setTimeout(loadMasterDbAsync, 50);
 }
 
 let isSavingMasterDb = false;
 let pendingSaveMasterDb = false;
 let saveMasterDbDebounceTimer = null;
+let masterDbIsDirty = false;
 
-function saveMasterDb() {
+// 🛡️ حفظ هادئ في الخلفية يحمي القرص الصلب من الكتابة المتكررة مع كل فاتورة صغيرة
+function saveMasterDb(immediate = false) {
+    masterDbIsDirty = true;
+    if (immediate) {
+        if (saveMasterDbDebounceTimer) clearTimeout(saveMasterDbDebounceTimer);
+        _doSaveMasterDb();
+        return;
+    }
     if (saveMasterDbDebounceTimer) {
         clearTimeout(saveMasterDbDebounceTimer);
     }
+    // مهلة 5 ثوانٍ لتجميع الحركات بهدوء تام دون أي ضغط على I/O أو الرامات
     saveMasterDbDebounceTimer = setTimeout(() => {
-        _doSaveMasterDb();
-    }, 250);
+        if (masterDbIsDirty) {
+            _doSaveMasterDb();
+        }
+    }, 5000);
 }
 
 function _doSaveMasterDb() {
@@ -160,6 +196,7 @@ function _doSaveMasterDb() {
         return;
     }
     isSavingMasterDb = true;
+    masterDbIsDirty = false;
     try {
         const jsonStr = JSON.stringify(masterDbData);
         fs.writeFile(masterDbFile, jsonStr, 'utf8', (err) => {
@@ -266,7 +303,7 @@ function getTrashedTransactionKeys(trashList = []) {
     return { keySet, invIdSet };
 }
 
-function mergeTransactions(existingList = [], incomingList = [], trashList = [], isMasterPush = false) {
+function mergeTransactions(existingList = [], incomingList = [], trashList = [], isMasterPush = false, isDelta = false) {
     const { keySet: trashedKeys, invIdSet: trashedInvIds } = getTrashedTransactionKeys(trashList);
 
     const isTrashed = (t) => {
@@ -292,8 +329,14 @@ function mergeTransactions(existingList = [], incomingList = [], trashList = [],
         return trashedKeys.has(compKey) || trashedKeys.has(legacyCompKey);
     };
 
-    const cleanExisting = (Array.isArray(existingList) ? existingList : []).filter(t => !isTrashed(t));
     const cleanIncoming = (Array.isArray(incomingList) ? incomingList : []).filter(t => !isTrashed(t));
+
+    // ⚡ تسريع فائق: إذا كان الماستر يقوم بدفع كامل قاعدة بياناته، نعتمد حركاته المعتمدة مباشرة في O(N)
+    if (isMasterPush && !isDelta && Array.isArray(incomingList)) {
+        return cleanIncoming;
+    }
+
+    const cleanExisting = (Array.isArray(existingList) ? existingList : []).filter(t => !isTrashed(t));
 
     if (cleanExisting.length === 0) return cleanIncoming;
     if (cleanIncoming.length === 0) return cleanExisting;
@@ -793,7 +836,7 @@ function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
             trash: mergedTrash,
             products: mergeProducts(masterDbData.products || [], db.products || [], mergedTrash, isMaster),
             accounts: mergeAccounts(masterDbData.accounts || [], db.accounts || [], mergedTrash, isMaster, isDelta),
-            transactions: mergeTransactions(masterDbData.transactions || [], db.transactions || [], mergedTrash, isMaster),
+            transactions: mergeTransactions(masterDbData.transactions || [], db.transactions || [], mergedTrash, isMaster, isDelta),
             users: (isDelta && (!db.users || db.users.length === 0)) ? (masterDbData.users || []) : mergeUsers(masterDbData.users || [], db.users || [], mergedTrash, isMaster),
             warehouses: (isDelta && (!db.warehouses || db.warehouses.length === 0)) ? (masterDbData.warehouses || []) : mergeWarehouses(masterDbData.warehouses || [], db.warehouses || [], mergedTrash, isMaster),
             treasuryAudit: (isDelta && (!db.treasuryAudit || db.treasuryAudit.length === 0)) ? (masterDbData.treasuryAudit || []) : mergeTreasuryAudit(masterDbData.treasuryAudit || [], db.treasuryAudit || []),
@@ -802,6 +845,12 @@ function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
         };
         saveMasterDb();
         syncInTransitFromTransactions(masterDbData.transactions);
+        // بث التحديث الجزئي اللحظي فوراً لجميع الأجهزة المتصلة بدون انتظار
+        broadcastLiveStreamEvent('DELTA_UPDATE', {
+            db: db,
+            sourceDeviceId: sourceDeviceId || 'DEV-HOST',
+            lastUpdated: masterDbData.lastUpdated
+        });
     }
     return masterDbData;
 }
@@ -822,12 +871,14 @@ const MIME_TYPES = {
 };
 
 function startServer(appRootDir, onNotification) {
+    const rootDir = (typeof appRootDir === 'string' && appRootDir.trim()) ? appRootDir : __dirname;
     if (serverInstance) {
         console.log('[ServerHub] Server is already running on port', SERVER_PORT);
         return { isRunning: true, ip: getLocalIPAddress(), port: SERVER_PORT };
     }
 
     serverInstance = http.createServer((req, res) => {
+        try {
         const clientIp = req.socket.remoteAddress ? req.socket.remoteAddress.replace('::ffff:', '') : 'Unknown';
         const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
         const pathname = decodeURIComponent(parsedUrl.pathname);
@@ -914,6 +965,30 @@ function startServer(appRootDir, onNotification) {
                     return;
                 }
 
+                // ⚡ بث الأحداث الحية الفورية (Server-Sent Events - Live Stream)
+                if (pathname === '/api/sync/live-stream' && req.method === 'GET') {
+                    if (!isAuthorizedDevice(req, clientIp)) {
+                        res.writeHead(401, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: 'غير مصرح: يجب إقران الجهاز أولاً' }));
+                        return;
+                    }
+                    res.writeHead(200, {
+                        'Content-Type': 'text/event-stream; charset=utf-8',
+                        'Cache-Control': 'no-cache, no-transform',
+                        'Connection': 'keep-alive',
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    res.write(`event: connected\ndata: ${JSON.stringify({ message: 'Live stream connected successfully', timestamp: Date.now() })}\n\n`);
+
+                    const clientObj = { req, res, clientIp };
+                    liveStreamClients.add(clientObj);
+
+                    req.on('close', () => {
+                        liveStreamClients.delete(clientObj);
+                    });
+                    return;
+                }
+
                 // س. مزامنة البيانات الكاملة: سحب البيانات للجهاز الفرعي / التابلت (Pull All Data)
                 if (pathname === '/api/sync/pull' && req.method === 'GET') {
                     if (!isAuthorizedDevice(req, clientIp)) {
@@ -948,7 +1023,7 @@ function startServer(appRootDir, onNotification) {
                     if (db) {
                         updateMasterDbData(db, trustedDeviceId, trustedIsMaster);
                         if (typeof onNotification === 'function') {
-                            onNotification('sync-data-pushed', { db: masterDbData, sourceDeviceId: trustedDeviceId, clientIp });
+                            onNotification('sync-data-pushed', { db: db, fullDb: masterDbData, sourceDeviceId: trustedDeviceId, clientIp });
                         }
                     }
                     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1081,26 +1156,30 @@ function startServer(appRootDir, onNotification) {
                         return;
                     }
 
-                    // توليد رمز PIN عشوائي ومحمي تشفيرياً من 4 أرقام
-                    const pin = crypto.randomInt(1000, 10000).toString();
-                    const reqId = 'REQ-' + Date.now();
-                    
-                    // إزالة أي طلبات سابقة لنفس الجهاز
-                    pendingPairingRequests = pendingPairingRequests.filter(r => r.deviceId !== deviceId);
-                    
-                    const pairReq = {
-                        id: reqId,
-                        deviceId,
-                        deviceName: deviceName || `تابلت (${clientIp})`,
-                        ip: clientIp,
-                        pin,
-                        requestedAt: new Date().toISOString()
-                    };
-                    pendingPairingRequests.push(pairReq);
+                    // إذا كان هناك طلب نشط وساري المفعول لنفس الجهاز، نثبت نفس رمز الـ PIN حتى لا يتغير على الشاشة
+                    let pairReq = pendingPairingRequests.find(r => r.deviceId === deviceId);
+                    if (pairReq) {
+                        pairReq.requestedAt = new Date().toISOString(); // تجديد الصلاحية 5 دقائق أخرى
+                        if (deviceName) pairReq.deviceName = deviceName;
+                        pairReq.ip = clientIp;
+                    } else {
+                        // توليد رمز PIN عشوائي ومحمي تشفيرياً من 4 أرقام
+                        const pin = crypto.randomInt(1000, 10000).toString();
+                        const reqId = 'REQ-' + Date.now();
+                        pairReq = {
+                            id: reqId,
+                            deviceId,
+                            deviceName: deviceName || `تابلت (${clientIp})`,
+                            ip: clientIp,
+                            pin,
+                            requestedAt: new Date().toISOString()
+                        };
+                        pendingPairingRequests.push(pairReq);
 
-                    // الحفاظ على حجم القائمة لمنع استهلاك الذاكرة
-                    if (pendingPairingRequests.length > 15) {
-                        pendingPairingRequests.shift();
+                        // الحفاظ على حجم القائمة لمنع استهلاك الذاكرة
+                        if (pendingPairingRequests.length > 15) {
+                            pendingPairingRequests.shift();
+                        }
                     }
 
                     // طباعة رمز الـ PIN بوضوح في شاشة السيرفر
@@ -1145,12 +1224,18 @@ function startServer(appRootDir, onNotification) {
                     return;
                 }
 
-                // س3. إخفاء وإلغاء طلب الإقران من قائمة الانتظار
+                // س3. إخفاء أو رفض طلب الإقران
                 if (pathname === '/api/pair-requests/dismiss' && req.method === 'POST') {
-                    const { id, deviceId } = jsonBody;
-                    pendingPairingRequests = pendingPairingRequests.filter(r => (id ? r.id !== id : r.deviceId !== deviceId));
+                    const { id, deviceId, action } = jsonBody;
+                    // لا يتم حذف الرمز إلا في حالة الرفض الصريح فقط! مجرد إغلاق النافذة على الماستر يترك الرمز نشطاً للسماح بإدخاله
+                    if (action === 'reject') {
+                        pendingPairingRequests = pendingPairingRequests.filter(r => (id ? r.id !== id : r.deviceId !== deviceId));
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, message: 'تم رفض وإلغاء طلب الإقران بنجاح' }));
+                        return;
+                    }
                     res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, message: 'تم إخفاء الطلب بنجاح' }));
+                    res.end(JSON.stringify({ success: true, message: 'تم إخفاء التنبيه من الشاشة مع بقاء الرمز نشطاً للاستخدام' }));
                     return;
                 }
 
@@ -1187,7 +1272,7 @@ function startServer(appRootDir, onNotification) {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ 
                             success: false, 
-                            message: 'لا يوجد طلب إقران نشط لهذا الجهاز أو انتهت صلاحية الرمز (مدتها دقيقتان). يرجى إعادة طلب الإقران.' 
+                            message: 'لا يوجد طلب إقران نشط لهذا الجهاز أو انتهت صلاحية الرمز (مدتها 5 دقائق). يرجى الضغط على اتصال مجدداً.' 
                         }));
                         return;
                     }
@@ -1421,9 +1506,19 @@ function startServer(appRootDir, onNotification) {
         // =========================================================================
         // 📁 2. Static File Serving (HTML, CSS, JS, Images)
         // =========================================================================
+        // توجيه مسار الموبايل لمجلده المستقل تماماً
+        if (pathname === '/mobile') {
+            res.writeHead(302, { 'Location': '/mobile/' });
+            res.end();
+            return;
+        }
+
         let safePath = pathname === '/' ? '/index.html' : pathname;
+        if (safePath === '/mobile/' || safePath === '/mobile.html') {
+            safePath = '/mobile/index.html';
+        }
         // منع التسلل للمجلدات وحماية الملفات الحساسة (Path Traversal Protection)
-        const normalizedRoot = path.resolve(appRootDir);
+        const normalizedRoot = path.resolve(rootDir);
         const cleanRelPath = path.normalize(safePath).replace(/^(\.\.[\/\\])+/, '').replace(/^[\/\\]+/, '');
         const resolvedPath = path.resolve(normalizedRoot, cleanRelPath);
 
@@ -1488,8 +1583,21 @@ function startServer(appRootDir, onNotification) {
 
             res.writeHead(200, headers);
             const stream = fs.createReadStream(resolvedPath);
+            stream.on('error', (streamErr) => {
+                if (!res.headersSent) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+                }
+                res.end('500 Error reading file');
+            });
             stream.pipe(res);
         });
+        } catch (serverErr) {
+            console.error('[ServerHub] Request error:', serverErr);
+            if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+            }
+            res.end(JSON.stringify({ error: 'Internal Server Error', message: serverErr.message }));
+        }
     });
 
     serverInstance.on('error', (err) => {
@@ -1512,8 +1620,16 @@ function startServer(appRootDir, onNotification) {
 }
 
 function stopServer() {
+    if (liveStreamClients && liveStreamClients.size > 0) {
+        for (const client of Array.from(liveStreamClients)) {
+            try { client.res.end(); } catch (e) {}
+        }
+        liveStreamClients.clear();
+    }
     if (serverInstance) {
-        serverInstance.close();
+        try {
+            serverInstance.close();
+        } catch (e) {}
         serverInstance = null;
         console.log('[ServerHub] Server stopped.');
     }
@@ -1570,3 +1686,7 @@ module.exports = {
     getMasterDbData,
     updateMasterDbData
 };
+
+if (require.main === module) {
+    startServer(__dirname);
+}

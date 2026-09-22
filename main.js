@@ -4,16 +4,16 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 // =========================================================================
-// 🚀 1. تسريع الأداء الفائق والرسوميات (Native GPU Hardware Acceleration)
-// يمنح Electron نفس سرعة وسلاسة متصفح جوجل كروم (60 FPS) مع استهلاك خفيف للموارد
+// 🚀 1. تسريع الأداء وضبط كروت الشاشة المدمجة (Intel HD Graphics & Low-End POS Profile)
 // =========================================================================
+// ⚡ إجبار إلكترون على تشغيل تسريع الرسوميات ومشاركة رامات الجهاز الـ 8GB لتفادي اختناق كرت الشاشة الـ 113MB
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
-app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,CalculateNativeWinOcclusion');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// 💾 تقليل العمليات الخلفية المجهدة للهارد الميكانيكي HDD
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess');
+// 🧠 ضبط استهلاك الذاكرة السريع لمحرك V8
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
 
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -33,8 +33,8 @@ function createWindow() {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
-        backgroundColor: '#ffffff',
-        show: false, // لا تظهر النافذة إلا بعد اكتمال الرسم لمنع أي وميض أبيض أو شاشة معلقة
+        backgroundColor: '#0f172a', // لون خلفية داكن أنيق ومتطابق مع هوية بيان بدلاً من الوميض الأبيض المزعج
+        show: false, // لا تظهر النافذة إلا بعد اكتمال الرسم لمنع أي وميض أو شاشة معلقة
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -102,8 +102,15 @@ function createWindow() {
             return;
         }
 
-        // منع إعادة التحميل العادية F5 أو Ctrl+R لحماية شاشة الكاشير وسلة المبيعات من التفريغ بالخطأ
-        if (input.key === 'F5' || (input.control && key === 'r')) {
+        // إعادة التحميل في تطبيق إلكترون المثبت ديسكتوب عبر Ctrl+R
+        if (input.control && key === 'r') {
+            event.preventDefault();
+            win.reload();
+            return;
+        }
+
+        // منع إعادة التحميل العادية F5 لحماية شاشة الكاشير وسلة المبيعات من التفريغ بالخطأ
+        if (input.key === 'F5') {
             event.preventDefault();
             return;
         }
@@ -126,19 +133,50 @@ function createWindow() {
         win.webContents.closeDevTools();
     });
 
-    // إغلاق نظيف وسريع مع حماية البيانات غير المحفوظة
-    win.on('close', () => {
-        openWindows.delete(win);
-        if (openWindows.size === 0) {
+    // إغلاق نظيف وسريع مع حماية البيانات غير المحفوظة والنسخ الاحتياطي التلقائي
+    win.on('close', (event) => {
+        if (isQuitting) {
+            // تم إنهاء النسخ مسبقاً والموافقة على الخروج
+            openWindows.delete(win);
+            return;
+        }
+
+        // إذا كان هناك أكثر من نافذة فرعية مفتوحة، نسمح بإغلاق هذه النافذة فقط
+        if (openWindows.size > 1) {
+            openWindows.delete(win);
+            return;
+        }
+
+        // 🔒 صمام الأمان: إيقاف الإغلاق المؤقت لمنح الريندرر وقتاً لحفظ النسخة وفحص البيانات غير المحفوظة
+        event.preventDefault();
+
+        try {
+            if (!win.isDestroyed() && win.webContents) {
+                win.webContents.send('trigger-backup-before-quit');
+            } else {
+                isQuitting = true;
+                app.quit();
+                return;
+            }
+        } catch (err) {
+            console.error('Error sending trigger-backup-before-quit:', err);
+            isQuitting = true;
+            app.quit();
+            return;
+        }
+
+        // صمام أمان زمني في حال تعليق الريندرر (3.5 ثوانٍ كحد أقصى لمنع أي بطء في النظام)
+        if (global.quitTimeout) clearTimeout(global.quitTimeout);
+        global.quitTimeout = setTimeout(() => {
+            console.warn('⚠️ Backup before quit timeout reached, forcing exit...');
             isQuitting = true;
             try {
-                win.webContents.send('trigger-backup-before-quit');
-            } catch(err) {}
-            if (global.quitTimeout) clearTimeout(global.quitTimeout);
-            global.quitTimeout = setTimeout(() => {
-                app.exit(0);
-            }, 800);
-        }
+                if (server_hub && typeof server_hub.stopServer === 'function') {
+                    server_hub.stopServer();
+                }
+            } catch (e) {}
+            app.exit(0);
+        }, 3500);
     });
 
     win.on('closed', () => {
@@ -157,7 +195,7 @@ function createWindow() {
 
     // 🔒 صمام الأمان الفولاذي: منع فتح أي نوافذ جديدة داخل بيئة Electron وتوجيه الروابط الآمنة للمتصفح الافتراضي مع السماح بنوافذ الطباعة المحلية
     win.webContents.setWindowOpenHandler(({ url }) => {
-        if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url) || /^tel:/i.test(url)) {
+        if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url) || /^tel:/i.test(url) || /^anydesk:/i.test(url)) {
             shell.openExternal(url);
             return { action: 'deny' };
         }
@@ -210,26 +248,62 @@ function createWindow() {
 
 // تهيئة التطبيق وإحالة الجلسة المكررة إلى النافذة المفتوحة
 app.on('second-instance', () => {
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
         if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
         mainWindow.focus();
+    } else {
+        // 🛡️ صمام أمان: فتح النافذة فوراً إذا كانت العملية تعمل بالخلفية بدون واجهة
+        createWindow();
     }
 });
 
+const os = require('os');
 const server_hub = require('./server_hub.js');
+
+const configDir = path.join(os.homedir(), '.bayan_pos');
+const roleConfigFile = path.join(configDir, 'terminal_role.json');
+
+function getPersistedTerminalRole() {
+    try {
+        if (fs.existsSync(roleConfigFile)) {
+            const data = JSON.parse(fs.readFileSync(roleConfigFile, 'utf8'));
+            if (data && (data.role === 'client' || data.role === 'master')) {
+                return data.role;
+            }
+        }
+    } catch(e) {}
+    return 'master';
+}
+
+function setPersistedTerminalRole(role) {
+    try {
+        if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(roleConfigFile, JSON.stringify({ role, updatedAt: new Date().toISOString() }), 'utf8');
+        return true;
+    } catch(e) {
+        return false;
+    }
+}
 
 app.whenReady().then(() => {
     createWindow();
 
-    // تشغيل السيرفر الشبكي المحلي المدمج لربط أجهزة التابلت والفروع
-    try {
-        server_hub.startServer(__dirname, (event, data) => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send(event, data);
-            }
-        });
-    } catch (err) {
-        console.error('[ServerHub] Failed to start local server:', err.message);
+    // تشغيل السيرفر الشبكي المحلي المدمج فقط إذا كان هذا الجهاز معرّفاً كـ جهاز رئيسي (Master)
+    const activeRole = getPersistedTerminalRole();
+    if (activeRole === 'master') {
+        try {
+            server_hub.startServer(__dirname, (event, data) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send(event, data);
+                }
+            });
+            console.log('🖥️ [Main] Started local server in MASTER mode.');
+        } catch (err) {
+            console.error('[ServerHub] Failed to start local server:', err.message);
+        }
+    } else {
+        console.log('💻 [Main] Running in CLIENT mode. Local server is NOT started (connected to Master).');
     }
 
     app.on('activate', function () {
@@ -251,6 +325,11 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', function () {
+    try {
+        if (server_hub && typeof server_hub.stopServer === 'function') {
+            server_hub.stopServer();
+        }
+    } catch (e) {}
     app.exit(0);
 });
 
@@ -273,7 +352,12 @@ ipcMain.on('save-backup-and-quit', (event, backupData) => {
         console.error('Failed to save backup:', err);
     } finally {
         isQuitting = true;
-        app.quit();
+        try {
+            if (server_hub && typeof server_hub.stopServer === 'function') {
+                server_hub.stopServer();
+            }
+        } catch (e) {}
+        app.exit(0);
     }
 });
 
@@ -290,23 +374,48 @@ ipcMain.on('cancel-quit', () => {
 });
 
 ipcMain.on('proceed-quit', () => {
+    if (global.quitTimeout) {
+        clearTimeout(global.quitTimeout);
+        global.quitTimeout = null;
+    }
     isQuitting = true;
-    app.quit();
+    try {
+        if (server_hub && typeof server_hub.stopServer === 'function') {
+            server_hub.stopServer();
+        }
+    } catch (e) {}
+    app.exit(0);
 });
 
 ipcMain.on('quit-directly', () => {
+    if (global.quitTimeout) {
+        clearTimeout(global.quitTimeout);
+        global.quitTimeout = null;
+    }
     isQuitting = true;
-    app.quit();
+    try {
+        if (server_hub && typeof server_hub.stopServer === 'function') {
+            server_hub.stopServer();
+        }
+    } catch (e) {}
+    app.exit(0);
 });
 
 // فتح الروابط الخارجية بأمان مع التحقق من الـ Protocol
 ipcMain.handle('open-url', async (event, url) => {
     try {
+        if (!url || typeof url !== 'string') return false;
+        const cleanUrl = url.trim();
+        // بروتوكول AnyDesk المباشر
+        if (/^anydesk:/i.test(cleanUrl)) {
+            await shell.openExternal(cleanUrl);
+            return true;
+        }
         // ✅ أمان: السماح فقط بـ http و https و mailto و tel ومنع أي بروتوكول آخر قد ينفّذ أوامر نظام
-        const parsedUrl = new URL(url);
-        const allowedProtocols = ['http:', 'https:', 'mailto:', 'tel:'];
+        const parsedUrl = new URL(cleanUrl);
+        const allowedProtocols = ['http:', 'https:', 'mailto:', 'tel:', 'anydesk:'];
         if (!allowedProtocols.includes(parsedUrl.protocol.toLowerCase())) {
-            console.error('⚠️ محاولة فتح رابط غير مسموح: ' + url);
+            console.error('⚠️ محاولة فتح رابط غير مسموح: ' + cleanUrl);
             return false;
         }
         await shell.openExternal(parsedUrl.href);
@@ -314,6 +423,46 @@ ipcMain.handle('open-url', async (event, url) => {
     } catch (err) {
         console.error('Failed to open URL:', err);
         return false;
+    }
+});
+
+// 🖥️ فتح تطبيق AnyDesk والاتصال المباشر بالكود فوراً
+ipcMain.handle('launch-anydesk', async (event, code) => {
+    try {
+        const cleanCode = String(code || '').replace(/[^a-zA-Z0-9@._-]/g, '').trim();
+        const { spawn, exec } = require('child_process');
+        const fs = require('fs');
+
+        const possiblePaths = [
+            'C:\\Program Files (x86)\\AnyDesk\\AnyDesk.exe',
+            'C:\\Program Files\\AnyDesk\\AnyDesk.exe',
+            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'AnyDesk', 'AnyDesk.exe') : null,
+            process.env.APPDATA ? path.join(process.env.APPDATA, 'AnyDesk', 'AnyDesk.exe') : null
+        ].filter(Boolean);
+
+        const anydeskExe = possiblePaths.find(p => fs.existsSync(p));
+
+        if (anydeskExe) {
+            const args = cleanCode ? [cleanCode] : [];
+            const child = spawn(anydeskExe, args, { detached: true, stdio: 'ignore' });
+            child.unref();
+            return { success: true, method: 'direct_exe' };
+        }
+
+        // في حال عدم وجود المسار الثابت، استخدام بروتوكول anydesk أو أمر start
+        const targetProtocol = cleanCode ? `anydesk:${cleanCode}` : 'anydesk:';
+        try {
+            await shell.openExternal(targetProtocol);
+            return { success: true, method: 'protocol' };
+        } catch (e) {
+            exec(cleanCode ? `start anydesk ${cleanCode}` : 'start anydesk', (err) => {
+                if (err) console.error('Error starting anydesk via start command:', err);
+            });
+            return { success: true, method: 'cmd' };
+        }
+    } catch (err) {
+        console.error('Error launching AnyDesk:', err);
+        return { success: false, error: err.message };
     }
 });
 
@@ -355,7 +504,6 @@ ipcMain.handle('hash-activation-payload', (event, payload) => {
 // =========================================================================
 // 📁 1. نظام مسار البيانات والتخزين الموحد (AppData/Roaming/Bayan POS)
 // =========================================================================
-const os = require('os');
 const userDataPath = path.join(app.getPath('appData'), 'Bayan POS');
 app.setPath('userData', userDataPath);
 if (!fs.existsSync(userDataPath)) {
@@ -455,7 +603,14 @@ function autoMigrateLegacyBackups() {
         console.warn("⚠️ Legacy backup migration warning:", err.message);
     }
 }
-autoMigrateLegacyBackups();
+// تشغيل فحص ونقل النسخ الاحتياطية القديمة بعد 10 ثوانٍ في الخلفية بهدوء لعدم تعطيل إقلاع البرنامج نهائياً
+setTimeout(() => {
+    try {
+        autoMigrateLegacyBackups();
+    } catch(e) {
+        console.warn("Background backup migration:", e);
+    }
+}, 10000);
 
 // الحصول على المسار الحقيقي لمجلد النسخ الاحتياطية
 ipcMain.handle('get-backup-dir', () => {
@@ -478,6 +633,19 @@ ipcMain.handle('save-backup-data', async (_e, payload) => {
         const fileName = `${prefix}${timestamp}.json`;
         const filePath = path.join(backupDir, fileName);
         await fs.promises.writeFile(filePath, payload?.dataStr || '{}', 'utf8');
+
+        // إذا كان النسخ يدوياً، نقوم بحفظ نسخة إضافية فورية على سطح المكتب Desktop ليجدها العميل أمامه مباشرة
+        if (payload?.isManual) {
+            try {
+                const desktopDir = app.getPath('desktop');
+                const desktopFilePath = path.join(desktopDir, fileName);
+                await fs.promises.writeFile(desktopFilePath, payload?.dataStr || '{}', 'utf8');
+                console.log("Manual backup also saved to Desktop:", desktopFilePath);
+            } catch(deskErr) {
+                console.warn("Could not save copy to desktop:", deskErr);
+            }
+        }
+
         return { success: true, filePath, fileName, backupDir };
     } catch (err) {
         console.error("save-backup-data IPC error:", err);
@@ -723,8 +891,9 @@ ipcMain.handle('quit-and-install-update', () => {
     }
 });
 
+try { ipcMain.removeHandler('get-app-version'); } catch(e) {}
 ipcMain.handle('get-app-version', () => {
-    return app.getVersion();
+    return app.getVersion() || '3.1.1';
 });
 
 // =========================================================================
@@ -839,4 +1008,26 @@ ipcMain.handle('fix-firewall-rule', async () => {
             else resolve({ success: true });
         });
     });
+});
+
+ipcMain.handle('get-terminal-role', () => {
+    return getPersistedTerminalRole();
+});
+
+ipcMain.handle('set-terminal-role', (event, role) => {
+    const success = setPersistedTerminalRole(role);
+    if (role === 'master') {
+        try {
+            server_hub.startServer(__dirname, (evt, data) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send(evt, data);
+                }
+            });
+        } catch(e) {}
+    } else {
+        try {
+            server_hub.stopServer();
+        } catch(e) {}
+    }
+    return { success, role };
 });

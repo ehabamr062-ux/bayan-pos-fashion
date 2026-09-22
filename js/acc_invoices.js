@@ -1,22 +1,49 @@
 // ============================================================
 //  إدارة الفواتير السابقة وتعديلها واستعراض بنودها (Invoices Management)
 // ============================================================
-        // 🙈 خاصية إظهار / إخفاء المبالغ المالية في تقرير الحركة اليومية للحفاظ على الخصوصية
-        window.toggleDailyReportAmountsPrivacy = function() {
-            const isHidden = document.body.classList.toggle('daily-amounts-hidden');
+        // 🔒 خاصية إظهار / إخفاء المبالغ المالية في تقرير الحركة اليومية للحفاظ على الخصوصية مع حماية برمز PIN المدير
+        window.toggleDailyReportAmountsPrivacy = async function() {
+            const isCurrentlyHidden = document.body.classList.contains('daily-amounts-hidden');
             const iconEl = document.getElementById('dailyAmountsEyeIcon');
             const textEl = document.getElementById('dailyAmountsEyeText');
             const btn = document.getElementById('toggleDailyAmountsBtn');
 
+            const curUser = (typeof currentUser !== 'undefined') ? currentUser : null;
+            const isAdmin = curUser ? (curUser.role === 'admin') : true;
+
+            let requiresAdminPin = false;
+            if (curUser && !isAdmin) {
+                const uTarget = (typeof users !== 'undefined' && Array.isArray(users))
+                    ? (users.find(u => u.pin === curUser.pin || u.name === curUser.name) || curUser)
+                    : curUser;
+
+                if (uTarget && uTarget.permissions && uTarget.permissions.general && uTarget.permissions.general.lockDailyAmounts !== undefined) {
+                    requiresAdminPin = !!uTarget.permissions.general.lockDailyAmounts;
+                } else {
+                    requiresAdminPin = true;
+                }
+            }
+
+            // 🛡️ إذا كانت المبالغ مخفية حالياً والمستخدم موظف مفعل عليه قفل المبالغ -> نطلب رمز PIN المدير إجبارياً
+            if (isCurrentlyHidden && requiresAdminPin) {
+                if (typeof window.verifyAdminPinAuthorization === 'function') {
+                    const ok = await window.verifyAdminPinAuthorization('👁️ كشف وإظهار المبالغ المالية', 'يتطلب إظهار المبالغ المالية في تقرير الحركة اليومية إدخال رمز PIN الخاص بالمدير.');
+                    if (!ok) return;
+                }
+            }
+
+            const isHidden = document.body.classList.toggle('daily-amounts-hidden');
+
             if (isHidden) {
-                if (iconEl) iconEl.innerText = '🙈';
+                if (iconEl) iconEl.innerText = '🔒';
                 if (textEl) textEl.innerText = 'إظهار المبالغ';
                 if (btn) {
-                    btn.style.background = '#fee2e2';
-                    btn.style.borderColor = '#fca5a5';
-                    btn.style.color = '#dc2626';
+                    btn.style.background = '#fef3c7';
+                    btn.style.borderColor = '#fde68a';
+                    btn.style.color = '#b45309';
+                    btn.title = requiresAdminPin ? 'انقر لإدخال رمز PIN المدير وإظهار المبالغ المالية' : 'إظهار المبالغ المالية';
                 }
-                if (typeof showToast === 'function') showToast('🙈 تم إخفاء المبالغ المالية للخصوصية', 'info');
+                if (typeof showToast === 'function') showToast('🔒 تم إخفاء وتأمين المبالغ المالية بنجاح', 'info');
             } else {
                 if (iconEl) iconEl.innerText = '👁️';
                 if (textEl) textEl.innerText = 'إخفاء المبالغ';
@@ -24,8 +51,9 @@
                     btn.style.background = '#f1f5f9';
                     btn.style.borderColor = '#cbd5e1';
                     btn.style.color = '#475569';
+                    btn.title = 'إخفاء المبالغ المالية فوراً للحفاظ على الخصوصية';
                 }
-                if (typeof showToast === 'function') showToast('👁️ تم إظهار المبالغ المالية', 'success');
+                if (typeof showToast === 'function') showToast(requiresAdminPin ? '👁️ تم إظهار المبالغ المالية بنجاح بإذن المدير' : '👁️ تم إظهار المبالغ المالية بنجاح', 'success');
             }
         };
 
@@ -524,7 +552,7 @@
                 
                 if (isExplicitCredit) {
                     g.remaining = Math.max(0, g.total - g.paid);
-                } else if (m.includes('نقدي') || m.includes('نقدية') || m.includes('كاش') || m.includes('تحويل') || m.includes('بنك') || m.includes('شبكة') || m.includes('فيزا') || g.type.includes('تسوية') || g.type.includes('قبض') || g.type.includes('صرف')) {
+                } else if (m.includes('نقدي') || m.includes('نقدية') || m.includes('كاش') || m.includes('تحويل') || m.includes('بنك') || m.includes('شبكة') || m.includes('فيزا') || m.includes('فودافون') || m.includes('vodafone') || m.includes('انستا') || m.includes('insta') || m.includes('محفظة') || m.includes('wallet') || m.includes('اورنج') || m.includes('اتصالات') || g.type.includes('تسوية') || g.type.includes('قبض') || g.type.includes('صرف') || g.paid === 0) {
                     g.paid = g.total;
                     g.remaining = 0;
                 } else {
@@ -537,27 +565,65 @@
         window.getGroupedTransactions = getGroupedTransactions;
 
         // نظام التصفح والتحميل الذكي لفواتير العمليات
-        window.invoicesRenderLimit = 500;
+        window.invoicesRenderLimit = 100;
+
+        // ⚡ محرك تأخير ذكي للبحث فائق السرعة (Search Debounce) لمنع أي بطء أو تكرار عمليات الفلترة مع البيانات الضخمة
+        let _invoicesSearchDebounceTimer = null;
+        window.debouncedRenderInvoicesTable = function(delay = 140) {
+            if (_invoicesSearchDebounceTimer) {
+                clearTimeout(_invoicesSearchDebounceTimer);
+            }
+            _invoicesSearchDebounceTimer = setTimeout(() => {
+                _invoicesSearchDebounceTimer = null;
+                renderInvoicesTable();
+            }, delay);
+        };
 
         window.loadMoreInvoices = function(step) {
             if (step === 0) {
                 window.invoicesRenderLimit = Infinity;
             } else {
-                window.invoicesRenderLimit = (window.invoicesRenderLimit || 500) + step;
+                window.invoicesRenderLimit = (window.invoicesRenderLimit || 100) + step;
             }
             renderInvoicesTable(true);
         };
 
-        function renderInvoicesTable(isLoadMore = false) {
+        async function renderInvoicesTable(isLoadMore = false) {
+            // إلغاء أي مؤقت بحث مؤجل لضمان التنفيذ المباشر فوراً عند الاستدعاء الصريح
+            if (_invoicesSearchDebounceTimer) {
+                clearTimeout(_invoicesSearchDebounceTimer);
+                _invoicesSearchDebounceTimer = null;
+            }
+
             if (!isLoadMore) {
-                window.invoicesRenderLimit = window.invoicesRenderLimit || 500;
+                window.invoicesRenderLimit = window.invoicesRenderLimit || 100;
+            }
+
+            const searchId = (document.getElementById('invoicesSearchId')?.value || '').toLowerCase();
+            const fromDate = document.getElementById('invoicesDateFrom')?.value || '';
+            const toDate = document.getElementById('invoicesDateTo')?.value || '';
+
+            // ⚡ جلب الفواتير السابقة أو المحددة من IndexedDB عند الطلب
+            if (searchId && typeof window.ensureInvoiceLoaded === 'function') {
+                await window.ensureInvoiceLoaded(searchId);
+            }
+            if ((fromDate || toDate) && typeof window.loadTransactionsForDateRange === 'function') {
+                const todayISO = new Date().toLocaleDateString('en-CA');
+                if (fromDate < todayISO || toDate < todayISO) {
+                    await window.loadTransactionsForDateRange(fromDate, toDate);
+                }
+            }
+
+            if (typeof renderInvoicesWarehouseChips === 'function') {
+                const whChipsBar = document.getElementById('invoicesWarehouseChipsBar');
+                if (whChipsBar && whChipsBar.children.length <= 1) {
+                    renderInvoicesWarehouseChips();
+                }
             }
 
             const tbody = document.getElementById('invoicesTableBody');
 
             tbody.innerHTML = '';
-
-            const searchId = document.getElementById('invoicesSearchId').value.toLowerCase();
 
             const searchPartner = document.getElementById('invoicesSearchPartner').value.toLowerCase();
 
@@ -567,15 +633,71 @@
 
             const typeFilter = document.getElementById('invoicesTypeFilter').value;
 
-            const fromDate = document.getElementById('invoicesDateFrom').value;
-
-            const toDate = document.getElementById('invoicesDateTo').value;
-
             // الحفاظ على الفهرس الأصلي للعملية بدون استهلاك الذاكرة أو استنساخ آلاف الكائنات
             for (let i = 0; i < transactions.length; i++) {
                 transactions[i].originalIndex = i;
             }
             let rawData = transactions;
+
+            // 🔒 خصوصية وسرية الفواتير بحسب دور ونطاق المستخدم الحالي
+            const activeUser = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : window.currentUser;
+            if (activeUser && activeUser.role !== 'admin') {
+                const invScope = activeUser.invoiceScope || 'user_only';
+                const myName = (activeUser.name || '').trim().toLowerCase();
+                const adminNames = (typeof window.getAdminUserNames === 'function') 
+                    ? window.getAdminUserNames() 
+                    : new Set(['المدير', 'المدير العام', 'مدير النظام', 'admin']);
+
+                if (invScope === 'user_only') {
+                    // 👤 حصر تام بفواتير هذا الموظف فقط (حسب حسابه الشخصي وورديته)
+                    rawData = rawData.filter(t => {
+                        const tUser = (t.user || '').trim().toLowerCase();
+                        return tUser && tUser === myName;
+                    });
+                } else if (invScope === 'hide_admin') {
+                    // 🛡️ حجب فواتير كافة حسابات مديري النظام ديناميكياً
+                    rawData = rawData.filter(t => {
+                        const tUser = (t.user || '').trim().toLowerCase();
+                        return !adminNames.has(tUser);
+                    });
+                } else if (invScope === 'terminal_only') {
+                    // حصر الفواتير بجهاز الموظف الحالي أو اسمه فقط
+                    let myLetter = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function') 
+                        ? window.BayanNetworkHub.getTerminalLetter() 
+                        : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || localStorage.getItem('local_device_letter') || '';
+                    rawData = rawData.filter(t => {
+                        const tUser = (t.user || '').trim().toLowerCase();
+                        let tLetter = t.terminalLetter;
+                        if (!tLetter && t.terminal) {
+                            const match = t.terminal.match(/\(([A-Z])\)/i);
+                            if (match) tLetter = match[1].toUpperCase();
+                        }
+                        const isMyTerminal = myLetter && (tLetter && tLetter.toUpperCase() === myLetter.toUpperCase());
+                        const isMyUser = tUser && (tUser === myName);
+                        return isMyTerminal || isMyUser;
+                    });
+                } else if (invScope === 'warehouse_only') {
+                    // حصر الفواتير بفرع ومخزن الموظف المصرح له فقط
+                    const userWh = (activeUser.warehouseScope === 'main') 
+                        ? 'المخزن الرئيسي' 
+                        : (activeUser.assignedWarehouse || 'المخزن الرئيسي');
+                    rawData = rawData.filter(t => (t.warehouse || 'المخزن الرئيسي') === userWh);
+                } else if (invScope === 'hide_master') {
+                    // حجب فواتير ومبيعات الجهاز الرئيسي (Master) وحسابات الإدارة
+                    rawData = rawData.filter(t => {
+                        const rawTerminal = t.terminal || '';
+                        let letter = t.terminalLetter;
+                        if (!letter) {
+                            const match = rawTerminal.match(/\(([A-Z])\)/i);
+                            if (match) letter = match[1].toUpperCase();
+                            else if (rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master')) letter = 'MASTER';
+                        }
+                        const tUser = (t.user || '').trim().toLowerCase();
+                        const isMaster = (letter === 'MASTER') || rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master') || adminNames.has(tUser);
+                        return !isMaster;
+                    });
+                }
+            }
 
             const cleanAr = (str) => cleanArabicCached(str);
 
@@ -616,6 +738,12 @@
                 });
             }
 
+            // 🏢 تصفية حسب المخزن / الفرع المختار من التبويبات الأفقية
+            if (window.currentInvoicesWarehouseFilter && window.currentInvoicesWarehouseFilter !== 'all') {
+                const whFilter = window.currentInvoicesWarehouseFilter;
+                rawData = rawData.filter(t => (t.warehouse || 'المخزن الرئيسي') === whFilter);
+            }
+
             if (searchId) {
                 rawData = rawData.filter(t => t.invoiceId && t.invoiceId.toString().includes(searchId));
             }
@@ -629,9 +757,18 @@
                     return nameMatch || codeMatch || phoneMatch;
                 }).map(acc => cleanAr(acc.name));
 
+                const matchingSet = new Set(matchingAccountNames);
+
                 rawData = rawData.filter(t => {
+                    if (!t || !t.partner) return false;
                     const pName = cleanAr(t.partner);
-                    return pName.includes(cleanSearch) || matchingAccountNames.some(m => pName.includes(m) || m.includes(pName));
+                    if (pName.includes(cleanSearch)) return true;
+                    if (matchingSet.has(pName)) return true;
+                    for (let mIdx = 0; mIdx < matchingAccountNames.length; mIdx++) {
+                        const m = matchingAccountNames[mIdx];
+                        if (pName.includes(m) || m.includes(pName)) return true;
+                    }
+                    return false;
                 });
             }
 
@@ -876,10 +1013,10 @@
                         <td class="col-inv-4" style="font-weight:bold; ${isV(4) ? '' : 'display:none;'}">${displayProduct}</td>
                         <td class="col-inv-5" style="color:${profitColor}; font-weight:bold; ${isV(5) ? '' : 'display:none;'}">${profitText}</td>
                         <td class="col-inv-6" style="${isV(6) ? '' : 'display:none;'}">
-                            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;">
-                                <span style="font-weight:800; color:#1e293b; font-size:0.83rem;">🏢 ${warehouse}</span>
-                                ${getTerminalBadgeHtml(t)}
-                            </div>
+                            <span style="font-weight:800; color:#1e293b; font-size:0.83rem;">🏢 ${warehouse}</span>
+                        </td>
+                        <td class="col-inv-14" style="text-align:center; ${isV(14) ? '' : 'display:none;'}">
+                            ${getTerminalBadgeHtml(t)}
                         </td>
                         <td class="col-inv-7" style="font-weight:bold; color:${isRejectedTransfer ? '#94a3b8' : 'var(--main-blue)'}; ${isV(7) ? '' : 'display:none;'}">${displayTotalHtml}</td>
                         <td class="col-inv-8" style="color:${isRejectedTransfer ? '#94a3b8' : 'blue'}; font-weight:bold; ${isV(8) ? '' : 'display:none;'}">${paid}</td>
@@ -895,7 +1032,7 @@
             if (hasMore) {
                 rowsHtml += `
                     <tr id="invoicesLoadMoreRow" style="background: linear-gradient(135deg, #f8fafc, #f1f5f9); text-align: center;">
-                        <td colspan="14" style="padding: 16px; border-top: 2px dashed #cbd5e1;">
+                        <td colspan="15" style="padding: 16px; border-top: 2px dashed #cbd5e1;">
                             <div style="display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;">
                                 <span style="font-weight: 800; color: #475569; font-size: 0.92rem;">
                                     📊 تم عرض <strong style="color: #2563eb; font-size: 1.05rem;">${displayedInvoices.length}</strong> من إجمالي <strong style="color: #1e293b; font-size: 1.05rem;">${totalMatchingInvoices}</strong> فاتورة
@@ -916,7 +1053,7 @@
 
         // دالة لعرض تفاصيل الفاتورة في تنبيه أو نافذة
 
-        function viewInvoiceItems(invoiceId, type = '', autoPrint = false) {
+        async function viewInvoiceItems(invoiceId, type = '', autoPrint = false) {
             if (!checkPermission('docs_view')) return;
             
             // تحديد فئة المعاملة المطلوبة لتجنب خلط السندات والفواتير التي تحمل نفس المعرّف
@@ -960,6 +1097,34 @@
                 invoiceItems = invoiceItems.filter(t => t.type && !t.type.includes('قبض') && !t.type.includes('صرف'));
             }
             
+            // ⚡ إذا لم تكن في الذاكرة (فاتورة قديمة)، نستدعيها من IndexedDB فوراً
+            if (invoiceItems.length === 0 && typeof window.ensureInvoiceLoaded === 'function') {
+                await window.ensureInvoiceLoaded(invoiceId);
+                invoiceItems = transactions.filter(t => {
+                    const hasInvId = t.invoiceId != null && t.invoiceId !== '';
+                    if (hasInvId) {
+                        if (String(t.invoiceId) !== String(invoiceId)) return false;
+                    } else {
+                        if (String(t.id) !== String(invoiceId)) return false;
+                    }
+                    if (category) {
+                        const tType = String(t.type || '');
+                        if (category === 'return_sales') return tType.includes('مرتجع بيع') || tType.includes('مرتجع مبيعات');
+                        if (category === 'return_purchase') return tType.includes('مرتجع شراء') || tType.includes('مرتجع مشتريات');
+                        if (category === 'sales') return (tType.includes('بيع') || tType.includes('مبيعات')) && !tType.includes('مرتجع');
+                        if (category === 'purchase') return (tType.includes('شراء') || tType.includes('مشتريات')) && !tType.includes('مرتجع');
+                        if (category === 'receipt') return tType.includes('قبض');
+                        if (category === 'disbursement') return tType.includes('صرف');
+                        if (category === 'adjustment') return tType.includes('تسوية');
+                        if (category === 'transfer') return tType.includes('تحويل');
+                    }
+                    return true;
+                });
+                if (category === 'sales' || category === 'purchase' || category === 'return_sales' || category === 'return_purchase') {
+                    invoiceItems = invoiceItems.filter(t => t.type && !t.type.includes('قبض') && !t.type.includes('صرف'));
+                }
+            }
+
             if (invoiceItems.length === 0) return alert('خطأ: لم يتم العثور على تفاصيل الفاتورة.');
             
             let head = invoiceItems.find(t => t.isInvoiceHead) || invoiceItems[0];
@@ -968,7 +1133,7 @@
             tx.warehouse = head.warehouse || 'المخزن الرئيسي';
             tx.terminal = head.terminal || 'الجهاز الرئيسي 💻';
             tx.partner = head.partner || head.customer || 'عميل نقدي';
-            tx.method = head.method || head.paymentMethod || 'نقدي';
+            tx.method = head.method || head.paymentMethod || 'كاش (نقدي)';
             tx.notes = invoiceItems.find(t => t.notes)?.notes || tx.notes || '';
 
             // استخراج بيانات الخصم والإضافات الإجمالية للفاتورة
@@ -1034,8 +1199,22 @@
             });
             
             // سحب المدفوع والمتبقي من رأس الفاتورة بشكل صحيح وموثوق
-            tx.paid = parseFloat(head.paidAmount != null ? head.paidAmount : (head.paid || 0));
-            tx.deferred = parseFloat(head.deferred != null ? head.deferred : (head.remaining || 0));
+            tx.paid = parseFloat(head.paidAmount != null ? head.paidAmount : (head.paid != null ? head.paid : 0));
+            if (isNaN(tx.paid)) tx.paid = 0;
+            
+            const headTotal = parseFloat(head.invoiceGrandTotal != null ? head.invoiceGrandTotal : (head.finalTotal != null ? head.finalTotal : (head.grandTotal || head.total || 0))) || 0;
+            const isExplicitCredit = (head.method && (head.method.includes('آجل') || head.method.includes('أجل') || head.method.includes('ذمم') || head.method.includes('credit') || head.method.includes('تقسيط')));
+            
+            if (head.deferred != null && !isNaN(parseFloat(head.deferred)) && parseFloat(head.deferred) > 0.001) {
+                tx.deferred = parseFloat(head.deferred);
+            } else if (head.remaining != null && !isNaN(parseFloat(head.remaining)) && parseFloat(head.remaining) > 0.001) {
+                tx.deferred = parseFloat(head.remaining);
+            } else if (isExplicitCredit || (headTotal > tx.paid && tx.paid >= 0)) {
+                tx.deferred = Math.max(0, headTotal - tx.paid);
+            } else {
+                tx.deferred = 0;
+            }
+            tx.remaining = tx.deferred;
             
             if (typeof window.renderCustomInvoiceModal === 'function') {
                 window.renderCustomInvoiceModal(tx, autoPrint);
@@ -1545,10 +1724,37 @@
 
                     // 1. تفعيل وضع التعديل (Edit Mode) عالمياً
                     isEditMode = true;
+                    window.isEditMode = true;
                     editingInvoiceId = invId;
+                    window.editingInvoiceId = invId;
 
                     let timeVal = head.timeISO || t.timeISO || '';
                     let dateVal = head.dateISO || t.dateISO || '';
+
+                    if (dateVal) {
+                        dateVal = String(dateVal).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).trim();
+                        if (dateVal.includes('T')) dateVal = dateVal.split('T')[0];
+                        if (dateVal.includes(' ')) dateVal = dateVal.split(' ')[0];
+                        const dmy = dateVal.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+                        if (dmy) {
+                            dateVal = `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+                        }
+                    }
+
+                    // استخراج التاريخ بدقة بصيغة YYYY-MM-DD في حال عدم وجود dateISO صريح
+                    if (!dateVal && t.date) {
+                        const normalized = String(t.date).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d\/-]/g, ' ').trim();
+                        const isoMatch = normalized.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+                        if (isoMatch) {
+                            dateVal = `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, '0')}-${String(isoMatch[3]).padStart(2, '0')}`;
+                        } else {
+                            const dmyMatch = normalized.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+                            if (dmyMatch) {
+                                dateVal = `${dmyMatch[3]}-${String(dmyMatch[2]).padStart(2, '0')}-${String(dmyMatch[1]).padStart(2, '0')}`;
+                            }
+                        }
+                    }
+
                     if (!timeVal && t.date) {
                         if (t.date.includes('،')) {
                             const dateParts = t.date.split('،');
@@ -1564,12 +1770,19 @@
                             }
                         }
                     }
-                    editingOriginalDate = { full: t.date, iso: dateVal, time: timeVal };
+                    editingOriginalDate = {
+                        full: t.date || (dateVal ? `${dateVal} ${timeVal}` : new Date().toLocaleString('ar-EG')),
+                        iso: dateVal || t.dateISO || new Date().toLocaleDateString('en-CA'),
+                        time: timeVal || t.timeISO || new Date().toTimeString().slice(0, 5)
+                    };
+                    window.editingOriginalDate = editingOriginalDate;
                     editingInvoiceType = t.type;
+                    window.editingInvoiceType = t.type;
                     window.editingOriginalPartner = partnerName;
                     window.editingOriginalMethod = paymentMethod;
                     window.editingOriginalUser = t.user || '';
                     editingOriginalItems = JSON.parse(JSON.stringify(invItems)); // نسخة أصلية للعكس والمطابقة
+                    window.editingOriginalItems = editingOriginalItems;
 
                     // 2. فتح القسم أولاً لضمان وجود تبويب نشط
                     const mainType = t.type || '';
@@ -1640,12 +1853,17 @@
                                 }
                                 let matchedOpt = Array.from(methodSelect.options).find(o => o.value === paymentMethod || o.text.trim() === paymentMethod);
                                 if (!matchedOpt) {
-                                    if (paymentMethod.includes('آجل') || paymentMethod.includes('اجل')) {
+                                    if (typeof window.isVodafonePaymentMethod === 'function' && window.isVodafonePaymentMethod(paymentMethod)) {
+                                        matchedOpt = Array.from(methodSelect.options).find(o => window.isVodafonePaymentMethod(o.value) || window.isVodafonePaymentMethod(o.text));
+                                    } else if (paymentMethod.includes('آجل') || paymentMethod.includes('اجل')) {
                                         matchedOpt = Array.from(methodSelect.options).find(o => o.value.includes('آجل') || o.value.includes('اجل'));
                                     } else if (paymentMethod.includes('تحويل') || paymentMethod.includes('بنك') || paymentMethod.includes('شيك') || paymentMethod.includes('فيزا') || paymentMethod.includes('شبكة')) {
                                         matchedOpt = Array.from(methodSelect.options).find(o => o.value.includes('تحويل') || o.value.includes('بنك') || o.value.includes('شيك'));
                                     } else {
-                                        matchedOpt = Array.from(methodSelect.options).find(o => o.value.includes('نقدي') || o.value.includes('كاش'));
+                                        matchedOpt = Array.from(methodSelect.options).find(o => {
+                                            const isNon = (typeof window.isNonCashPaymentMethod === 'function') ? window.isNonCashPaymentMethod(o.value) : false;
+                                            return !isNon && (o.value.includes('نقدي') || o.value.includes('كاش'));
+                                        });
                                     }
                                 }
                                 if (matchedOpt) {
@@ -1733,12 +1951,17 @@
                                 }
                                 let matchedOpt = Array.from(purMethodSelect.options).find(o => o.value === paymentMethod || o.text.trim() === paymentMethod);
                                 if (!matchedOpt) {
-                                    if (paymentMethod.includes('آجل') || paymentMethod.includes('اجل')) {
+                                    if (typeof window.isVodafonePaymentMethod === 'function' && window.isVodafonePaymentMethod(paymentMethod)) {
+                                        matchedOpt = Array.from(purMethodSelect.options).find(o => window.isVodafonePaymentMethod(o.value) || window.isVodafonePaymentMethod(o.text));
+                                    } else if (paymentMethod.includes('آجل') || paymentMethod.includes('اجل')) {
                                         matchedOpt = Array.from(purMethodSelect.options).find(o => o.value.includes('آجل') || o.value.includes('اجل'));
                                     } else if (paymentMethod.includes('شيك') || paymentMethod.includes('تحويل') || paymentMethod.includes('بنك')) {
                                         matchedOpt = Array.from(purMethodSelect.options).find(o => o.value.includes('شيك') || o.value.includes('تحويل') || o.value.includes('بنك'));
                                     } else {
-                                        matchedOpt = Array.from(purMethodSelect.options).find(o => o.value.includes('نقدي') || o.value.includes('كاش'));
+                                        matchedOpt = Array.from(purMethodSelect.options).find(o => {
+                                            const isNon = (typeof window.isNonCashPaymentMethod === 'function') ? window.isNonCashPaymentMethod(o.value) : false;
+                                            return !isNon && (o.value.includes('نقدي') || o.value.includes('كاش'));
+                                        });
                                     }
                                 }
                                 if (matchedOpt) {
@@ -1803,6 +2026,9 @@
                                     populatePaymentMethodSelects();
                                 }
                                 let matchedOpt = Array.from(returnMethodSelect.options).find(o => o.value === paymentMethod || o.text.trim() === paymentMethod);
+                                if (!matchedOpt && typeof window.isVodafonePaymentMethod === 'function' && window.isVodafonePaymentMethod(paymentMethod)) {
+                                    matchedOpt = Array.from(returnMethodSelect.options).find(o => window.isVodafonePaymentMethod(o.value) || window.isVodafonePaymentMethod(o.text));
+                                }
                                 if (matchedOpt) returnMethodSelect.value = matchedOpt.value;
                                 if (typeof selectMethod === 'function') selectMethod(returnMethodSelect);
                             }
@@ -1844,6 +2070,9 @@
                                     populatePaymentMethodSelects();
                                 }
                                 let matchedOpt = Array.from(purReturnMethodSelect.options).find(o => o.value === paymentMethod || o.text.trim() === paymentMethod);
+                                if (!matchedOpt && typeof window.isVodafonePaymentMethod === 'function' && window.isVodafonePaymentMethod(paymentMethod)) {
+                                    matchedOpt = Array.from(purReturnMethodSelect.options).find(o => window.isVodafonePaymentMethod(o.value) || window.isVodafonePaymentMethod(o.text));
+                                }
                                 if (matchedOpt) purReturnMethodSelect.value = matchedOpt.value;
                                 if (typeof selectMethod === 'function') selectMethod(purReturnMethodSelect);
                             }
@@ -1898,8 +2127,16 @@
                             if (document.getElementById('receiptNotes')) document.getElementById('receiptNotes').value = head.product || head.notes || '';
                             if (document.getElementById('receiptID')) document.getElementById('receiptID').value = invId;
 
-                            const rMethodSelect = document.getElementById('receiptMethodSelect') || document.getElementById('receiptPaymentMethod');
-                            if (rMethodSelect) rMethodSelect.value = paymentMethod || 'نقدية';
+                            const rMethodSelect = document.getElementById('receiptTreasurySelect') || document.getElementById('receiptMethodSelect') || document.getElementById('receiptPaymentMethod');
+                            if (rMethodSelect) {
+                                if (rMethodSelect.options.length === 0 && typeof populatePaymentMethodSelects === 'function') populatePaymentMethodSelects();
+                                let opt = Array.from(rMethodSelect.options).find(o => o.value === paymentMethod || o.text.trim() === paymentMethod);
+                                if (!opt && typeof window.isVodafonePaymentMethod === 'function' && window.isVodafonePaymentMethod(paymentMethod)) {
+                                    opt = Array.from(rMethodSelect.options).find(o => window.isVodafonePaymentMethod(o.value) || window.isVodafonePaymentMethod(o.text));
+                                }
+                                if (opt) rMethodSelect.value = opt.value;
+                                else rMethodSelect.value = paymentMethod || 'كاش (نقدي)';
+                            }
 
                             if (payerName && typeof getAccountBalance === 'function') {
                                 const bal = getAccountBalance(payerName);
@@ -1922,8 +2159,16 @@
                             if (document.getElementById('disburseNotes')) document.getElementById('disburseNotes').value = head.product || head.notes || '';
                             if (document.getElementById('disburseID')) document.getElementById('disburseID').value = invId;
 
-                            const dMethodSelect = document.getElementById('disburseMethodSelect') || document.getElementById('disbursePaymentMethod');
-                            if (dMethodSelect) dMethodSelect.value = paymentMethod || 'نقدية';
+                            const dMethodSelect = document.getElementById('disburseTreasurySelect') || document.getElementById('disburseMethodSelect') || document.getElementById('disbursePaymentMethod');
+                            if (dMethodSelect) {
+                                if (dMethodSelect.options.length === 0 && typeof populatePaymentMethodSelects === 'function') populatePaymentMethodSelects();
+                                let opt = Array.from(dMethodSelect.options).find(o => o.value === paymentMethod || o.text.trim() === paymentMethod);
+                                if (!opt && typeof window.isVodafonePaymentMethod === 'function' && window.isVodafonePaymentMethod(paymentMethod)) {
+                                    opt = Array.from(dMethodSelect.options).find(o => window.isVodafonePaymentMethod(o.value) || window.isVodafonePaymentMethod(o.text));
+                                }
+                                if (opt) dMethodSelect.value = opt.value;
+                                else dMethodSelect.value = paymentMethod || 'كاش (نقدي)';
+                            }
 
                             if (payeeName && typeof getAccountBalance === 'function') {
                                 const bal = getAccountBalance(payeeName);
@@ -2000,8 +2245,8 @@
                             window.adjCart = adjCart;
 
                             if (document.getElementById('adjBadgeID')) document.getElementById('adjBadgeID').innerText = invId;
-                            if (document.getElementById('adjDate')) document.getElementById('adjDate').value = t.dateISO || '';
-                            if (document.getElementById('adjTime')) document.getElementById('adjTime').value = t.timeISO || '';
+                            if (document.getElementById('adjDate')) document.getElementById('adjDate').value = dateVal || t.dateISO || '';
+                            if (document.getElementById('adjTime')) document.getElementById('adjTime').value = timeVal || t.timeISO || '';
 
                             if (typeof renderAdjTable === 'function') renderAdjTable();
 
@@ -2012,6 +2257,12 @@
                         window.isEditMode = true;
                         editingInvoiceId = invId;
                         window.editingInvoiceId = invId;
+                        editingOriginalDate = {
+                            full: t.date || (dateVal ? `${dateVal} ${timeVal}` : new Date().toLocaleString('ar-EG')),
+                            iso: dateVal || t.dateISO || new Date().toLocaleDateString('en-CA'),
+                            time: timeVal || t.timeISO || new Date().toTimeString().slice(0, 5)
+                        };
+                        window.editingOriginalDate = editingOriginalDate;
                         editingInvoiceType = t.type;
                         window.editingInvoiceType = t.type;
                         editingOriginalItems = JSON.parse(JSON.stringify(invItems));
@@ -2069,6 +2320,33 @@
                     const isMatch = hasInvId ? (String(t.invoiceId) === String(invId)) : (String(t.id) === String(invId));
                     return isMatch && (!cleanType || window.isMatchingInvoiceType(t.type, cleanType));
                 }) : []);
+
+            // إنشاء نسخة حماية سريعة في الذاكرة (Fail-Safe Snapshot) قبل أي مساس بالمخزن أو الحركات
+            const affectedProductIdentifiers = new Set();
+            oldItems.forEach(it => {
+                if (it) {
+                    if (it.productId) affectedProductIdentifiers.add(String(it.productId));
+                    if (it.product) affectedProductIdentifiers.add(String(it.product));
+                }
+            });
+
+            const backupProducts = [];
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                productsDB.forEach(p => {
+                    if (p && (affectedProductIdentifiers.has(String(p.id)) || affectedProductIdentifiers.has(String(p.name)))) {
+                        backupProducts.push(JSON.parse(JSON.stringify(p)));
+                    }
+                });
+            }
+
+            window._revertedInvoiceBackup = {
+                invId: invId,
+                type: type,
+                cleanType: cleanType,
+                oldItems: JSON.parse(JSON.stringify(oldItems)),
+                backupProducts: backupProducts,
+                timestamp: Date.now()
+            };
 
             const defaultWH = (typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي';
 
@@ -2211,6 +2489,80 @@
 
             }
 
+        };
+
+        // 🛡️ آلية حزام الأمان والتراجع التلقائي في حال تعثر حفظ التعديل (Fail-Safe Rollback)
+        window.rollbackLastRevertedInvoice = async function() {
+            if (!window._revertedInvoiceBackup) return false;
+
+            const backup = window._revertedInvoiceBackup;
+            console.warn(`🛡️ تفعيل حزام الأمان: جاري استعادة الفاتورة الأصلية #${backup.invId}...`);
+
+            try {
+                // 1. استعادة حالة المنتجات كما كانت قبل التعديل في الذاكرة
+                if (backup.backupProducts && Array.isArray(backup.backupProducts) && typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                    backup.backupProducts.forEach(savedP => {
+                        const targetP = productsDB.find(p => p && (p.id === savedP.id || p.name === savedP.name));
+                        if (targetP) {
+                            Object.assign(targetP, JSON.parse(JSON.stringify(savedP)));
+                        }
+                    });
+
+                    // تحديث المنتجات في IndexedDB إن وُجد
+                    if (typeof db !== 'undefined' && db.products && typeof db.products.bulkPut === 'function') {
+                        try {
+                            await db.products.bulkPut(backup.backupProducts);
+                        } catch (pErr) {
+                            console.warn("⚠️ تعذر تحديث المنتجات المستعادة في IndexedDB مباشرة:", pErr);
+                        }
+                    }
+                }
+
+                // 2. إعادة إدراج حركات الفاتورة القديمة بالكامل في مصفوفة transactions
+                if (backup.oldItems && Array.isArray(backup.oldItems) && backup.oldItems.length > 0) {
+                    if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+                        // تصفية أي سجلات قديمة أو جزئية لنفس الفاتورة لضمان عدم التكرار
+                        transactions = transactions.filter(t => {
+                            const hasInvId = t.invoiceId != null && t.invoiceId !== '';
+                            const isMatch = hasInvId ? (String(t.invoiceId) === String(backup.invId)) : (String(t.id) === String(backup.invId));
+                            return !(isMatch && (!backup.cleanType || window.isMatchingInvoiceType(t.type, backup.cleanType)));
+                        });
+
+                        // إعادة الصفوف الأصلية بحالتها
+                        backup.oldItems.forEach(origRow => {
+                            transactions.push(JSON.parse(JSON.stringify(origRow)));
+                        });
+                    }
+
+                    // إعادة إدراج السجلات في IndexedDB
+                    if (typeof db !== 'undefined' && db.transactions && typeof db.transactions.bulkPut === 'function') {
+                        try {
+                            await db.transactions.bulkPut(backup.oldItems);
+                        } catch (tErr) {
+                            console.warn("⚠️ تعذر إعادة السجلات إلى IndexedDB:", tErr);
+                        }
+                    }
+                }
+
+                // 3. إبطال الكاش لإعادة حساب الأرصدة بدقة تامة
+                if (typeof invalidateStockCache === 'function') invalidateStockCache();
+                if (typeof window.invalidateStockCache === 'function') window.invalidateStockCache();
+                if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+                window.accountBalancesCache = {};
+
+                // 4. تنظيف كائن النسخة الاحتياطية
+                window._revertedInvoiceBackup = null;
+                console.log(`✅ تم استرجاع الفاتورة الأصلية #${backup.invId} بنجاح تام 100%.`);
+                return true;
+            } catch (rbErr) {
+                console.error("❌ فشل استرجاع الفاتورة السابقة:", rbErr);
+                return false;
+            }
+        };
+
+        // مسح نسخة الأمان بعد نجاح حفظ التعديل بشكل نهائي
+        window.clearRevertedInvoiceBackup = function() {
+            window._revertedInvoiceBackup = null;
         };
 
         async function deleteTransaction(idx) {

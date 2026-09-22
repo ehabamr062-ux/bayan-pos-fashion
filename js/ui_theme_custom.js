@@ -100,6 +100,11 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
 
             if (!modal || !list) return;
 
+            // توحيد أسماء الباقات لتشمل المسميات المختلفة
+            if (planName === 'الباقة الأساسية') planName = 'الباقة الشهرية';
+            else if (planName === 'الباقة المتقدمة') planName = 'الباقة السنوية';
+            else if (planName === 'الباقة الاحترافية') planName = 'الباقة مدى الحياة';
+
             // إعادة ضبط التبويبات للوضع الافتراضي (المميزات)
             switchPackageTab('features');
 
@@ -118,7 +123,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 extraItems = ["<span style='color:#ef4444; font-weight:bold;'>✖ محدودة بـ 200 فاتورة فقط للتجربة</span>"];
             } else if (planName === 'الباقة الشهرية') {
                 icon = "⚙️";
-                extraItems = ["✔ عدد فواتير غير محدود", "✔ دعم فني متميز"];
+                extraItems = ["✔ عدد فواتير غير محدود ♾️", "✔ دعم فني متميز"];
             } else if (planName === 'الباقة السنوية') {
                 icon = "🚀";
                 extraItems = ["✔ نسخ احتياطي محلي تلقائي وآمن", "✔ دعم فني VIP وأولوية قصوى"];
@@ -441,8 +446,15 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
         function toggleSubscriptionModal(show) {
             const modal = document.getElementById('subscriptionModal');
             if (!modal) return;
-            if (show) modal.classList.remove('hidden');
-            else modal.classList.add('hidden');
+            if (show) {
+                if (typeof showSubscription === 'function') {
+                    showSubscription();
+                } else {
+                    modal.classList.remove('hidden');
+                }
+            } else {
+                modal.classList.add('hidden');
+            }
         }
 
         // --- وظائف شعار المؤسسة (Logo System) ---
@@ -523,9 +535,6 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 if (typeof removeStore === 'function') removeStore('bayan_business_logo');
                 if (window.AppStore) delete window.AppStore['bayan_business_logo'];
                 updateLogoDisplays(null);
-                if (window.BayanNetworkHub && typeof window.BayanNetworkHub.pushLocalDbToServer === 'function') {
-                    window.BayanNetworkHub.pushLocalDbToServer();
-                }
                 if (typeof showToast === 'function') showToast("تم حذف الشعار بنجاح ✅");
                 else alert("تم حذف الشعار بنجاح ✅");
             } catch(e) {
@@ -852,26 +861,33 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
 
         function requestActivation(plan, price) {
             const currentPlan = window.getBayanPlan();
+            const isPlanValid = (typeof window.isSubscriptionValid === 'function') ? window.isSubscriptionValid() : true;
             
-            const tiers = { 'باقة نسخة المجانية': 0, 'الباقة الشهرية': 1, 'الباقة السنوية': 2, 'الباقة مدى الحياة': 3 };
+            const tiers = { 
+                'باقة نسخة المجانية': 0, 
+                'الباقة الشهرية': 1, 'الباقة الأساسية': 1,
+                'الباقة السنوية': 2, 'الباقة المتقدمة': 2,
+                'الباقة مدى الحياة': 3, 'الباقة الاحترافية': 3 
+            };
             const curTier = tiers[currentPlan] || 0;
             const newTier = tiers[plan] || 0;
 
-            if (curTier === 3) {
+            if (curTier === 3 && isPlanValid) {
                 if (typeof showToast === 'function') showToast("أنت تمتلك النسخة مدى الحياة بالفعل! لا حاجة للاشتراك.", "warning");
                 else alert("أنت تمتلك النسخة مدى الحياة بالفعل! لا حاجة للاشتراك.");
                 return;
             }
 
-            if (newTier < curTier) {
-                if (typeof showToast === 'function') showToast(`أنت مشترك حالياً في باقة أعلى (${currentPlan}). لا يمكن الرجوع لباقة أقل.`, "error");
-                else alert(`أنت مشترك حالياً في باقة أعلى (${currentPlan}). لا يمكن الرجوع لباقة أقل.`);
+            // فحص منع الرجوع لباقة أقل يسري فقط إذا كانت الباقة الحالية سارية المفعول
+            if (isPlanValid && newTier < curTier) {
+                if (typeof showToast === 'function') showToast(`أنت مشترك حالياً في باقة أعلى (${currentPlan}). لا يمكن الرجوع لباقة أقل أثناء سريان الاشتراك.`, "error");
+                else alert(`أنت مشترك حالياً في باقة أعلى (${currentPlan}). لا يمكن الرجوع لباقة أقل أثناء سريان الاشتراك.`);
                 return;
             }
 
-            if (newTier === curTier && curTier !== 0) {
-                // If they try to subscribe to the same plan, ask for confirmation
-                const conf = confirm(`أنت مشترك في "${currentPlan}" بالفعل. هل تريد تجديد الاشتراك أو الاشتراك مرة أخرى؟`);
+            // إذا كان مشتركاً بالفعل في نفس الباقة وما زالت سارية
+            if (isPlanValid && newTier === curTier && curTier !== 0) {
+                const conf = confirm(`أنت مشترك في "${currentPlan}" واشتراكك سارٍ حالياً. هل تريد تجديد وتمديد الاشتراك الآن؟`);
                 if (!conf) return;
             }
 
@@ -885,7 +901,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '1.0.6';
+            const version = window.appVersion || '3.1.1';
 
             const message = `السلام عليكم\nأريد الاشتراك في Bayan POS Fashion (بَيَان فاشون للملابس والأحذية)\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة المطلوبة: ${plan}\nالمبلغ: ${price} ج.م\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ وجاري انتظار كود التفعيل.`;
             

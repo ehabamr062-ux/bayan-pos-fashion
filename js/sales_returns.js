@@ -612,6 +612,18 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
         // 🛑 فحص حاسم: التأكد من عدم تجاوز كمية أي صنف للكمية المتاحة في الفاتورة الأصلية
         if (originalInvoiceId && originalInvoiceId !== '---') {
+            if (typeof window.ensureInvoiceLoaded === 'function') {
+                await window.ensureInvoiceLoaded(originalInvoiceId);
+                try {
+                    if (typeof db !== 'undefined' && db && db.transactions) {
+                        const prevR = await db.transactions.where('type').startsWith('مرتجع').filter(t => String(t.originalInvoiceId) === String(originalInvoiceId)).toArray();
+                        if (prevR && prevR.length > 0) {
+                            const exIds = new Set(transactions.map(t => t.id));
+                            prevR.forEach(r => { if (r && r.id && !exIds.has(r.id)) transactions.push(r); });
+                        }
+                    }
+                } catch(e) {}
+            }
             const cleanStr = (s) => (s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
             for (const item of returnCart) {
                 const itemClean = cleanStr(item.name);
@@ -657,7 +669,16 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
         const reason = document.getElementById('salesReturnReason').value;
 
-        const dt = getTransactionDateTime('salesReturnDate', 'salesReturnTime');
+        const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+            ? editingOriginalDate
+            : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+        const inputDateVal = document.getElementById('salesReturnDate')?.value;
+        const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+        const dt = (isEditMode && origDt && !isDateManuallyChanged)
+            ? origDt
+            : getTransactionDateTime('salesReturnDate', 'salesReturnTime');
 
         const subTotal = returnCart.reduce((sum, i) => sum + (i.price * i.qty), 0);
 
@@ -978,6 +999,10 @@ async function saveSalesReturn(force = false, accountChecked = false) {
         } else {
             await saveData();
         }
+
+        if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
+            window.updateLastSavedSequence('مرتجع بيع', returnInvoiceId);
+        }
         if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
         window.accountBalancesCache = {};
 
@@ -992,12 +1017,16 @@ async function saveSalesReturn(force = false, accountChecked = false) {
         });
 
         isEditMode = false;
+        window.isEditMode = false;
 
         editingInvoiceId = null;
+        window.editingInvoiceId = null;
 
         editingOriginalDate = null;
+        window.editingOriginalDate = null;
 
         editingInvoiceType = null;
+        window.editingInvoiceType = null;
 
         // تم إيقاف الطباعة التلقائية بناءً على طلب المستخدم (الحفظ فقط)
 
@@ -1009,7 +1038,26 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
         viewOldInvoice(returnInvoiceId, 'مرتجع بيع', true);
 
+        if (typeof window.clearRevertedInvoiceBackup === 'function') {
+            window.clearRevertedInvoiceBackup();
+        }
+
         return true;
+
+    } catch (saveErr) {
+
+        console.error("❌ خطأ أثناء حفظ مرتجع البيع:", saveErr);
+        if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+            await window.rollbackLastRevertedInvoice();
+        }
+        showCustomAlert({
+            type: 'error',
+            titleText: '⚠️ تعذر حفظ مرتجع البيع',
+            msg: isEditMode
+                ? ('حدث خطأ أثناء حفظ التعديل، وتم الحفاظ على مرتجع البيع الأصلي واستعادته بالكامل دون أي فقدان للبيانات.\n\nتفاصيل الخطأ: ' + (saveErr?.message || saveErr))
+                : ('حدث خطأ غير متوقع أثناء حفظ مرتجع البيع:\n' + (saveErr?.message || saveErr))
+        });
+        return false;
 
     } finally {
 
@@ -1292,7 +1340,16 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
         const reason = document.getElementById('purReturnReason').value;
 
-        const dt = getTransactionDateTime('purReturnDate', 'purReturnTime');
+        const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+            ? editingOriginalDate
+            : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+        const inputDateVal = document.getElementById('purReturnDate')?.value;
+        const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+        const dt = (isEditMode && origDt && !isDateManuallyChanged)
+            ? origDt
+            : getTransactionDateTime('purReturnDate', 'purReturnTime');
 
         const selectedMethod = (typeof getSelectedPaymentMethod === 'function') 
             ? getSelectedPaymentMethod('purchase-return-section') 
@@ -1396,6 +1453,18 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
         // 🛑 فحص حاسم: التأكد من عدم تجاوز كمية أي صنف للكمية المتاحة في الفاتورة الأصلية
         if (originalInvoiceId && originalInvoiceId !== '---') {
+            if (typeof window.ensureInvoiceLoaded === 'function') {
+                await window.ensureInvoiceLoaded(originalInvoiceId);
+                try {
+                    if (typeof db !== 'undefined' && db && db.transactions) {
+                        const prevR = await db.transactions.where('type').startsWith('مرتجع').filter(t => String(t.originalInvoiceId) === String(originalInvoiceId)).toArray();
+                        if (prevR && prevR.length > 0) {
+                            const exIds = new Set(transactions.map(t => t.id));
+                            prevR.forEach(r => { if (r && r.id && !exIds.has(r.id)) transactions.push(r); });
+                        }
+                    }
+                } catch(e) {}
+            }
             const cleanStr = (s) => (s || '').trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ');
             for (const item of purReturnCart) {
                 const itemClean = cleanStr(item.name);
@@ -1634,6 +1703,10 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
         } else {
             await saveData();
         }
+
+        if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
+            window.updateLastSavedSequence('مرتجع شراء', returnInvoiceId);
+        }
         if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
         window.accountBalancesCache = {};
 
@@ -1648,12 +1721,16 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
         });
 
         isEditMode = false;
+        window.isEditMode = false;
 
         editingInvoiceId = null;
+        window.editingInvoiceId = null;
 
         editingOriginalDate = null;
+        window.editingOriginalDate = null;
 
         editingInvoiceType = null;
+        window.editingInvoiceType = null;
 
         // تم إيقاف الطباعة التلقائية بناءً على طلب المستخدم (الحفظ فقط)
 
@@ -1665,7 +1742,26 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
         viewOldInvoice(returnInvoiceId, 'مرتجع شراء', true);
 
+        if (typeof window.clearRevertedInvoiceBackup === 'function') {
+            window.clearRevertedInvoiceBackup();
+        }
+
         return true;
+
+    } catch (saveErr) {
+
+        console.error("❌ خطأ أثناء حفظ مرتجع الشراء:", saveErr);
+        if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+            await window.rollbackLastRevertedInvoice();
+        }
+        showCustomAlert({
+            type: 'error',
+            titleText: '⚠️ تعذر حفظ مرتجع الشراء',
+            msg: isEditMode
+                ? ('حدث خطأ أثناء حفظ التعديل، وتم الحفاظ على مرتجع الشراء الأصلي واستعادته بالكامل دون أي فقدان للبيانات.\n\nتفاصيل الخطأ: ' + (saveErr?.message || saveErr))
+                : ('حدث خطأ غير متوقع أثناء حفظ مرتجع الشراء:\n' + (saveErr?.message || saveErr))
+        });
+        return false;
 
     } finally {
 
@@ -1722,19 +1818,9 @@ async function handleReturnSearch(query, type) {
         return;
     }
 
-    const queryLower = query.toLowerCase();
-
-    const results = productsDB.filter(p =>
-
-        (p.name && p.name.toLowerCase().includes(queryLower)) ||
-
-        (p.code && String(p.code).toLowerCase().includes(queryLower)) ||
-
-        (p.barcode && String(p.barcode).toLowerCase().includes(queryLower)) ||
-
-        (p.units && p.units.some(u => u.unitBarcode && String(u.unitBarcode).toLowerCase().includes(queryLower)))
-
-    ).slice(0, 15);
+    const results = (typeof window.searchProductsRanked === 'function')
+        ? window.searchProductsRanked(query)
+        : (productsDB || []).filter(p => (p.name && p.name.includes(query)) || (p.barcode && String(p.barcode).includes(query)));
 
     if (results.length === 0) {
 
@@ -1748,59 +1834,49 @@ async function handleReturnSearch(query, type) {
 
     let html = '';
 
-    results.forEach((p, index) => {
+    results.slice(0, 40).forEach((p, index) => {
 
         const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName) ? currentUser.warehouseName : 'المخزن الرئيسي').trim();
         const stockVal = typeof getWarehouseStock === 'function' ? getWarehouseStock(p.name, activeWH) : 0;
 
         let stockText = `<span style="font-size: 0.75rem; color: #64748b; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">المخزون (${activeWH}): ${stockVal}</span>`;
 
+        const sizesList = (p.variants && Array.isArray(p.variants)) 
+            ? [...new Set(p.variants.map(v => String(v.size || '').trim()).filter(s => s && s !== '-' && s !== 'موحد' && s !== 'قياسي'))] 
+            : [];
+        const sizesHtml = sizesList.length > 0 
+            ? `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 800; border: 1px solid #bae6fd; margin-right: 4px;">📏 مقاسات: ${sizesList.slice(0, 5).join(', ')}${sizesList.length > 5 ? '...' : ''}</span>`
+            : '';
+
         if (p.units && p.units.length > 1) {
-
             html += `
-
                         <div class="search-result-item" tabindex="0" onclick="selectReturnProductToHeader('${p.id}', '${type}')" style="display:flex; justify-content:space-between; align-items:center;">
-
                             <div style="flex:1;">
-
                                 <div style="font-weight:bold; color:#1e293b; font-size:0.9rem;">${p.name} <span style="font-size:0.7rem; color:#f59e0b; background:#fef3c7; padding:1px 4px; border-radius:4px;">📦 متعدد الوحدات</span></div>
-
-                                <div style="font-size:0.75rem; color:#64748b;">الكود: ${p.code || '-'}</div>
-
+                                <div style="font-size:0.75rem; color:#64748b; display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:2px;">
+                                    <span>الكود: ${p.code || '-'} | باركود: ${p.barcode || '-'}</span>
+                                    ${sizesHtml}
+                                </div>
                             </div>
-
                             <div style="text-align:left;">
-
                                 ${stockText}
-
                             </div>
-
                         </div>`;
-
         } else {
-
             let unitPrice = p.price;
-
             html += `
-
                         <div class="search-result-item" tabindex="0" onclick="selectReturnProductToHeader('${p.id}', '${type}')" style="display:flex; justify-content:space-between; align-items:center;">
-
                             <div style="flex:1;">
-
                                 <div style="font-weight:bold; color:#1e293b; font-size:0.9rem;">${p.name}</div>
-
-                                <div style="font-size:0.75rem; color:#64748b;">السعر: ${parseFloat(unitPrice).toFixed(2)} ج.م</div>
-
+                                <div style="font-size:0.75rem; color:#64748b; display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:2px;">
+                                    <span>السعر: ${parseFloat(unitPrice).toFixed(2)} ج.م | كود: ${p.code || '-'} | باركود: ${p.barcode || '-'}</span>
+                                    ${sizesHtml}
+                                </div>
                             </div>
-
                             <div style="text-align:left;">
-
                                 ${stockText}
-
                             </div>
-
                         </div>`;
-
         }
 
     });
@@ -2003,20 +2079,32 @@ async function handleReturnSearchEnter(query, event, type, forceAdd = false) {
         if (window.dispatchSearchBarcode(cleanQuery, retContext)) return;
     }
 
-    let pInDB = productsDB.find(p => String(p.barcode) === String(query) || String(p.code) === String(query));
+    let pInDB = null;
+
+    // تطابق تام بالاسم أولاً
+    const normClean = (typeof window.normalizeSearchQuery === 'function')
+        ? window.normalizeSearchQuery(cleanQuery)
+        : cleanQuery.trim().toLowerCase();
+
+    pInDB = productsDB.find(p => {
+        const pNorm = (typeof window.normalizeSearchQuery === 'function')
+            ? window.normalizeSearchQuery(p.name)
+            : String(p.name || '').trim().toLowerCase();
+        return pNorm === normClean;
+    });
 
     if (!pInDB) {
-
-        pInDB = productsDB.find(p => p.units && p.units.some(u => String(u.unitBarcode) === String(query)));
-
+        pInDB = productsDB.find(p => String(p.barcode || '').trim() === cleanQuery || String(p.code || '').trim() === cleanQuery);
     }
 
     if (!pInDB) {
-        const queryLower = cleanQuery.toLowerCase();
-        const matches = productsDB.filter(p =>
-            (p.name && p.name.toLowerCase().includes(queryLower)) ||
-            (p.code && String(p.code).toLowerCase().includes(queryLower))
-        );
+        pInDB = productsDB.find(p => p.units && p.units.some(u => String(u.unitBarcode || '').trim() === cleanQuery));
+    }
+
+    if (!pInDB) {
+        const matches = (typeof window.searchProductsRanked === 'function')
+            ? window.searchProductsRanked(cleanQuery, { limit: 10 })
+            : productsDB.filter(p => (p.name && p.name.toLowerCase().includes(cleanQuery.toLowerCase())));
         
         if (matches.length === 1) {
             pInDB = matches[0];
@@ -2450,7 +2538,7 @@ window.openSearchInvoiceModal = function () {
 
 };
 
-function executeInvoiceSearch() {
+async function executeInvoiceSearch() {
 
     const ref = document.getElementById('searchInvoiceRef').value.trim();
 
@@ -2467,6 +2555,24 @@ function executeInvoiceSearch() {
     const isSalesReturn = document.getElementById('sales-return-section') && !document.getElementById('sales-return-section').classList.contains('hidden');
 
     const targetType = isSalesReturn ? 'بيع' : 'شراء';
+
+    // ⚡ استدعاء الفاتورة من IndexedDB عند الطلب لضمان العثور عليها حتى لو مسجلة من سنوات
+    if (ref && typeof window.ensureInvoiceLoaded === 'function') {
+        await window.ensureInvoiceLoaded(ref);
+    }
+    if ((dateFrom || dateTo) && typeof window.loadTransactionsForDateRange === 'function') {
+        await window.loadTransactionsForDateRange(dateFrom, dateTo);
+    }
+    // إذا كان البحث عاماً بدون شروط ومصفوفة الذاكرة لا تحتوي إلا فواتير اليوم، نجلب أحدث 200 فاتورة
+    if (!ref && !dateFrom && !dateTo && typeof db !== 'undefined' && db && db.transactions) {
+        try {
+            const recentTx = await db.transactions.where('type').startsWith(targetType).reverse().limit(200).toArray();
+            if (recentTx && recentTx.length > 0) {
+                const existingIds = new Set(transactions.map(t => t.id));
+                recentTx.forEach(row => { if (row && row.id && !existingIds.has(row.id)) transactions.push(row); });
+            }
+        } catch(e) {}
+    }
 
     // العثور على أسماء الحسابات التي تطابق المدخل (اسم، كود، أو هاتف)
 
@@ -2688,7 +2794,7 @@ function openSelectReturnItemsForSelected() {
 
 }
 
-function confirmSelectedInvoiceForReturn(invoiceId) {
+async function confirmSelectedInvoiceForReturn(invoiceId) {
 
     if (!invoiceId) {
 
@@ -2706,9 +2812,22 @@ function confirmSelectedInvoiceForReturn(invoiceId) {
 
     const targetType = isSalesReturn ? 'بيع' : 'شراء';
 
-    // جلب أصناف الفاتورة الأصلية
+    // جلب أصناف الفاتورة الأصلية مع استدعاء فوري من IndexedDB إذا لم تكن في الذاكرة
+    let originalInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
 
-    const originalInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
+    if (originalInvoiceItems.length === 0 && typeof window.ensureInvoiceLoaded === 'function') {
+        await window.ensureInvoiceLoaded(invoiceId);
+        try {
+            if (typeof db !== 'undefined' && db && db.transactions) {
+                const prevR = await db.transactions.where('type').startsWith('مرتجع').filter(t => String(t.originalInvoiceId) === String(invoiceId)).toArray();
+                if (prevR && prevR.length > 0) {
+                    const exIds = new Set(transactions.map(t => t.id));
+                    prevR.forEach(r => { if (r && r.id && !exIds.has(r.id)) transactions.push(r); });
+                }
+            }
+        } catch(e) {}
+        originalInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
+    }
 
     if (originalInvoiceItems.length === 0) {
 
@@ -2888,7 +3007,7 @@ function confirmSelectedInvoiceForReturn(invoiceId) {
 
 let currentReturnInvoiceItems = [];
 
-function openSelectReturnItemsModal(invoiceId) {
+async function openSelectReturnItemsModal(invoiceId) {
 
     const modal = document.getElementById('selectReturnItemsModal');
 
@@ -2906,9 +3025,22 @@ function openSelectReturnItemsModal(invoiceId) {
 
     const targetType = isSalesReturn ? 'بيع' : 'شراء';
 
-    // جلب أصناف الفاتورة الأصلية
-
+    // جلب أصناف الفاتورة الأصلية مع استدعاء فوري من IndexedDB إذا لم تكن في الذاكرة
     currentReturnInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
+
+    if (currentReturnInvoiceItems.length === 0 && typeof window.ensureInvoiceLoaded === 'function') {
+        await window.ensureInvoiceLoaded(invoiceId);
+        try {
+            if (typeof db !== 'undefined' && db && db.transactions) {
+                const prevR = await db.transactions.where('type').startsWith('مرتجع').filter(t => String(t.originalInvoiceId) === String(invoiceId)).toArray();
+                if (prevR && prevR.length > 0) {
+                    const exIds = new Set(transactions.map(t => t.id));
+                    prevR.forEach(r => { if (r && r.id && !exIds.has(r.id)) transactions.push(r); });
+                }
+            }
+        } catch(e) {}
+        currentReturnInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
+    }
 
     if (currentReturnInvoiceItems.length === 0) {
 

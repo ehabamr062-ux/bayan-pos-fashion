@@ -1,9 +1,44 @@
 
-// ================= نظام بَيَان POS - نقطة الانطلاق (Initialization) =================
-// يتم استدعاء هذه الدالة بعد تحميل كافة الملفات المعيارية (Modules)
+// ================= نظام بَيَان POS - نقطة الانطلاق الفائقة (Instant Launch Initialization) =================
+// يتم إظهار شاشة تسجيل الدخول فوراً في أجزاء من الثانية (Instant Paint)
+// مع استمرار تحميل ومعالجة بيانات المنظومة في الخلفية بسلاسة تامة وبلا أي شاشة بيضاء
 
-loadData().then(async () => {
-    // 0. فحص واستعادة رتبة المدير الأساسي وصمام الأمان التلقائي
+// ⚡ 1. الإظهار الفوري لشاشة تسجيل الدخول (0-30ms)
+(async function instantLoginLaunch() {
+    try {
+        if (typeof initAppStore === 'function') {
+            await initAppStore();
+        }
+        const targetDb = window.db || window.bayanDB;
+        if (targetDb && targetDb.users) {
+            const [uData, wData] = await Promise.all([
+                targetDb.users.toArray().catch(() => []),
+                targetDb.warehouses ? targetDb.warehouses.toArray().catch(() => []) : []
+            ]);
+            if (uData && uData.length > 0 && (!window.users || window.users.length === 0)) {
+                window.users = uData;
+                if (typeof users !== 'undefined') users = uData;
+            }
+            if (wData && wData.length > 0 && (!window.warehouses || window.warehouses.length === 0)) {
+                window.warehouses = wData;
+                if (typeof warehouses !== 'undefined') warehouses = wData;
+            }
+        }
+        // عرض شاشة تسجيل الدخول فوراً وبأقصى سرعة
+        if (typeof initLogin === 'function' && !window.currentUser) {
+            initLogin();
+        }
+    } catch(e) {
+        console.warn("Instant login display notice:", e);
+    }
+})();
+
+// 🔄 2. تشغيل تحميل وتحديث كامل بيانات المنظومة في الخلفية بسلاسة تامة بعد ظهور شاشة الدخول
+window.loadDataPromise = new Promise((resolve) => {
+    setTimeout(async () => {
+        try {
+            await loadData();
+            // 0. فحص واستعادة رتبة المدير الأساسي وصمام الأمان التلقائي
     try {
         if (typeof users !== 'undefined' && Array.isArray(users) && users.length > 0) {
             let primaryAdmin = users.find(u => u.id === 1 || u.id === '1') || users[0];
@@ -42,11 +77,13 @@ loadData().then(async () => {
         updateLogoDisplays(savedLogo || null);
     }
 
-    // 1. تحديث التوجيهات وشاشة تسجيل الدخول فوراً وبأقصى سرعة (0ms)
+    // 1. تحديث التوجيهات أو شاشة تسجيل الدخول
     if (currentUser) {
         console.log(`👤 أهلاً بك مجدداً: ${currentUser.name}`);
         if (typeof updateNotifications === 'function') updateNotifications();
         if (typeof window.updateHeaderWarehouseSelect === 'function') window.updateHeaderWarehouseSelect();
+    } else if (typeof updateLoginUsersList === 'function') {
+        updateLoginUsersList();
     } else if (typeof initLogin === 'function') {
         initLogin();
     }
@@ -66,7 +103,7 @@ loadData().then(async () => {
     // 4. صمام الأمان الفولاذي: إنشاء نسخة احتياطية تلقائية وفورية في الخلفية عند الترقية لإصدار جديد
     try {
         const lastVer = getStore('bayan_last_run_version');
-        const curVer = window.appVersion || '1.0.6';
+        const curVer = window.appVersion || '3.1.1';
         if (lastVer && lastVer !== curVer) {
             console.log(`🛡️ [Safety Shield] Version upgrade detected (${lastVer} ➔ ${curVer}). Creating automatic background backup...`);
             if (typeof window.executeAutoBackupToFile === 'function') {
@@ -84,6 +121,12 @@ loadData().then(async () => {
     }
 
     console.log("🚀 نظام بَيَان المتكامل جاهز للعمل بنجاح!");
+            resolve();
+        } catch(err) {
+            console.warn("loadData error:", err);
+            resolve();
+        }
+    }, 120);
 });
 
 // =========================================================================
@@ -149,6 +192,8 @@ window.addEventListener('beforeinstallprompt', (e) => {
 // =========================================================================
 (function initEmergencySettingsShortcut() {
     const activeKeys = new Set();
+    let emergencySequence = '';
+    let sequenceTimer = null;
 
     function triggerEmergencySettings() {
         console.log("⚡ [Emergency Bypass] تفعيل اختصار الطوارئ السري للإعدادات!");
@@ -166,7 +211,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
                 adminUser.permissions.general.reports = true;
                 adminUser.permissions.general.profits = true;
             }
-            if (currentUser) {
+            if (typeof currentUser !== 'undefined' && currentUser) {
                 currentUser.role = 'admin';
                 currentUser.isFrozen = false;
                 if (!currentUser.permissions) currentUser.permissions = {};
@@ -176,6 +221,21 @@ window.addEventListener('beforeinstallprompt', (e) => {
             }
             if (typeof saveData === 'function') saveData();
         }
+
+        // استعادة صلاحية النظام وفك أي حظر عن بعد
+        if (typeof window.unblockDeviceLocally === 'function') {
+            window.unblockDeviceLocally();
+        } else {
+            try {
+                if (typeof setStore === 'function') {
+                    setStore('bayan_remote_blocked', 'false');
+                    setStore('bayan_remote_block_msg', '');
+                }
+                localStorage.setItem('bayan_remote_blocked', 'false');
+                localStorage.removeItem('bayan_remote_block_msg');
+            } catch(e) {}
+        }
+
 
         // 2. إغلاق شاشة الدخول إذا كانت مفتوحة
         const loginModal = document.getElementById('loginModal');
@@ -205,30 +265,55 @@ window.addEventListener('beforeinstallprompt', (e) => {
         }
     }
 
-    // رصد الضغط المتزامن
+    // رصد الضغط (متزامن أو متتالي مع استمرار ضغط Ctrl) لتفادي قيود الكيبورد
     window.addEventListener('keydown', (e) => {
-        if (!e || typeof e.key !== 'string') return;
-        const key = e.key.toLowerCase();
+        if (!e) return;
+        const code = e.code || '';
+        const key = (e.key || '').toLowerCase();
+
         activeKeys.add(key);
+        activeKeys.add(code);
 
-        const hasCtrl = e.ctrlKey || activeKeys.has('control');
-        const hasD = activeKeys.has('d') || activeKeys.has('ي'); // يدعم العربي والإنجليزي
-        const hasF = activeKeys.has('f') || activeKeys.has('ب');
-        const hasG = activeKeys.has('g') || activeKeys.has('ل');
+        const hasCtrl = e.ctrlKey || activeKeys.has('control') || activeKeys.has('ControlLeft') || activeKeys.has('ControlRight');
+        
+        const hasD = activeKeys.has('d') || activeKeys.has('ي') || activeKeys.has('KeyD');
+        const hasF = activeKeys.has('f') || activeKeys.has('ب') || activeKeys.has('KeyF');
+        const hasG = activeKeys.has('g') || activeKeys.has('ل') || activeKeys.has('KeyG');
 
-        if (hasCtrl && hasD && hasF && hasG) {
+        // تتبع التتابع السريع: علّق على Ctrl ثم اضغط D ثم F ثم G
+        if (hasCtrl) {
+            let char = '';
+            if (code === 'KeyD' || key === 'd' || key === 'ي') char = 'D';
+            else if (code === 'KeyF' || key === 'f' || key === 'ب') char = 'F';
+            else if (code === 'KeyG' || key === 'g' || key === 'ل') char = 'G';
+
+            if (char) {
+                clearTimeout(sequenceTimer);
+                if (char === 'D') emergencySequence = 'D';
+                else if (emergencySequence === 'D' && char === 'F') emergencySequence = 'DF';
+                else if (emergencySequence === 'DF' && char === 'G') emergencySequence = 'DFG';
+                else if (char !== 'D') emergencySequence = '';
+
+                sequenceTimer = setTimeout(() => { emergencySequence = ''; }, 3000);
+            }
+        }
+
+        if (hasCtrl && ((hasD && hasF && hasG) || emergencySequence === 'DFG')) {
             e.preventDefault();
             activeKeys.clear();
+            emergencySequence = '';
             triggerEmergencySettings();
         }
-    });
+    }, true);
 
     window.addEventListener('keyup', (e) => {
-        if (!e || typeof e.key !== 'string') return;
-        activeKeys.delete(e.key.toLowerCase());
-    });
+        if (!e) return;
+        if (e.key) activeKeys.delete(e.key.toLowerCase());
+        if (e.code) activeKeys.delete(e.code);
+    }, true);
 
     // إتاحة استدعاء يدوي في الكونسول أيضاً إن لزم
     window.emergencyOpenSettings = triggerEmergencySettings;
+    window.triggerEmergencySettings = triggerEmergencySettings;
 })();
 

@@ -295,10 +295,19 @@ function computeTransactionRunningBalances(targetWarehouse = 'all') {
         productGroups[key].txList.push({ t, origIdx });
     });
 
+    const prodMap = new Map();
+    if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+        for (let pi = 0; pi < productsDB.length; pi++) {
+            const item = productsDB[pi];
+            if (item) {
+                if (item.name) prodMap.set(String(item.name).trim(), item);
+                if (item.id) prodMap.set(String(item.id), item);
+            }
+        }
+    }
+
     Object.values(productGroups).forEach(grp => {
-        const p = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
-            ? productsDB.find(x => x && (x.name === grp.productName || x.id === grp.productName))
-            : null;
+        const p = prodMap.get(grp.productName) || null;
 
         let currentStock = 0;
         if (p) {
@@ -383,7 +392,7 @@ function computeTransactionRunningBalances(targetWarehouse = 'all') {
     return balanceMap;
 }
 
-function renderHistoryTable(filterName = null) {
+async function renderHistoryTable(filterName = null) {
     const tbody = document.getElementById('historyTableBody');
     if (!tbody) return;
 
@@ -392,6 +401,14 @@ function renderHistoryTable(filterName = null) {
     const typeFilter = document.getElementById('historyTypeFilter')?.value;
     const methodFilter = document.getElementById('historyMethodFilter')?.value;
     const whFilter = document.getElementById('historyWarehouseFilter')?.value || 'all';
+
+    // ⚡ جلب حركات الفترة المحددة من IndexedDB عند الطلب
+    if (typeof window.loadTransactionsForDateRange === 'function' && (fromDate || toDate)) {
+        const todayISO = new Date().toLocaleDateString('en-CA');
+        if (fromDate < todayISO || toDate < todayISO) {
+            await window.loadTransactionsForDateRange(fromDate, toDate);
+        }
+    }
 
     if (!filterName) {
         const searchVal = document.getElementById('historySearch')?.value?.trim();
@@ -403,8 +420,68 @@ function renderHistoryTable(filterName = null) {
     // حساب الأرصدة التراكمية الدقيقة لكافة الحركات بناءً على فلتر المخزن
     const balanceMap = computeTransactionRunningBalances(whFilter);
 
-    // إضافة index أصلي لكل عنصر للتمكن من حذفه بشكل صحيح
-    let data = transactions.map((t, i) => ({ ...t, originalIndex: i }));
+    // الحفاظ على الفهرس الأصلي للعملية بدون استهلاك الذاكرة أو استنساخ آلاف الكائنات
+    for (let i = 0; i < transactions.length; i++) {
+        if (transactions[i]) transactions[i].originalIndex = i;
+    }
+    let data = transactions;
+
+    // 🔒 حماية وخصوصية حركات المبيعات بحسب دور ونطاق المستخدم الحالي
+    const activeUser = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : window.currentUser;
+    if (activeUser && activeUser.role !== 'admin') {
+        const invScope = activeUser.invoiceScope || 'user_only';
+        const myName = (activeUser.name || '').trim().toLowerCase();
+        const adminNames = (typeof window.getAdminUserNames === 'function') 
+            ? window.getAdminUserNames() 
+            : new Set(['المدير', 'المدير العام', 'مدير النظام', 'admin']);
+
+        if (invScope === 'user_only') {
+            // 👤 حصر تام بمبيعات وحركات هذا الموظف فقط (حسب حسابه الشخصي وورديته)
+            data = data.filter(t => {
+                const tUser = (t.user || '').trim().toLowerCase();
+                return tUser && tUser === myName;
+            });
+        } else if (invScope === 'hide_admin') {
+            // 🛡️ حجب فواتير كافة حسابات مديري النظام ديناميكياً
+            data = data.filter(t => {
+                const tUser = (t.user || '').trim().toLowerCase();
+                return !adminNames.has(tUser);
+            });
+        } else if (invScope === 'terminal_only') {
+            let myLetter = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function') 
+                ? window.BayanNetworkHub.getTerminalLetter() 
+                : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || localStorage.getItem('local_device_letter') || '';
+            data = data.filter(t => {
+                const tUser = (t.user || '').trim().toLowerCase();
+                let tLetter = t.terminalLetter;
+                if (!tLetter && t.terminal) {
+                    const match = t.terminal.match(/\(([A-Z])\)/i);
+                    if (match) tLetter = match[1].toUpperCase();
+                }
+                const isMyTerminal = myLetter && (tLetter && tLetter.toUpperCase() === myLetter.toUpperCase());
+                const isMyUser = tUser && (tUser === myName);
+                return isMyTerminal || isMyUser;
+            });
+        } else if (invScope === 'warehouse_only') {
+            const userWh = (activeUser.warehouseScope === 'main') 
+                ? 'المخزن الرئيسي' 
+                : (activeUser.assignedWarehouse || 'المخزن الرئيسي');
+            data = data.filter(t => (t.warehouse || 'المخزن الرئيسي') === userWh);
+        } else if (invScope === 'hide_master') {
+            data = data.filter(t => {
+                const rawTerminal = t.terminal || '';
+                let letter = t.terminalLetter;
+                if (!letter) {
+                    const match = rawTerminal.match(/\(([A-Z])\)/i);
+                    if (match) letter = match[1].toUpperCase();
+                    else if (rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master')) letter = 'MASTER';
+                }
+                const tUser = (t.user || '').trim().toLowerCase();
+                const isMaster = (letter === 'MASTER') || rawTerminal.includes('الرئيسي') || rawTerminal.includes('Master') || adminNames.has(tUser);
+                return !isMaster;
+            });
+        }
+    }
 
     // 1. فلترة إجبارية: عرض الحركات المخزنية فقط (استبعاد القبض والصرف المالي البحت، واستبعاد التحويلات المرفوضة الملغاة)
     data = data.filter(t => ['بيع', 'شراء', 'مرتجع', 'تسوية', 'تحويل'].some(k => t.type && t.type.includes(k)));
@@ -430,9 +507,9 @@ function renderHistoryTable(filterName = null) {
     // فلترة بطريقة السداد
     if (methodFilter && methodFilter !== 'all') {
         if (methodFilter === 'cash') {
-            data = data.filter(t => t.method && (t.method.includes('نقدية') || t.method.includes('نقدي') || t.method.includes('فودافون')));
+            data = data.filter(t => t.method && (t.method.includes('نقدية') || t.method.includes('نقدي') || t.method.includes('كاش')) && !t.method.includes('فودافون') && !t.method.includes('فودافن') && !t.method.includes('vodafone') && !t.method.includes('voda') && !t.method.includes('اورنج') && !t.method.includes('اتصالات') && !t.method.includes('انستا') && !t.method.includes('فيزا') && !t.method.includes('بنك'));
         } else if (methodFilter === 'credit') {
-            data = data.filter(t => t.method && t.method.includes('آجل'));
+            data = data.filter(t => t.method && (t.method.includes('آجل') || t.method.includes('اجل') || t.method.includes('ذمم')));
         }
     }
 
@@ -644,7 +721,7 @@ function renderHistoryTable(filterName = null) {
 
 // متغيرات للتحكم في ظهور الأعمدة مع الحفظ في IndexedDB (getStore)
 
-let invoicesColumnVisibility = JSON.parse(getStore('pos_inv_cols_visible') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true,"12":true,"13":true}');
+let invoicesColumnVisibility = JSON.parse(getStore('pos_inv_cols_visible') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true,"12":true,"13":true,"14":true}');
 window.invoicesColumnVisibility = invoicesColumnVisibility;
 
 // دالة مركزية لاسترجاع تخصيص أعمدة الفواتير من الذاكرة وقاعدة البيانات لحظياً
@@ -680,7 +757,7 @@ function updateInvoicesTableStyles() {
     const hasProfitPerm = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
     let css = '';
 
-    for (let i = 0; i <= 13; i++) {
+    for (let i = 0; i <= 14; i++) {
         const isHiddenByPref = invoicesColumnVisibility[i] === false;
         const isProfitHidden = (i === 5 && !hasProfitPerm);
 
@@ -699,10 +776,14 @@ function initInvoicesColumns() {
     updateInvoicesTableStyles();
 
     // مزامنة حالة مربعات الاختيار في نافذة التخصيص
-    for (let i = 0; i <= 13; i++) {
+    for (let i = 0; i <= 14; i++) {
         const isVisible = invoicesColumnVisibility[i] !== false;
         const checkbox = document.querySelector(`#invoicesColSelectorPopup input[onchange*="(${i},"]`);
         if (checkbox) checkbox.checked = isVisible;
+    }
+
+    if (typeof renderInvoicesWarehouseChips === 'function') {
+        renderInvoicesWarehouseChips();
     }
 }
 window.initInvoicesColumns = initInvoicesColumns;
@@ -745,7 +826,7 @@ function toggleInvoicesColumn(index, isVisible, shouldSave = true) {
 window.toggleInvoicesColumn = toggleInvoicesColumn;
 
 function setInvoicesAllCols(makeVisible) {
-    for (let i = 0; i <= 13; i++) {
+    for (let i = 0; i <= 14; i++) {
         if (i === 0 || i === 1) {
             // الاحتفاظ بعمود الاختيار ورقم الفاتورة مفعلين دوماً لضمان التفاعل
             invoicesColumnVisibility[i] = true;
@@ -762,29 +843,130 @@ window.setInvoicesAllCols = setInvoicesAllCols;
 
 function setInvoicesTypeFilter(type, btn) {
 
-    // إزالة الحالة النشطة من جميع التبويبات
-
-    document.querySelectorAll('.invoice-tab').forEach(t => t.classList.remove('active'));
+    // إزالة الحالة النشطة من جميع تبويبات أنواع العمليات
+    document.querySelectorAll('#invoicesChipBar .invoice-tab').forEach(t => t.classList.remove('active'));
 
     // إضافة الحالة النشطة للتبويب المختار
-
-    btn.classList.add('active');
+    if (btn) btn.classList.add('active');
 
     // تحديث قيمة الـ select المخفية للحفاظ على التوافق مع الكود الحالي
-
     const filterEl = document.getElementById('invoicesTypeFilter');
-
     if (filterEl) {
-
         filterEl.value = type;
-
-        // استدعاء التحديث
-
         renderInvoicesTable();
+    }
+}
+window.setInvoicesTypeFilter = setInvoicesTypeFilter;
 
+// 🏢 إدارة فلترة وتبويبات المخازن والفروع في قسم الفواتير
+window.currentInvoicesWarehouseFilter = 'all';
+
+function setInvoicesWarehouseFilter(wh, btn) {
+    window.currentInvoicesWarehouseFilter = wh;
+    document.querySelectorAll('#invoicesWarehouseChipsBar .invoice-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    if (typeof renderInvoicesTable === 'function') {
+        renderInvoicesTable();
+    }
+}
+window.setInvoicesWarehouseFilter = setInvoicesWarehouseFilter;
+
+function renderInvoicesWarehouseChips() {
+    const container = document.getElementById('invoicesWarehouseChipsBar');
+    if (!container) return;
+
+    const activeUser = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : window.currentUser;
+    if (activeUser && activeUser.role !== 'admin') {
+        if (activeUser.invoiceScope === 'user_only') {
+            container.innerHTML = `
+                <button class="invoice-tab active" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap; background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe;">
+                    <span>👤</span> فواتيرك وحسابك فقط (${activeUser.name})
+                </button>
+            `;
+            return;
+        }
+
+        if (activeUser.invoiceScope === 'hide_admin') {
+            container.innerHTML = `
+                <button class="invoice-tab active" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap; background: #fef2f2; color: #b91c1c; border: 1.5px solid #fecaca;">
+                    <span>🛡️</span> فواتير المبيعات (حجب مبيعات الإدارة)
+                </button>
+            `;
+            return;
+        }
+
+        if (activeUser.invoiceScope === 'terminal_only') {
+            const myLetter = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function')
+                ? window.BayanNetworkHub.getTerminalLetter()
+                : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || localStorage.getItem('local_device_letter') || 'كاشير فرعي';
+            container.innerHTML = `
+                <button class="invoice-tab active" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap;">
+                    <span>💻</span> فواتير جهازك الحالي فقط (${myLetter})
+                </button>
+            `;
+            return;
+        }
+
+        const isRestrictedWarehouse = (
+            activeUser.invoiceScope === 'warehouse_only' ||
+            activeUser.warehouseScope === 'specific' ||
+            activeUser.warehouseScope === 'main'
+        );
+
+        if (isRestrictedWarehouse) {
+            const allowedWh = (activeUser.warehouseScope === 'main') 
+                ? 'المخزن الرئيسي' 
+                : (activeUser.assignedWarehouse || 'المخزن الرئيسي');
+            window.currentInvoicesWarehouseFilter = allowedWh;
+            const safeName = String(allowedWh).replace(/'/g, "\\'");
+            container.innerHTML = `
+                <button class="invoice-tab active" onclick="setInvoicesWarehouseFilter('${safeName}', this)" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap;">
+                    <span>🏬</span> فرعك المصرّح به: ${allowedWh}
+                </button>
+            `;
+            return;
+        }
     }
 
+    let whNames = [];
+    if (window.warehouses && Array.isArray(window.warehouses)) {
+        whNames = window.warehouses.map(w => (typeof w === 'string' ? w : (w ? w.name : ''))).filter(Boolean);
+    }
+    if (whNames.length === 0 && typeof warehouses !== 'undefined' && Array.isArray(warehouses)) {
+        whNames = warehouses.map(w => (typeof w === 'string' ? w : (w ? w.name : ''))).filter(Boolean);
+    }
+    if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+        transactions.forEach(t => {
+            if (t && t.warehouse && !whNames.includes(t.warehouse)) {
+                whNames.push(t.warehouse);
+            }
+        });
+    }
+    if (whNames.length === 0) {
+        whNames = ['المخزن الرئيسي'];
+    }
+
+    const currentFilter = window.currentInvoicesWarehouseFilter || 'all';
+
+    let html = `
+        <button class="invoice-tab ${currentFilter === 'all' ? 'active' : ''}" onclick="setInvoicesWarehouseFilter('all', this)" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap;">
+            <span>🏢</span> كافة الفروع والمخازن
+        </button>
+    `;
+
+    whNames.forEach(name => {
+        const isActive = (currentFilter === name);
+        const safeName = String(name).replace(/'/g, "\\'");
+        html += `
+            <button class="invoice-tab ${isActive ? 'active' : ''}" onclick="setInvoicesWarehouseFilter('${safeName}', this)" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap;">
+                <span>🏬</span> ${name}
+            </button>
+        `;
+    });
+
+    container.innerHTML = html;
 }
+window.renderInvoicesWarehouseChips = renderInvoicesWarehouseChips;
 
 function applyQuickDateFilter(rangeType, fromId, toId) {
 
@@ -891,6 +1073,9 @@ function toggleShareMenu(menuId, event) {
 
     if (!isActive) {
         menu.classList.add('active');
+        if (typeof autoFillSharePhone === 'function') {
+            autoFillSharePhone(menuId);
+        }
     }
 }
 

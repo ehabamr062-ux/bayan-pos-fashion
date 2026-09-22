@@ -270,7 +270,7 @@ function loadSettings() {
     }
     const autoBackupEl = document.getElementById('autoBackupSetting');
     if (autoBackupEl) {
-        autoBackupEl.checked = (settings.autoBackup === true);
+        autoBackupEl.checked = (settings.autoBackup === true || settings.autoBackup === 'true');
         autoBackupEl.onchange = function() {
             const cur = JSON.parse(getStore('pos_settings') || '{}');
             cur.autoBackup = this.checked;
@@ -401,7 +401,19 @@ function applyPermissions() {
     }
 
     // 3. 🔒 التحكم في ظهور أزرار وملخصات الأرباح (شاشة البيع وتقرير الحركة اليومية)
-    const canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+    let canViewProfits = (typeof hasPermission === 'function') ? hasPermission('general_profits') : true;
+
+    if (typeof currentUser !== 'undefined' && currentUser) {
+        const uTarget = (typeof users !== 'undefined') ? users.find(u => u.pin === currentUser.pin) || currentUser : currentUser;
+        if (uTarget && uTarget.permissions && uTarget.permissions.general) {
+            if (uTarget.permissions.general.hideProfits !== undefined) {
+                canViewProfits = !uTarget.permissions.general.hideProfits;
+            } else if (uTarget.permissions.general.profits !== undefined) {
+                canViewProfits = !!uTarget.permissions.general.profits;
+            }
+        }
+    }
+
     const profitBtns = document.querySelectorAll('.btn-profit, #btnCurrentBillProfit, .action-btn.btn-profit');
     profitBtns.forEach(btn => {
         if (btn) {
@@ -414,9 +426,83 @@ function applyPermissions() {
         dailyProfitCard.style.setProperty('display', canViewProfits ? '' : 'none', 'important');
     }
 
+    // 3.2 🔒 التحكم في ظهور رصيد الدرج والرصيد السابق والنهائي بتقرير الحركة اليومية
+    let hideDrawerBalance = (typeof hasPermission === 'function') ? (hasPermission('ui_hide_drawer_balance') || hasPermission('hide_drawer_balance')) : false;
+    if (typeof currentUser !== 'undefined' && currentUser) {
+        const uTarget = (typeof users !== 'undefined') ? users.find(u => u.pin === currentUser.pin) || currentUser : currentUser;
+        if (uTarget && uTarget.permissions && uTarget.permissions.general) {
+            if (uTarget.permissions.general.hideDrawerBalance !== undefined) {
+                hideDrawerBalance = !!uTarget.permissions.general.hideDrawerBalance;
+            } else if (uTarget.permissions.general.drawerBalance !== undefined) {
+                hideDrawerBalance = !uTarget.permissions.general.drawerBalance;
+            }
+        }
+    }
+    const dailyTotalBadge = document.getElementById('dailyTotalSalesReceipts');
+    if (dailyTotalBadge) {
+        dailyTotalBadge.style.setProperty('display', hideDrawerBalance ? 'none' : '', 'important');
+    }
+
+    // 3.3 🔒 التحكم في قفل تاريخ تقرير الحركة اليومية على اليوم الحالي فقط
+    if (typeof checkAndApplyDailyReportDateLock === 'function') {
+        checkAndApplyDailyReportDateLock();
+    }
+
+    // 3.1 🔒 التحكم في ظهور أزرار المشاركة وزر جديد (F10) وتفعيل النمط المبسط لشريط الأزرار
+    let hideShare = (typeof hasPermission === 'function') ? hasPermission('ui_hide_share') : false;
+    let hideNew = (typeof hasPermission === 'function') ? hasPermission('ui_hide_new') : false;
+
+    if (typeof currentUser !== 'undefined' && currentUser) {
+        const uTarget = (typeof users !== 'undefined') ? users.find(u => u.pin === currentUser.pin) || currentUser : currentUser;
+        if (uTarget) {
+            if (uTarget.lockPriceEdit !== undefined) currentUser.lockPriceEdit = !!uTarget.lockPriceEdit;
+            if (uTarget.maxDiscountPercent !== undefined) currentUser.maxDiscountPercent = uTarget.maxDiscountPercent;
+            if (uTarget.maxAdditionPercent !== undefined) currentUser.maxAdditionPercent = uTarget.maxAdditionPercent;
+        }
+        if (uTarget && uTarget.permissions && uTarget.permissions.general) {
+            if (uTarget.permissions.general.hideShare !== undefined) hideShare = !!uTarget.permissions.general.hideShare;
+            if (uTarget.permissions.general.hideNew !== undefined) hideNew = !!uTarget.permissions.general.hideNew;
+        }
+    }
+
+    // إخفاء/إظهار أزرار المشاركة وحاوياتها
+    const shareWrappers = document.querySelectorAll('.share-btn-container');
+    shareWrappers.forEach(w => {
+        if (w) w.style.setProperty('display', hideShare ? 'none' : 'flex', 'important');
+    });
+    const shareBtns = document.querySelectorAll('.action-bar .btn-share-trigger');
+    shareBtns.forEach(btn => {
+        if (btn) {
+            btn.style.setProperty('display', hideShare ? 'none' : '', 'important');
+            if (btn.parentElement && !btn.parentElement.classList.contains('action-bar')) {
+                btn.parentElement.style.setProperty('display', hideShare ? 'none' : 'flex', 'important');
+            }
+        }
+    });
+
+    // إخفاء/إظهار أزرار جديد (F10)
+    const newBtns = document.querySelectorAll('.action-bar .btn-new');
+    newBtns.forEach(btn => {
+        if (btn) btn.style.setProperty('display', hideNew ? 'none' : '', 'important');
+    });
+
+    // تفعيل نمط العرض المبسط (.simplified-pos-actions) للأشرطة السفلية
+    const allActionBars = document.querySelectorAll('.action-bar');
+    allActionBars.forEach(bar => {
+        const isSales = bar.closest('#sales-section');
+        // في المبيعات، يتم التبسيط إذا أخفيت المشاركة وجديد مع حجب الأرباح؛ وفي الأقسام الأخرى إذا أخفيت المشاركة وجديد
+        const shouldSimplify = isSales ? (hideShare && hideNew && !canViewProfits) : (hideShare && hideNew);
+        if (shouldSimplify) {
+            bar.classList.add('simplified-pos-actions');
+        } else {
+            bar.classList.remove('simplified-pos-actions');
+        }
+    });
+
     // 4. 🔒 تحديث ضوابط الخصم والتسعير في شاشة المبيعات فور تسجيل الدخول
-    const canEditPrice = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
-        || (typeof hasPermission === 'function' && hasPermission('docs_price_edit'));
+    const isPriceLocked = (typeof currentUser !== 'undefined' && currentUser && currentUser.lockPriceEdit);
+    const canEditPrice = !isPriceLocked && ((typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
+        || (typeof hasPermission === 'function' && hasPermission('docs_price_edit')));
     const headerPriceEl = document.getElementById('headerPrice');
     if (headerPriceEl) {
         headerPriceEl.readOnly = !canEditPrice;
@@ -424,7 +510,7 @@ function applyPermissions() {
             headerPriceEl.style.cursor = 'not-allowed';
             headerPriceEl.style.background = '#f1f5f9';
             headerPriceEl.style.color = '#64748b';
-            headerPriceEl.title = '🔒 تعديل السعر مقفل للكاشير ومصرح به للمدير فقط';
+            headerPriceEl.title = isPriceLocked ? '🔒 تعديل سعر البيع مقفل ومحمي لهذا الحساب' : '🔒 تعديل السعر مقفل للكاشير ومصرح به للمدير فقط';
         } else {
             headerPriceEl.style.cursor = '';
             headerPriceEl.style.background = '#ffffff';
@@ -562,7 +648,7 @@ function applyPermissionPreset(presetType) {
 
     if (presetType === 'cashier_only') {
         // كاشير بيع فقط: إضافة فواتير بيع وخصم محدود (بدون تعديل سعر البيع، بدون ضريبة، بدون حذف)
-        const cashierIds = ['perm_docs_add', 'perm_docs_discount'];
+        const cashierIds = ['perm_docs_add', 'perm_docs_discount', 'perm_gen_lock_daily_user', 'perm_gen_lock_daily_date', 'perm_gen_lock_daily_amounts'];
         cashierIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.checked = true;
@@ -675,79 +761,93 @@ function renderUsersTable() {
         const isSuperAdmin = (u.id === 1);
         const isFrozen = !!u.isFrozen;
         const nfcBadge = u.nfcUid 
-            ? `<span style="background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 5px;">💳 ${u.nfcUid}</span>`
-            : `<span style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; background: #f8fafc; padding: 3px 8px; border-radius: 6px; border: 1px dashed #cbd5e1;">غير مربوط</span>`;
+            ? `<span style="background: #eff6ff; color: #1d4ed8; border: 2px solid #93c5fd; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 5px;">💳 ${u.nfcUid}</span>`
+            : `<span style="color: #000000; font-size: 0.92rem; font-weight: 900; background: #f1f5f9; padding: 5px 12px; border-radius: 8px; border: 2px solid #cbd5e1;">غير مربوط</span>`;
 
         const statusBadge = isFrozen
-            ? `<span style="background: #fef2f2; color: #b91c1c; border: 1.5px solid #fecaca; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">❄️ مجمّد</span>`
-            : `<span style="background: #ecfdf5; color: #047857; border: 1.5px solid #a7f3d0; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🟢 نشط</span>`;
+            ? `<span style="background: #fef2f2; color: #b91c1c; border: 2px solid #fca5a5; padding: 5px 14px; border-radius: 50px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">❄️ مجمّد</span>`
+            : `<span style="background: #ecfdf5; color: #047857; border: 2px solid #86efac; padding: 5px 14px; border-radius: 50px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🟢 نشط</span>`;
 
-        let whBadge = `<span style="background: #f0fdf4; color: #15803d; border: 1.5px solid #bbf7d0; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">🌐 كافة الفروع</span>`;
+        let whBadge = `<span style="background: #f0fdf4; color: #15803d; border: 2px solid #86efac; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🌐 كافة الفروع</span>`;
         if (u.warehouseScope === 'main') {
-            whBadge = `<span style="background: #f8fafc; color: #334155; border: 1.5px solid #cbd5e1; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">🏢 المخزن الرئيسي</span>`;
+            whBadge = `<span style="background: #f1f5f9; color: #000000; border: 2px solid #94a3b8; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🏢 المخزن الرئيسي</span>`;
         } else if (u.warehouseScope === 'specific' && u.assignedWarehouse) {
-            whBadge = `<span style="background: #faf5ff; color: #7e22ce; border: 1.5px solid #e9d5ff; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">🏬 ${u.assignedWarehouse}</span>`;
+            whBadge = `<span style="background: #faf5ff; color: #6b21a8; border: 2px solid #d8b4fe; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🏬 ${u.assignedWarehouse}</span>`;
+        }
+
+        let invScopeBadge = `<span style="background: #f0fdf4; color: #15803d; border: 2px solid #86efac; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🌐 كافة الفواتير</span>`;
+        if (u.invoiceScope === 'user_only') {
+            invScopeBadge = `<span style="background: #eff6ff; color: #1d4ed8; border: 2px solid #93c5fd; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">👤 فواتيره فقط</span>`;
+        } else if (u.invoiceScope === 'hide_admin') {
+            invScopeBadge = `<span style="background: #fef2f2; color: #b91c1c; border: 2px solid #fca5a5; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🛡️ حجب المدير</span>`;
+        } else if (u.invoiceScope === 'terminal_only') {
+            invScopeBadge = `<span style="background: #f5f3ff; color: #6b21a8; border: 2px solid #c4b5fd; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">💻 جهازه فقط</span>`;
+        } else if (u.invoiceScope === 'warehouse_only') {
+            invScopeBadge = `<span style="background: #f0fdfa; color: #0f766e; border: 2px solid #5eead4; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🏢 فرعه فقط</span>`;
+        } else if (u.invoiceScope === 'hide_master') {
+            invScopeBadge = `<span style="background: #fff7ed; color: #c2410c; border: 2px solid #fdba74; padding: 5px 12px; border-radius: 8px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">🛡️ حجب الماستر</span>`;
         }
 
         const roleBadge = (u.role === 'admin')
-            ? `<span style="background: #fffbeb; color: #b45309; border: 1.5px solid #fde68a; padding: 4px 12px; border-radius: 50px; font-size: 0.82rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">⭐ مدير نظام</span>`
-            : `<span style="background: #f1f5f9; color: #334155; border: 1.5px solid #cbd5e1; padding: 4px 12px; border-radius: 50px; font-size: 0.82rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">👤 موظف</span>`;
+            ? `<span style="background: #fffbeb; color: #92400e; border: 2px solid #f59e0b; padding: 5px 14px; border-radius: 50px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">⭐ مدير نظام</span>`
+            : `<span style="background: #f1f5f9; color: #000000; border: 2px solid #94a3b8; padding: 5px 14px; border-radius: 50px; font-size: 0.92rem; font-weight: 900; display: inline-flex; align-items: center; gap: 4px;">👤 موظف</span>`;
 
         rowsHtml += `
-            <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.15s; ${isFrozen ? 'opacity: 0.75; background: #fff5f5;' : 'background: #ffffff;'}">
-                <td style="padding: 12px 14px; font-weight: 900; color: #0f172a; font-size: 0.92rem;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #f1f5f9; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; border: 1px solid #e2e8f0;">👤</span>
+            <tr style="border-bottom: 2px solid #e2e8f0; transition: background 0.15s; ${isFrozen ? 'opacity: 0.85; background: #fff5f5;' : 'background: #ffffff;'}">
+                <td style="padding: 14px 16px; font-weight: 900; color: #000000; font-size: 1.05rem;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="background: #f1f5f9; width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; border: 2px solid #cbd5e1;">👤</span>
                         <div>
-                            <span>${u.name}</span>
-                            ${isSuperAdmin ? '<span style="font-size: 0.72rem; color: #0284c7; font-weight: 800; display: block;">المدير الأساسي</span>' : ''}
+                            <span style="color: #000000; font-weight: 900; font-size: 1.05rem;">${u.name}</span>
+                            ${isSuperAdmin ? '<span style="font-size: 0.85rem; color: #0284c7; font-weight: 900; display: block; margin-top: 2px;">المدير الأساسي</span>' : ''}
                         </div>
                     </div>
                 </td>
-                <td style="padding: 12px 14px; text-align: center;">
-                    <span style="font-family: monospace; letter-spacing: 2px; font-weight: 900; font-size: 0.95rem; background: #f8fafc; padding: 4px 10px; border-radius: 8px; border: 1.5px solid #e2e8f0; color: #334155;">
+                <td style="padding: 14px 16px; text-align: center;">
+                    <span style="font-family: monospace; letter-spacing: 2px; font-weight: 900; font-size: 1.05rem; background: #f8fafc; padding: 5px 12px; border-radius: 8px; border: 2px solid #cbd5e1; color: #000000;">
                         ${(u.role === 'admin' && !isSuperAdmin) ? '••••' : u.pin}
                     </span>
                 </td>
-                <td style="padding: 12px 14px; text-align: center;">${nfcBadge}</td>
-                <td style="padding: 12px 14px; text-align: center;">${roleBadge}</td>
-                <td style="padding: 12px 14px; text-align: center;">${whBadge}</td>
-                <td style="padding: 12px 14px; text-align: center;">${statusBadge}</td>
-                <td style="padding: 12px 14px; text-align: center;">
+                <td style="padding: 14px 16px; text-align: center;">${nfcBadge}</td>
+                <td style="padding: 14px 16px; text-align: center;">${roleBadge}</td>
+                <td style="padding: 14px 16px; text-align: center;">${whBadge}</td>
+                <td style="padding: 14px 16px; text-align: center;">${invScopeBadge}</td>
+                <td style="padding: 14px 16px; text-align: center;">${statusBadge}</td>
+                <td style="padding: 14px 16px; text-align: center;">
                     <div style="display: inline-flex; gap: 6px; justify-content: center; align-items: center;">
                         
                         <!-- زر التعديل -->
                         <button type="button" onclick="editUser(${idx})" title="تعديل الموظف"
-                            style="background: #eff6ff; color: #1d4ed8; border: 1.5px solid #bfdbfe; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            style="background: #eff6ff; color: #1d4ed8; border: 2px solid #bfdbfe; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 900; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
                             <span>✏️</span> تعديل
                         </button>
 
                         <!-- زر نسخ الصلاحيات -->
                         <button type="button" onclick="openCopyPermissionsModal(${idx})" title="نسخ صلاحيات من موظف آخر"
-                            style="background: #f0fdfa; color: #0f766e; border: 1.5px solid #99f6e4; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            style="background: #f0fdfa; color: #0f766e; border: 2px solid #99f6e4; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 900; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
                             <span>📋</span> نسخ
                         </button>
 
                         <!-- زر تغيير رمز PIN -->
                         <button type="button" onclick="changeUserPin(${idx})" title="تغيير رمز الدخول PIN"
-                            style="background: #fffbeb; color: #b45309; border: 1.5px solid #fde68a; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            style="background: #fffbeb; color: #b45309; border: 2px solid #fde68a; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 900; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
                             <span>🔑</span> PIN
                         </button>
 
                         ${!isSuperAdmin ? `
                             <!-- زر التجميد / التنشيط -->
                             <button type="button" onclick="toggleFreezeUser(${idx})" title="${isFrozen ? 'تفعيل الحساب' : 'تجميد الحساب'}"
-                                style="background: ${isFrozen ? '#ecfdf5' : '#f8fafc'}; color: ${isFrozen ? '#047857' : '#475569'}; border: 1.5px solid ${isFrozen ? '#a7f3d0' : '#cbd5e1'}; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                style="background: ${isFrozen ? '#ecfdf5' : '#f8fafc'}; color: ${isFrozen ? '#047857' : '#000000'}; border: 2px solid ${isFrozen ? '#86efac' : '#cbd5e1'}; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 900; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
                                 ${isFrozen ? '<span>🟢</span> تنشيط' : '<span>❄️</span> تجميد'}
                             </button>
 
                             <!-- زر الحذف -->
                             <button type="button" onclick="deleteUser(${idx})" title="حذف الموظف نهائياً"
-                                style="background: #fef2f2; color: #dc2626; border: 1.5px solid #fecaca; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                style="background: #fef2f2; color: #dc2626; border: 2px solid #fecaca; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 900; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; gap: 4px;">
                                 <span>🗑️</span> حذف
                             </button>
                         ` : `
-                            <span style="background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; height: 32px; padding: 0 10px; border-radius: 8px; font-weight: 800; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px;" title="حساب المدير محمي من الحذف والتجميد">
+                            <span style="background: #f1f5f9; color: #000000; border: 2px solid #cbd5e1; height: 38px; padding: 0 14px; border-radius: 8px; font-weight: 900; font-size: 0.92rem; display: inline-flex; align-items: center; gap: 4px;" title="حساب المدير محمي من الحذف والتجميد">
                                 <span>🛡️</span> محمي
                             </span>
                         `}
@@ -768,8 +868,10 @@ function toggleFreezeUser(idx) {
     if (u.id === 1 || u.role === 'admin' || u.name === 'المدير') return showToast("🛡️ لا يمكن تجميد حساب مدير النظام الرئيسي!", "error");
 
     u.isFrozen = !u.isFrozen;
+    window.users = users;
     saveData();
     renderUsersTable();
+    if (typeof updateLoginUsersList === 'function') updateLoginUsersList();
 
     const msg = u.isFrozen ? `❄️ تم تجميد حساب الموظف (${u.name})` : `🟢 تم إلغاء تجميد وتفعيل حساب الموظف (${u.name})`;
     showToast(msg, u.isFrozen ? "info" : "success");
@@ -858,8 +960,16 @@ function executeChangeUserPin(idx) {
         return showToast("🚫 رمز PIN هذا مستخدم بالفعل لموظف آخر!", "error");
     }
     u.pin = cleanPin;
+    if (currentUser && (currentUser.id === u.id || currentUser.name === u.name)) {
+        currentUser.pin = cleanPin;
+        window.currentUser = currentUser;
+        if (typeof setStore === 'function') {
+            setStore('pos_session_user', JSON.stringify(currentUser));
+        }
+    }
     saveData();
     renderUsersTable();
+    if (typeof updateLoginUsersList === 'function') updateLoginUsersList();
     const modal = document.getElementById('changePinModalOverlay');
     if (modal) modal.remove();
     showToast(`✅ تم تغيير رمز PIN للموظف (${u.name}) بنجاح!`, "success");
@@ -974,11 +1084,17 @@ function addUser() {
     let role = document.getElementById('newUserRole').value;
     const nfcUid = (document.getElementById('newUserNfcUid') ? document.getElementById('newUserNfcUid').value.trim() : '');
     const warehouseScope = document.getElementById('newUserWarehouseScope') ? document.getElementById('newUserWarehouseScope').value : 'all';
+    const invoiceScope = document.getElementById('newUserInvoiceScope') ? document.getElementById('newUserInvoiceScope').value : (role === 'admin' ? 'all' : 'user_only');
     const assignedWarehouse = (warehouseScope === 'specific' && document.getElementById('newUserSpecificWarehouse'))
         ? document.getElementById('newUserSpecificWarehouse').value
         : (warehouseScope === 'main' ? 'المخزن الرئيسي' : '');
 
     if (!name || !pin) return showToast("⚠️ يرجى إدخال اسم المستخدم ورمز الدخول", "error");
+
+    const duplicateNameUser = users.find(u => u.name && u.name.trim().toLowerCase() === name.toLowerCase() && u.id !== (window.editingUserId || 0));
+    if (duplicateNameUser) {
+        return showToast(`🚫 اسم الموظف (${name}) مستخدم بالفعل لموظف آخر!`, "error");
+    }
 
     const duplicatePinUser = users.find(u => u.pin === pin && u.id !== (window.editingUserId || 0));
     if (duplicatePinUser) {
@@ -999,6 +1115,29 @@ function addUser() {
     const canPurReturn = document.getElementById('perm_sec_pur_return') ? document.getElementById('perm_sec_pur_return').checked : false;
     const canWarehouseReport = document.getElementById('perm_sec_warehouse_report') ? document.getElementById('perm_sec_warehouse_report').checked : false;
     const canTreasury = document.getElementById('perm_sec_treasury') ? document.getElementById('perm_sec_treasury').checked : false;
+
+    let isHideProfits = false;
+    if (role === 'admin') {
+        const adminEl = document.getElementById('adminHideProfits');
+        if (adminEl) isHideProfits = adminEl.checked;
+    } else {
+        const permEl = document.getElementById('perm_ui_hide_profits');
+        if (permEl) isHideProfits = permEl.checked;
+    }
+
+    let isHideDrawerBalance = false;
+    if (role === 'admin') {
+        const adminEl = document.getElementById('adminHideDrawerBalance');
+        if (adminEl) isHideDrawerBalance = adminEl.checked;
+    } else {
+        const permEl = document.getElementById('perm_ui_hide_drawer_balance');
+        const permGenEl = document.getElementById('perm_gen_drawer_balance');
+        if (permEl) {
+            isHideDrawerBalance = permEl.checked;
+        } else if (permGenEl) {
+            isHideDrawerBalance = !permGenEl.checked;
+        }
+    }
 
     const permissions = {
         docs: {
@@ -1037,7 +1176,15 @@ function addUser() {
         },
         general: {
             reports: document.getElementById('perm_gen_reports') ? document.getElementById('perm_gen_reports').checked : false,
-            profits: (role === 'admin' && document.getElementById('adminAllowProfits')) ? document.getElementById('adminAllowProfits').checked : (document.getElementById('perm_gen_profits') ? document.getElementById('perm_gen_profits').checked : false),
+            profits: !isHideProfits,
+            hideProfits: isHideProfits,
+            drawerBalance: !isHideDrawerBalance,
+            hideDrawerBalance: isHideDrawerBalance,
+            lockDailyUser: (role === 'admin') ? false : (document.getElementById('perm_gen_lock_daily_user') ? document.getElementById('perm_gen_lock_daily_user').checked : true),
+            lockDailyDate: (role === 'admin') ? false : (document.getElementById('perm_gen_lock_daily_date') ? document.getElementById('perm_gen_lock_daily_date').checked : true),
+            lockDailyAmounts: (role === 'admin') ? false : (document.getElementById('perm_gen_lock_daily_amounts') ? document.getElementById('perm_gen_lock_daily_amounts').checked : true),
+            hideShare: (role === 'admin' && document.getElementById('adminHideShare')) ? document.getElementById('adminHideShare').checked : (document.getElementById('perm_ui_hide_share') ? document.getElementById('perm_ui_hide_share').checked : false),
+            hideNew: (role === 'admin' && document.getElementById('adminHideNew')) ? document.getElementById('adminHideNew').checked : (document.getElementById('perm_ui_hide_new') ? document.getElementById('perm_ui_hide_new').checked : false),
             settings: document.getElementById('perm_gen_settings') ? document.getElementById('perm_gen_settings').checked : false,
             shortcuts: document.getElementById('perm_gen_shortcuts') ? document.getElementById('perm_gen_shortcuts').checked : false,
             users: document.getElementById('perm_gen_users') ? document.getElementById('perm_gen_users').checked : false
@@ -1047,9 +1194,27 @@ function addUser() {
     const existingTarget = window.editingUserId ? users.find(u => u.id === window.editingUserId) : null;
     const isFrozen = existingTarget ? !!existingTarget.isFrozen : false;
 
-    const maxDiscountPercent = document.getElementById('newUserMaxDiscount') 
-        ? Math.max(0, Math.min(100, parseFloat(document.getElementById('newUserMaxDiscount').value) || 0)) 
-        : 5;
+    let maxDiscountPercent = 5;
+    let maxAdditionPercent = 15;
+    let lockPriceEdit = false;
+
+    if (role === 'admin') {
+        maxDiscountPercent = document.getElementById('adminMaxDiscount')
+            ? Math.max(0, Math.min(100, parseFloat(document.getElementById('adminMaxDiscount').value) || 0))
+            : 100;
+        maxAdditionPercent = document.getElementById('adminMaxAddition')
+            ? Math.max(0, Math.min(100, parseFloat(document.getElementById('adminMaxAddition').value) || 0))
+            : 100;
+        lockPriceEdit = document.getElementById('adminLockPriceEdit') ? document.getElementById('adminLockPriceEdit').checked : false;
+    } else {
+        maxDiscountPercent = document.getElementById('newUserMaxDiscount') 
+            ? Math.max(0, Math.min(100, parseFloat(document.getElementById('newUserMaxDiscount').value) || 0)) 
+            : 5;
+        maxAdditionPercent = document.getElementById('newUserMaxAddition') 
+            ? Math.max(0, Math.min(100, parseFloat(document.getElementById('newUserMaxAddition').value) || 0)) 
+            : 15;
+        lockPriceEdit = document.getElementById('perm_docs_price_edit') ? !document.getElementById('perm_docs_price_edit').checked : true;
+    }
 
     const newUser = { 
         id: window.editingUserId || Date.now(), 
@@ -1060,7 +1225,10 @@ function addUser() {
         isFrozen: isFrozen,
         warehouseScope,
         assignedWarehouse,
+        invoiceScope,
         maxDiscountPercent,
+        maxAdditionPercent,
+        lockPriceEdit,
         permissions 
     };
 
@@ -1071,15 +1239,25 @@ function addUser() {
         window.editingUserId = null;
         showToast("✅ تم تحديث بيانات الموظف بنجاح", "success");
     } else {
-        if (users.some(u => u.name === name)) return showToast("🚫 اسم المستخدم موجود بالفعل!", "error");
         users.push(newUser);
         showToast("✅ تم إضافة الموظف الجديد بنجاح", "success");
     }
 
+    // مزامنة فورية للجلسة الحالية إذا قام المستخدم بتعديل بيانات حسابه المفتوح
+    if (currentUser && (currentUser.id === newUser.id || currentUser.name === newUser.name)) {
+        currentUser = { ...currentUser, ...newUser };
+        window.currentUser = currentUser;
+        if (typeof setStore === 'function') {
+            setStore('pos_session_user', JSON.stringify(currentUser));
+        }
+    }
+
+    window.users = users;
     saveData();
     renderUsersTable();
     hideUserFormCard();
     if (typeof applyPermissions === 'function') applyPermissions();
+    if (typeof updateLoginUsersList === 'function') updateLoginUsersList();
     
     if (typeof logAuditAction === 'function') logAuditAction(isUpdating ? 'تحديث موظف' : 'إضافة موظف جديد', `الاسم: ${newUser.name}, الدور: ${newUser.role}, المخزن: ${warehouseScope === 'specific' ? assignedWarehouse : (warehouseScope === 'main' ? 'الرئيسي فقط' : 'كافة المخازن')}`);
     if (typeof syncUsersToCloud === 'function') syncUsersToCloud();
@@ -1129,6 +1307,14 @@ function editUser(idx) {
         }
     }
 
+    const invScopeEl = document.getElementById('newUserInvoiceScope');
+    if (invScopeEl) {
+        invScopeEl.value = u.invoiceScope || (u.role === 'admin' ? 'all' : 'user_only');
+        if (typeof updateInvoiceScopeHelpHint === 'function') {
+            updateInvoiceScopeHelpHint(invScopeEl.value);
+        }
+    }
+
     toggleAdminPermsUI(u.role);
 
     const p = u.permissions || {};
@@ -1154,6 +1340,18 @@ function editUser(idx) {
 
     if (document.getElementById('newUserMaxDiscount')) {
         document.getElementById('newUserMaxDiscount').value = (u.maxDiscountPercent !== undefined) ? u.maxDiscountPercent : 5;
+    }
+    if (document.getElementById('newUserMaxAddition')) {
+        document.getElementById('newUserMaxAddition').value = (u.maxAdditionPercent !== undefined) ? u.maxAdditionPercent : 15;
+    }
+    if (document.getElementById('adminMaxDiscount')) {
+        document.getElementById('adminMaxDiscount').value = (u.maxDiscountPercent !== undefined) ? u.maxDiscountPercent : 100;
+    }
+    if (document.getElementById('adminMaxAddition')) {
+        document.getElementById('adminMaxAddition').value = (u.maxAdditionPercent !== undefined) ? u.maxAdditionPercent : 100;
+    }
+    if (document.getElementById('adminLockPriceEdit')) {
+        document.getElementById('adminLockPriceEdit').checked = !!u.lockPriceEdit;
     }
     if (p.stock) {
         document.getElementById('perm_stock_add').checked = !!p.stock.add;
@@ -1200,9 +1398,58 @@ function editUser(idx) {
         document.getElementById('perm_gen_users').checked = !!p.general.users;
     }
 
-    const adminAllowProfitsEl = document.getElementById('adminAllowProfits');
-    if (adminAllowProfitsEl) {
-        adminAllowProfitsEl.checked = (p.general && p.general.profits !== undefined) ? !!p.general.profits : true;
+    const isProfitsHidden = (p.general && p.general.hideProfits !== undefined) 
+        ? !!p.general.hideProfits 
+        : ((p.general && p.general.profits !== undefined) ? !p.general.profits : false);
+
+    const adminHideProfitsEl = document.getElementById('adminHideProfits');
+    if (adminHideProfitsEl) {
+        adminHideProfitsEl.checked = isProfitsHidden;
+    }
+    const permHideProfitsEl = document.getElementById('perm_ui_hide_profits');
+    if (permHideProfitsEl) {
+        permHideProfitsEl.checked = isProfitsHidden;
+    }
+    const adminHideShareEl = document.getElementById('adminHideShare');
+    if (adminHideShareEl) {
+        adminHideShareEl.checked = (p.general && p.general.hideShare !== undefined) ? !!p.general.hideShare : false;
+    }
+    const adminHideNewEl = document.getElementById('adminHideNew');
+    if (adminHideNewEl) {
+        adminHideNewEl.checked = (p.general && p.general.hideNew !== undefined) ? !!p.general.hideNew : false;
+    }
+
+    const permHideShareEl = document.getElementById('perm_ui_hide_share');
+    if (permHideShareEl) {
+        permHideShareEl.checked = (p.general && p.general.hideShare !== undefined) ? !!p.general.hideShare : false;
+    }
+    const permHideNewEl = document.getElementById('perm_ui_hide_new');
+    if (permHideNewEl) {
+        permHideNewEl.checked = (p.general && p.general.hideNew !== undefined) ? !!p.general.hideNew : false;
+    }
+
+    const isDrawerBalanceHidden = (p.general && p.general.hideDrawerBalance !== undefined)
+        ? !!p.general.hideDrawerBalance
+        : ((p.general && p.general.drawerBalance !== undefined) ? !p.general.drawerBalance : false);
+
+    const adminHideDrawerBalanceEl = document.getElementById('adminHideDrawerBalance');
+    if (adminHideDrawerBalanceEl) adminHideDrawerBalanceEl.checked = isDrawerBalanceHidden;
+    const permHideDrawerBalanceEl = document.getElementById('perm_ui_hide_drawer_balance');
+    if (permHideDrawerBalanceEl) permHideDrawerBalanceEl.checked = isDrawerBalanceHidden;
+    const permGenDrawerBalanceEl = document.getElementById('perm_gen_drawer_balance');
+    if (permGenDrawerBalanceEl) permGenDrawerBalanceEl.checked = !isDrawerBalanceHidden;
+
+    const lockDailyUserEl = document.getElementById('perm_gen_lock_daily_user');
+    if (lockDailyUserEl) {
+        lockDailyUserEl.checked = (p.general && p.general.lockDailyUser !== undefined) ? !!p.general.lockDailyUser : (u.role !== 'admin');
+    }
+    const lockDailyDateEl = document.getElementById('perm_gen_lock_daily_date');
+    if (lockDailyDateEl) {
+        lockDailyDateEl.checked = (p.general && p.general.lockDailyDate !== undefined) ? !!p.general.lockDailyDate : (u.role !== 'admin');
+    }
+    const lockDailyAmountsEl = document.getElementById('perm_gen_lock_daily_amounts');
+    if (lockDailyAmountsEl) {
+        lockDailyAmountsEl.checked = (p.general && p.general.lockDailyAmounts !== undefined) ? !!p.general.lockDailyAmounts : (u.role !== 'admin');
     }
     
     const formCard = document.getElementById('userFormCard');
@@ -1232,13 +1479,33 @@ function resetUserForm() {
         scopeEl.value = 'all';
         onUserWarehouseScopeChange('all');
     }
+    const invScopeEl = document.getElementById('newUserInvoiceScope');
+    if (invScopeEl) {
+        invScopeEl.value = 'user_only';
+        if (typeof updateInvoiceScopeHelpHint === 'function') {
+            updateInvoiceScopeHelpHint('user_only');
+        }
+    }
     if (typeof applyPermissionPreset === 'function') {
-        applyPermissionPreset('cashier_only');
+        applyPermissionPreset('cashier_only', true);
     }
     if (document.getElementById('newUserMaxDiscount')) document.getElementById('newUserMaxDiscount').value = '5';
-    if (document.getElementById('adminAllowProfits')) {
-        document.getElementById('adminAllowProfits').checked = true;
-    }
+    if (document.getElementById('newUserMaxAddition')) document.getElementById('newUserMaxAddition').value = '15';
+    if (document.getElementById('adminMaxDiscount')) document.getElementById('adminMaxDiscount').value = '100';
+    if (document.getElementById('adminMaxAddition')) document.getElementById('adminMaxAddition').value = '100';
+    if (document.getElementById('adminLockPriceEdit')) document.getElementById('adminLockPriceEdit').checked = false;
+    if (document.getElementById('adminHideProfits')) document.getElementById('adminHideProfits').checked = false;
+    if (document.getElementById('perm_ui_hide_profits')) document.getElementById('perm_ui_hide_profits').checked = false;
+    if (document.getElementById('adminHideShare')) document.getElementById('adminHideShare').checked = false;
+    if (document.getElementById('adminHideNew')) document.getElementById('adminHideNew').checked = false;
+    if (document.getElementById('perm_ui_hide_share')) document.getElementById('perm_ui_hide_share').checked = false;
+    if (document.getElementById('perm_ui_hide_new')) document.getElementById('perm_ui_hide_new').checked = false;
+    if (document.getElementById('adminHideDrawerBalance')) document.getElementById('adminHideDrawerBalance').checked = false;
+    if (document.getElementById('perm_ui_hide_drawer_balance')) document.getElementById('perm_ui_hide_drawer_balance').checked = false;
+    if (document.getElementById('perm_gen_drawer_balance')) document.getElementById('perm_gen_drawer_balance').checked = true;
+    if (document.getElementById('perm_gen_lock_daily_user')) document.getElementById('perm_gen_lock_daily_user').checked = true;
+    if (document.getElementById('perm_gen_lock_daily_date')) document.getElementById('perm_gen_lock_daily_date').checked = true;
+    if (document.getElementById('perm_gen_lock_daily_amounts')) document.getElementById('perm_gen_lock_daily_amounts').checked = true;
     if (typeof switchPermCategory === 'function') {
         switchPermCategory('sales');
     }
@@ -1290,7 +1557,7 @@ function switchPermCategory(category) {
 }
 window.switchPermCategory = switchPermCategory;
 
-function applyPermissionPreset(presetKey) {
+function applyPermissionPreset(presetKey, silent = false) {
     const setChecked = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.checked = !!val;
@@ -1301,7 +1568,7 @@ function applyPermissionPreset(presetKey) {
 
     if (presetKey === 'cashier_only') {
         // كاشير مبيعات: بيع، مرتجع، سند قبض، سجل الفواتير، تقارير يومية
-        toggleAllUserSections(false);
+        toggleAllUserSections(false, true);
         setChecked('perm_docs_add', true);
         setChecked('perm_docs_return', true);
         setChecked('perm_sec_receipt', true);
@@ -1309,14 +1576,24 @@ function applyPermissionPreset(presetKey) {
         setChecked('perm_gen_reports', true);
         setChecked('perm_docs_discount', true);
         setChecked('perm_docs_tax', true);
+        setChecked('perm_gen_lock_daily_user', true);
+        setChecked('perm_gen_lock_daily_date', true);
+        setChecked('perm_gen_lock_daily_amounts', true);
 
+        const maxAdditionEl = document.getElementById('newUserMaxAddition');
         if (priceEditEl) priceEditEl.checked = false;
         if (maxDiscountEl) maxDiscountEl.value = '5';
-        if (typeof showToast === 'function') showToast("🛒 تم تفعيل أقسام: كاشير مبيعات (بيع ومرتجع وقبض)", "success");
+        if (maxAdditionEl) maxAdditionEl.value = '15';
+        const invScopeEl = document.getElementById('newUserInvoiceScope');
+        if (invScopeEl) {
+            invScopeEl.value = 'user_only';
+            if (typeof updateInvoiceScopeHelpHint === 'function') updateInvoiceScopeHelpHint('user_only');
+        }
+        if (!silent && typeof showToast === 'function') showToast("🛒 تم تفعيل أقسام: كاشير مبيعات (بيع ومرتجع وقبض مع حصر فواتيره فقط)", "success");
 
     } else if (presetKey === 'stock_manager') {
         // أمين مخزن: المخزن وبضاعة الأصناف، أرصدة المخازن، فواتير الشراء، مرتجع الشراء، تسوية، حركة صنف، تحويل، استعلام
-        toggleAllUserSections(false);
+        toggleAllUserSections(false, true);
         setChecked('perm_stock_view', true);
         setChecked('perm_sec_warehouse_report', true);
         setChecked('perm_stock_add', true);
@@ -1331,13 +1608,15 @@ function applyPermissionPreset(presetKey) {
         setChecked('perm_docs_purchase_price', false);
         setChecked('perm_gen_profits', false);
 
+        const maxAdditionEl = document.getElementById('newUserMaxAddition');
         if (priceEditEl) priceEditEl.checked = false;
         if (maxDiscountEl) maxDiscountEl.value = '0';
-        if (typeof showToast === 'function') showToast("📦 تم تفعيل أقسام: أمين مخزن (مخازن وبضاعة ومشتريات)", "success");
+        if (maxAdditionEl) maxAdditionEl.value = '0';
+        if (!silent && typeof showToast === 'function') showToast("📦 تم تفعيل أقسام: أمين مخزن (مخازن وبضاعة ومشتريات)", "success");
 
     } else if (presetKey === 'accountant') {
         // محاسب مالي: حسابات، سندات قبض وصرف، فواتير، تقارير، أرباح، أرصدة مخازن، كشف حساب
-        toggleAllUserSections(false);
+        toggleAllUserSections(false, true);
         setChecked('perm_sec_receipt', true);
         setChecked('perm_sec_disburse', true);
         setChecked('perm_acc_view', true);
@@ -1353,14 +1632,16 @@ function applyPermissionPreset(presetKey) {
         setChecked('perm_gen_profits', true);
         setChecked('perm_docs_purchase_price', true);
 
+        const maxAdditionEl = document.getElementById('newUserMaxAddition');
         if (priceEditEl) priceEditEl.checked = true;
         if (maxDiscountEl) maxDiscountEl.value = '10';
-        if (typeof showToast === 'function') showToast("💼 تم تفعيل أقسام: محاسب مالي (حسابات وقبض وصرف وأرباح)", "success");
+        if (maxAdditionEl) maxAdditionEl.value = '20';
+        if (!silent && typeof showToast === 'function') showToast("💼 تم تفعيل أقسام: محاسب مالي (حسابات وقبض وصرف وأرباح)", "success");
     }
 }
 window.applyPermissionPreset = applyPermissionPreset;
 
-function toggleAllUserSections(checked) {
+function toggleAllUserSections(checked, silent = false) {
     const ids = [
         'perm_docs_add', 'perm_docs_return', 'perm_docs_purchase', 'perm_sec_pur_return', 'perm_docs_view',
         'perm_sec_receipt', 'perm_sec_disburse', 'perm_acc_view', 'perm_acc_add', 'perm_acc_statement', 'perm_sec_treasury',
@@ -1374,7 +1655,7 @@ function toggleAllUserSections(checked) {
     });
     if (document.getElementById('perm_docs_discount')) document.getElementById('perm_docs_discount').checked = !!checked;
     if (document.getElementById('perm_docs_tax')) document.getElementById('perm_docs_tax').checked = !!checked;
-    if (typeof showToast === 'function') showToast(checked ? "✔️ تم تحديد كافة الأقسام للموظف" : "❌ تم إلغاء تحديد كافة الأقسام", "info");
+    if (!silent && typeof showToast === 'function') showToast(checked ? "✔️ تم تحديد كافة الأقسام للموظف" : "❌ تم إلغاء تحديد كافة الأقسام", "info");
 }
 window.toggleAllUserSections = toggleAllUserSections;
 
@@ -1383,19 +1664,32 @@ function quickSelectUserPreset(presetKey) {
         const roleEl = document.getElementById('newUserRole');
         if (roleEl) roleEl.value = 'admin';
         toggleAdminPermsUI('admin');
-        const adminProfitsEl = document.getElementById('adminAllowProfits');
-        if (adminProfitsEl) adminProfitsEl.checked = true;
+        if (document.getElementById('adminHideProfits')) document.getElementById('adminHideProfits').checked = false;
+        if (document.getElementById('adminHideShare')) document.getElementById('adminHideShare').checked = false;
+        if (document.getElementById('adminHideNew')) document.getElementById('adminHideNew').checked = false;
+        if (document.getElementById('adminMaxDiscount')) document.getElementById('adminMaxDiscount').value = '100';
+        if (document.getElementById('adminMaxAddition')) document.getElementById('adminMaxAddition').value = '100';
+        if (document.getElementById('adminLockPriceEdit')) document.getElementById('adminLockPriceEdit').checked = false;
         const maxDiscountEl = document.getElementById('newUserMaxDiscount');
         if (maxDiscountEl) maxDiscountEl.value = '100';
+        const maxAdditionEl = document.getElementById('newUserMaxAddition');
+        if (maxAdditionEl) maxAdditionEl.value = '100';
         const priceEditEl = document.getElementById('perm_docs_price_edit');
         if (priceEditEl) priceEditEl.checked = true;
-        toggleAllUserSections(true);
+        const invScopeEl = document.getElementById('newUserInvoiceScope');
+        if (invScopeEl) {
+            invScopeEl.value = 'all';
+            if (typeof updateInvoiceScopeHelpHint === 'function') updateInvoiceScopeHelpHint('all');
+        }
+        if (document.getElementById('perm_gen_lock_daily_user')) document.getElementById('perm_gen_lock_daily_user').checked = false;
+        if (document.getElementById('perm_gen_lock_daily_date')) document.getElementById('perm_gen_lock_daily_date').checked = false;
+        toggleAllUserSections(true, true);
         if (typeof showToast === 'function') showToast("⭐ تم تطبيق قالب: مدير عام (كافة الأقسام والصلاحيات)", "success");
     } else {
         const roleEl = document.getElementById('newUserRole');
         if (roleEl) roleEl.value = 'user';
         toggleAdminPermsUI('user');
-        applyPermissionPreset(presetKey);
+        applyPermissionPreset(presetKey, false);
     }
 }
 window.quickSelectUserPreset = quickSelectUserPreset;
@@ -1439,6 +1733,141 @@ function hideUserFormCard() {
 }
 window.hideUserFormCard = hideUserFormCard;
 
+function updateInvoiceScopeHelpHint(val) {
+    const hintContainer = document.getElementById('newUserInvoiceScopeHint');
+    const hintText = document.getElementById('newUserInvoiceScopeHintText');
+    if (!hintContainer || !hintText) return;
+
+    const scopeDescriptions = {
+        'all': {
+            badge: 'وصول شامل',
+            badgeBg: '#10b981',
+            containerBg: '#ecfdf5',
+            borderColor: '#a7f3d0',
+            text: 'يشوف كل الفواتير (ممتاز لعمل المرتجعات والتعاون بين الكاشيرات)'
+        },
+        'user_only': {
+            badge: 'حصر فواتيره',
+            badgeBg: '#f59e0b',
+            containerBg: '#fffbeb',
+            borderColor: '#fde68a',
+            text: 'يشوف فواتيره فقط وتختفي فواتير المدير تماماً عن عينيه'
+        },
+        'hide_admin': {
+            badge: 'حجب الإدارة',
+            badgeBg: '#3b82f6',
+            containerBg: '#eff6ff',
+            borderColor: '#bfdbfe',
+            text: 'حجب فواتير الإدارة فقط ومشاركة فواتير باقي الموظفين للتعاون'
+        },
+        'terminal_only': {
+            badge: 'حصر بالجهاز',
+            badgeBg: '#8b5cf6',
+            containerBg: '#f5f3ff',
+            borderColor: '#ddd6fe',
+            text: 'حصر الفواتير بجهاز هذا الكاشير فقط ومنع رؤية أجهزة غيره'
+        },
+        'warehouse_only': {
+            badge: 'حصر بالفرع',
+            badgeBg: '#06b6d4',
+            containerBg: '#ecfeff',
+            borderColor: '#a5f3fc',
+            text: 'حصر الفواتير بمخزن وفرع هذا الموظف فقط وعزل بقية الفروع'
+        },
+        'hide_master': {
+            badge: 'حجب السيرفر',
+            badgeBg: '#ef4444',
+            containerBg: '#fef2f2',
+            borderColor: '#fecaca',
+            text: 'حجب كمبيوتر السيرفر الرئيسي عن أجهزة التابلت والفرعيات'
+        }
+    };
+
+    const info = scopeDescriptions[val] || scopeDescriptions['user_only'];
+    hintContainer.style.background = info.containerBg;
+    hintContainer.style.borderColor = info.borderColor;
+    hintText.innerHTML = `<span style="display:inline-block; padding:2px 7px; border-radius:5px; background:${info.badgeBg}; color:#ffffff; font-size:0.75rem; font-weight:bold; margin-left:6px;">${info.badge}</span> <span style="color:#1e293b; font-weight:600;">${info.text}</span>`;
+}
+window.updateInvoiceScopeHelpHint = updateInvoiceScopeHelpHint;
+
+function showInvoiceScopeHelpModal() {
+    const htmlContent = `
+        <div style="text-align: right; font-family: inherit; font-size: 0.88rem; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; max-height: 60vh; overflow-y: auto; padding-left: 4px;">
+            <div style="background: #ecfdf5; border-right: 4px solid #10b981; padding: 8px 12px; border-radius: 8px;">
+                <div style="font-weight: 800; color: #047857; margin-bottom: 2px; font-size: 0.92rem;">🌐 كافة فواتير النظام (وصول شامل)</div>
+                <div style="color: #065f46; font-size: 0.82rem; line-height: 1.4;">يشوف كل الفواتير (ممتاز لعمل المرتجعات والتعاون بين الكاشيرات)</div>
+            </div>
+
+            <div style="background: #fffbeb; border-right: 4px solid #f59e0b; padding: 8px 12px; border-radius: 8px;">
+                <div style="font-weight: 800; color: #b45309; margin-bottom: 2px; font-size: 0.92rem;">👤 فواتير هذا الموظف فقط</div>
+                <div style="color: #92400e; font-size: 0.82rem; line-height: 1.4;">يشوف فواتيره فقط وتختفي فواتير المدير تماماً عن عينيه</div>
+            </div>
+
+            <div style="background: #eff6ff; border-right: 4px solid #3b82f6; padding: 8px 12px; border-radius: 8px;">
+                <div style="font-weight: 800; color: #1d4ed8; margin-bottom: 2px; font-size: 0.92rem;">🛡️ حجب فواتير المدير العام</div>
+                <div style="color: #1e40af; font-size: 0.82rem; line-height: 1.4;">حجب فواتير الإدارة فقط ومشاركة فواتير باقي الموظفين للتعاون</div>
+            </div>
+
+            <div style="background: #f5f3ff; border-right: 4px solid #8b5cf6; padding: 8px 12px; border-radius: 8px;">
+                <div style="font-weight: 800; color: #6d28d9; margin-bottom: 2px; font-size: 0.92rem;">💻 فواتير جهازه فقط (الكاشير الحالي)</div>
+                <div style="color: #5b21b6; font-size: 0.82rem; line-height: 1.4;">حصر الفواتير بجهاز هذا الكاشير فقط ومنع رؤية أجهزة غيره</div>
+            </div>
+
+            <div style="background: #ecfeff; border-right: 4px solid #06b6d4; padding: 8px 12px; border-radius: 8px;">
+                <div style="font-weight: 800; color: #0e7490; margin-bottom: 2px; font-size: 0.92rem;">🏢 فواتير فرعه ومخزنه فقط</div>
+                <div style="color: #155e75; font-size: 0.82rem; line-height: 1.4;">حصر الفواتير بمخزن وفرع هذا الموظف فقط وعزل بقية الفروع</div>
+            </div>
+
+            <div style="background: #fef2f2; border-right: 4px solid #ef4444; padding: 8px 12px; border-radius: 8px;">
+                <div style="font-weight: 800; color: #b91c1c; margin-bottom: 2px; font-size: 0.92rem;">🛡️ حجب فواتير الجهاز الرئيسي (Master)</div>
+                <div style="color: #991b1b; font-size: 0.82rem; line-height: 1.4;">حجب كمبيوتر السيرفر الرئيسي عن أجهزة التابلت والفرعيات</div>
+            </div>
+        </div>
+    `;
+
+    if (typeof showCustomAlert === 'function') {
+        showCustomAlert({
+            type: 'info',
+            titleText: 'دليل خيارات خصوصية الفواتير والمبيعات',
+            msg: htmlContent,
+            confirmText: 'فهمت ذلك ✔️',
+            cardWidth: '550px'
+        });
+    } else {
+        const old = document.getElementById('invScopeHelpOverlay');
+        if (old) old.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'invScopeHelpOverlay';
+        overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:99999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(3px);';
+        overlay.innerHTML = `
+            <div style="background:#fff; border-radius:14px; padding:22px; max-width:540px; width:92%; box-shadow:0 12px 30px rgba(0,0,0,0.25); font-family:inherit;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
+                    <div style="font-weight:bold; font-size:1.05rem; color:#0f172a;">🔒 دليل خيارات خصوصية الفواتير</div>
+                    <button onclick="document.getElementById('invScopeHelpOverlay').remove()" style="background:none; border:none; font-size:1.3rem; cursor:pointer; color:#64748b;">✕</button>
+                </div>
+                ${htmlContent}
+                <div style="text-align:center; margin-top:16px;">
+                    <button onclick="document.getElementById('invScopeHelpOverlay').remove()" style="background:#0284c7; color:#fff; border:none; padding:8px 24px; border-radius:8px; font-weight:bold; cursor:pointer;">فهمت ذلك ✔️</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+}
+window.showInvoiceScopeHelpModal = showInvoiceScopeHelpModal;
+
+if (typeof document !== 'undefined') {
+    const initScopeHint = () => {
+        const el = document.getElementById('newUserInvoiceScope');
+        if (el && typeof updateInvoiceScopeHelpHint === 'function') updateInvoiceScopeHelpHint(el.value);
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initScopeHint);
+    } else {
+        setTimeout(initScopeHint, 100);
+    }
+}
+
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         const modal = document.getElementById('userFormCard');
@@ -1474,9 +1903,28 @@ function deleteUser(idx) {
     if (confirm(`هل أنت متأكد من حذف الموظف (${u.name}) نهائياً؟`)) {
         if (typeof addToTrash === 'function') addToTrash('user', u, `مستخدم: ${u.name}`);
         const deletedName = u.name;
+        const deletedId = u.id;
+
+        if (!window.deletedItemIds) window.deletedItemIds = {};
+        if (!window.deletedItemIds.users) window.deletedItemIds.users = [];
+        window.deletedItemIds.users.push(deletedId);
+
         users.splice(idx, 1);
+        window.users = users;
+
+        // حذف مباشر وفوري من جدول قاعدة البيانات IndexedDB لمنع أي بقاء له على الهارد ديسك
+        if (typeof db !== 'undefined' && db.users) {
+            db.users.delete(deletedId).catch(e => console.warn("Direct db.users.delete notice:", e));
+        }
+
         saveData();
         renderUsersTable();
+
+        // تحديث فوري لقائمة المستخدمين في شاشة تسجيل الدخول بدون تسجيل خروج
+        if (typeof updateLoginUsersList === 'function') {
+            updateLoginUsersList();
+        }
+
         if (typeof trashManager !== 'undefined' && trashManager.renderTrashTable) trashManager.renderTrashTable();
 
         if (typeof logAuditAction === 'function') logAuditAction('حذف مستخدم', `الاسم: ${deletedName}`);
@@ -1528,6 +1976,8 @@ function resolvePermissionKey(action) {
     if (act === 'accounts_statement' || act === 'statement') act = 'accounts_statement';
     if (act === 'accounts_treasury' || act === 'sec_treasury' || act === 'treasury' || act === 'treasury-audit' || act === 'treasury_audit') act = 'accounts_treasury';
     if (act === 'general_shortcuts' || act === 'shortcuts') act = 'general_shortcuts';
+    if (act === 'ui_hide_share' || act === 'hide_share') return { module: 'general', perm: 'hideShare' };
+    if (act === 'ui_hide_new' || act === 'hide_new') return { module: 'general', perm: 'hideNew' };
     if (act.startsWith('acc_')) act = 'accounts_' + act.substring(4);
     if (act.startsWith('gen_')) act = 'general_' + act.substring(4);
     if (act.startsWith('products_')) act = 'stock_' + act.substring(9);
@@ -1568,7 +2018,8 @@ function checkPermission(action) {
 
         // نستخدم بيانات المستخدم الحقيقية من IndexedDB (ليس من localStorage)
         if (realUser.role === 'admin') {
-            if (action === 'general_profits' && realUser.permissions?.general && realUser.permissions.general.profits === false) {
+            const isProfitsBlocked = realUser.permissions?.general && (realUser.permissions.general.hideProfits === true || realUser.permissions.general.profits === false);
+            if (action === 'general_profits' && isProfitsBlocked) {
                 showCustomAlert({
                     type: 'error',
                     titleText: '🚫 وصول مرفوض',
@@ -1645,7 +2096,8 @@ function checkPermission(action) {
     // Fallback: لو مصفوفة users لم تُحمَّل بعد، نعتمد على currentUser المحمل في الذاكرة
     if (currentUser.isFrozen) return false;
     if (currentUser.role === 'admin') {
-        if (action === 'general_profits' && currentUser.permissions?.general && currentUser.permissions.general.profits === false) {
+        const isProfitsBlocked = currentUser.permissions?.general && (currentUser.permissions.general.hideProfits === true || currentUser.permissions.general.profits === false);
+        if (action === 'general_profits' && isProfitsBlocked) {
             showCustomAlert({
                 type: 'error',
                 titleText: '🚫 وصول مرفوض',
@@ -1727,8 +2179,28 @@ function hasPermission(action) {
         if (!realUser) return false;
         if (realUser.isFrozen) return false;
         if (realUser.role === 'admin') {
-            if (action === 'general_profits' && realUser.permissions?.general && realUser.permissions.general.profits === false) {
-                return false;
+            if (action === 'general_profits') {
+                if (realUser.permissions?.general) {
+                    if (realUser.permissions.general.hideProfits !== undefined) return !realUser.permissions.general.hideProfits;
+                    if (realUser.permissions.general.profits === false) return false;
+                }
+                return true;
+            }
+            if (action === 'ui_hide_share' || action === 'hide_share') {
+                return !!(realUser.permissions?.general && realUser.permissions.general.hideShare);
+            }
+            if (action === 'ui_hide_new' || action === 'hide_new') {
+                return !!(realUser.permissions?.general && realUser.permissions.general.hideNew);
+            }
+            if (action === 'ui_hide_drawer_balance' || action === 'hide_drawer_balance') {
+                return !!(realUser.permissions?.general && (realUser.permissions.general.hideDrawerBalance || realUser.permissions.general.drawerBalance === false));
+            }
+            if (action === 'general_drawer_balance' || action === 'drawer_balance') {
+                if (realUser.permissions?.general) {
+                    if (realUser.permissions.general.hideDrawerBalance !== undefined) return !realUser.permissions.general.hideDrawerBalance;
+                    if (realUser.permissions.general.drawerBalance !== undefined) return !!realUser.permissions.general.drawerBalance;
+                }
+                return true;
             }
             return true;
         }
@@ -1776,6 +2248,14 @@ function hasPermission(action) {
                 if (userPerms.shortcuts !== undefined) return !!userPerms.shortcuts && !!userPerms.settings;
                 return !!userPerms.settings;
             }
+            if (action === 'ui_hide_drawer_balance' || action === 'hide_drawer_balance' || (module === 'general' && (perm === 'ui_hide_drawer_balance' || perm === 'hide_drawer_balance'))) {
+                return !!(userPerms && (userPerms.hideDrawerBalance || userPerms.drawerBalance === false));
+            }
+            if (action === 'general_drawer_balance' || action === 'drawer_balance' || (module === 'general' && (perm === 'drawer_balance' || perm === 'drawerBalance'))) {
+                if (userPerms.hideDrawerBalance !== undefined) return !userPerms.hideDrawerBalance;
+                if (userPerms.drawerBalance !== undefined) return !!userPerms.drawerBalance;
+                return true;
+            }
             return !!userPerms[perm];
         }
         return false;
@@ -1783,8 +2263,28 @@ function hasPermission(action) {
     // Fallback لو users لم تُحمَّل بعد
     if (currentUser.isFrozen) return false;
     if (currentUser.role === 'admin') {
-        if (action === 'general_profits' && currentUser.permissions?.general && currentUser.permissions.general.profits === false) {
-            return false;
+        if (action === 'general_profits') {
+            if (currentUser.permissions?.general) {
+                if (currentUser.permissions.general.hideProfits !== undefined) return !currentUser.permissions.general.hideProfits;
+                if (currentUser.permissions.general.profits === false) return false;
+            }
+            return true;
+        }
+        if (action === 'ui_hide_share' || action === 'hide_share') {
+            return !!(currentUser.permissions?.general && currentUser.permissions.general.hideShare);
+        }
+        if (action === 'ui_hide_new' || action === 'hide_new') {
+            return !!(currentUser.permissions?.general && currentUser.permissions.general.hideNew);
+        }
+        if (action === 'ui_hide_drawer_balance' || action === 'hide_drawer_balance') {
+            return !!(currentUser.permissions?.general && (currentUser.permissions.general.hideDrawerBalance || currentUser.permissions.general.drawerBalance === false));
+        }
+        if (action === 'general_drawer_balance' || action === 'drawer_balance') {
+            if (currentUser.permissions?.general) {
+                if (currentUser.permissions.general.hideDrawerBalance !== undefined) return !currentUser.permissions.general.hideDrawerBalance;
+                if (currentUser.permissions.general.drawerBalance !== undefined) return !!currentUser.permissions.general.drawerBalance;
+            }
+            return true;
         }
         return true;
     }
@@ -1831,6 +2331,14 @@ function hasPermission(action) {
         if (module === 'general' && perm === 'shortcuts') {
             if (userPerms.shortcuts !== undefined) return !!userPerms.shortcuts && !!userPerms.settings;
             return !!userPerms.settings;
+        }
+        if (action === 'ui_hide_drawer_balance' || action === 'hide_drawer_balance' || (module === 'general' && (perm === 'ui_hide_drawer_balance' || perm === 'hide_drawer_balance'))) {
+            return !!(userPerms && (userPerms.hideDrawerBalance || userPerms.drawerBalance === false));
+        }
+        if (action === 'general_drawer_balance' || action === 'drawer_balance' || (module === 'general' && (perm === 'drawer_balance' || perm === 'drawerBalance'))) {
+            if (userPerms.hideDrawerBalance !== undefined) return !userPerms.hideDrawerBalance;
+            if (userPerms.drawerBalance !== undefined) return !!userPerms.drawerBalance;
+            return true;
         }
         return !!userPerms[perm];
     }
@@ -2058,15 +2566,15 @@ function renderWarehousesTable() {
     warehouses.forEach((w, idx) => {
         const isCurrent = currentUser && currentUser.warehouseName === w.name;
         rowsHtml += `
-            <tr style="border-bottom: 1px solid #f1f5f9; ${isCurrent ? 'background: #fffdf0;' : ''}">
-                <td style="padding: 10px 12px; font-weight: 800; color: #1e293b; white-space: nowrap;">
-                    ${w.name} ${isCurrent ? '<span style="background: #f59e0b; color: #1a1600; padding: 2px 6px; border-radius: 6px; font-size: 0.72rem; font-weight: 900; margin-right: 4px; display: inline-block;">نشط</span>' : ''}
+            <tr style="border-bottom: 2px solid #e2e8f0; ${isCurrent ? 'background: #fffdf0;' : 'background: #ffffff;'}">
+                <td style="padding: 14px 16px; font-weight: 900; color: #000000; white-space: nowrap; font-size: 1.05rem;">
+                    ${w.name} ${isCurrent ? '<span style="background: #f59e0b; color: #000000; padding: 4px 10px; border-radius: 8px; font-size: 0.88rem; font-weight: 900; margin-right: 8px; display: inline-block; border: 1.5px solid #d97706;">نشط</span>' : ''}
                 </td>
-                <td style="padding: 10px 12px; color: #64748b; font-weight: 600;">${w.address || '-'}</td>
-                <td style="padding: 10px 12px; text-align: center;">
-                    <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
-                        <button type="button" style="padding: 5px 10px; font-size: 0.8rem; background: #f59e0b; color: #ffffff; border: none; border-radius: 6px; font-weight: 800; cursor: pointer;" onclick="editWarehouse(${idx})">تعديل</button>
-                        <button type="button" style="padding: 5px 10px; font-size: 0.8rem; background: #ef4444; color: #ffffff; border: none; border-radius: 6px; font-weight: 800; cursor: pointer;" onclick="deleteWarehouse(${idx})">حذف</button>
+                <td style="padding: 14px 16px; color: #000000; font-weight: 900; font-size: 1.02rem;">${w.address || '-'}</td>
+                <td style="padding: 14px 16px; text-align: center;">
+                    <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+                        <button type="button" style="padding: 8px 16px; font-size: 0.95rem; background: #f59e0b; color: #000000; border: 2px solid #d97706; border-radius: 8px; font-weight: 900; cursor: pointer; min-height: 38px;" onclick="editWarehouse(${idx})">✏️ تعديل</button>
+                        <button type="button" style="padding: 8px 16px; font-size: 0.95rem; background: #ef4444; color: #ffffff; border: 2px solid #b91c1c; border-radius: 8px; font-weight: 900; cursor: pointer; min-height: 38px;" onclick="deleteWarehouse(${idx})">🗑️ حذف</button>
                     </div>
                 </td>
             </tr>

@@ -268,21 +268,55 @@ window.updateAllCurrencyLabels = updateAllCurrencyLabels;
 
 window.DEFAULT_PAYMENT_METHODS = [
     { id: 'cash', name: 'كاش (نقدي)', type: 'cash', active: true, isSystem: true },
-    { id: 'network', name: 'شبكة / مدى', type: 'bank', active: true, isSystem: false },
-    { id: 'transfer', name: 'تحويل بنكي', type: 'bank', active: true, isSystem: false },
-    { id: 'credit', name: 'أجل (حساب عميل/مورد)', type: 'credit', active: true, isSystem: true },
-    { id: 'ninja', name: 'نينجا (Ninja)', type: 'bank', active: true, isSystem: false },
-    { id: 'tamara', name: 'تمارا (Tamara)', type: 'bank', active: true, isSystem: false },
-    { id: 'stc_pay', name: 'STC Pay', type: 'bank', active: true, isSystem: false },
-    { id: 'visa', name: 'فيزا / ماستركارد', type: 'bank', active: true, isSystem: false }
+    { id: 'vodafone_cash', name: 'فودافون كاش', type: 'bank', active: true, isSystem: true },
+    { id: 'credit', name: 'أجل (حساب عميل/مورد)', type: 'credit', active: true, isSystem: true }
 ];
 
 function getPaymentMethods() {
     try {
         const stored = typeof getStore === 'function' ? getStore('bayan_payment_methods') : null;
         if (stored) {
-            const parsed = JSON.parse(stored);
+            let parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length > 0) {
+                // تنظيف وسائل الدفع الافتراضية القديمة المحشورة مسبقاً إذا وُجدت
+                const legacySeedIds = ['ninja', 'tamara', 'stc_pay', 'network', 'transfer', 'visa'];
+                let modified = false;
+                const filtered = parsed.filter(m => !(m && legacySeedIds.includes(m.id)));
+                if (filtered.length !== parsed.length) {
+                    parsed = filtered;
+                    modified = true;
+                }
+
+                // التأكد من وجود وتصحيح فودافون كاش كوسيلة رسمية
+                const vfIdx = parsed.findIndex(m => m && (m.id === 'vodafone_cash' || (m.name && (m.name.includes('فودافون') || m.name.includes('فودافن') || m.name.toLowerCase().includes('vodafone')))));
+                if (vfIdx !== -1) {
+                    if (parsed[vfIdx].type !== 'bank' || !parsed[vfIdx].isSystem || parsed[vfIdx].active === false) {
+                        parsed[vfIdx].type = 'bank';
+                        parsed[vfIdx].name = parsed[vfIdx].name ? parsed[vfIdx].name.trim() : 'فودافون كاش';
+                        parsed[vfIdx].isSystem = true;
+                        parsed[vfIdx].active = true;
+                        modified = true;
+                    }
+                } else {
+                    const cashIdx = parsed.findIndex(m => m && (m.id === 'cash' || (m.name && m.name.includes('كاش') && !m.name.includes('فودافون'))));
+                    const newVf = { id: 'vodafone_cash', name: 'فودافون كاش', type: 'bank', active: true, isSystem: true };
+                    if (cashIdx !== -1) {
+                        parsed.splice(cashIdx + 1, 0, newVf);
+                    } else {
+                        parsed.unshift(newVf);
+                    }
+                    modified = true;
+                }
+
+                // التأكد من أن الكاش نقدي والأجل أجل
+                parsed.forEach(m => {
+                    if (m && m.id === 'cash') m.type = 'cash';
+                    if (m && m.id === 'credit') m.type = 'credit';
+                });
+
+                if (modified && typeof setStore === 'function') {
+                    setStore('bayan_payment_methods', JSON.stringify(parsed));
+                }
                 return parsed;
             }
         }
@@ -330,16 +364,40 @@ function populatePaymentMethodSelects() {
     allSelects.forEach(selectEl => {
         if (!selectEl) return;
         const currentVal = selectEl.value;
-        const isFilter = selectEl.id && selectEl.id.toLowerCase().includes('filter');
+        const isFilter = (selectEl.id && selectEl.id.toLowerCase().includes('filter')) || selectEl.id === 'dailyReportTreasurySelect';
         
-        let html = isFilter ? '<option value="">كل وسائل الدفع...</option>' : '';
+        let html = '';
+        if (selectEl.id === 'dailyReportTreasurySelect') {
+            html = '<option value="all">كل الخزائن ووسائل الدفع</option>';
+        } else if (isFilter) {
+            html = '<option value="">كل وسائل الدفع...</option>';
+        }
         methods.forEach(m => {
-            const icon = m.type === 'cash' ? '💵' : (m.type === 'credit' ? '⏳' : '🏦');
-            html += `<option value="${m.name}">${icon} ${m.name}</option>`;
+            let icon = '💳';
+            const lower = (m.name || '').toLowerCase();
+            if (lower.includes('فودافون') || lower.includes('اورنج') || lower.includes('أورانج') || lower.includes('اتصالات') || lower.includes('وي باي') || lower.includes('محفظة') || (lower.includes('كاش') && (lower.includes('فودافون') || lower.includes('اورنج') || lower.includes('اتصالات') || lower.includes('we'))) || lower.includes('wallet')) {
+                icon = '📱';
+            } else if (lower.includes('انستاباي') || lower.includes('إنستاباي') || lower.includes('insta')) {
+                icon = '⚡';
+            } else if (lower.includes('فيزا') || lower.includes('ماستر') || lower.includes('visa') || lower.includes('master') || lower.includes('مدى') || lower.includes('شبكة') || lower.includes('كارت') || lower.includes('بطاقة') || lower.includes('card')) {
+                icon = '💳';
+            } else if (lower.includes('بنك') || lower.includes('تحويل') || lower.includes('bank') || lower.includes('حساب') || lower.includes('iban')) {
+                icon = '🏦';
+            } else if (lower.includes('شيك')) {
+                icon = '📑';
+            } else if (m.type === 'cash' || lower.includes('نقدي') || lower.includes('كاش')) {
+                icon = '💵';
+            } else if (m.type === 'credit' || lower.includes('آجل') || lower.includes('أجل')) {
+                icon = '⏳';
+            }
+            const cleanName = (m.name || '').replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+/u, '').trim() || m.name;
+            html += `<option value="${m.name}">${icon} ${cleanName}</option>`;
         });
         selectEl.innerHTML = html;
         if (currentVal && Array.from(selectEl.options).some(o => o.value === currentVal)) {
             selectEl.value = currentVal;
+        } else if (selectEl.id === 'dailyReportTreasurySelect') {
+            selectEl.value = 'all';
         }
     });
 }
@@ -352,7 +410,7 @@ function renderPaymentMethodsSettings() {
     let html = '';
 
     methods.forEach((m, idx) => {
-        const isProtected = m.isSystem || m.id === 'cash' || m.id === 'credit' || m.type === 'cash' || m.type === 'credit';
+        const isProtected = m.isSystem || m.id === 'cash' || m.id === 'credit';
 
         const typeBadge = m.type === 'cash' 
             ? '<span style="background:#ecfdf5; color:#047857; padding:4px 12px; border-radius:12px; font-weight:bold; font-size:0.8rem;">💵 نقدي (كاش)</span>'
@@ -421,8 +479,8 @@ function openAddPaymentMethodModal(editIdx = null) {
         const methods = getPaymentMethods();
         const m = methods[editIdx];
         if (m) {
-            if (m.isSystem || m.id === 'cash' || m.id === 'credit' || m.type === 'cash' || m.type === 'credit') {
-                if (typeof showToast === 'function') showToast("🔒 عذراً، لا يمكن تعديل وسائل الدفع الأساسية للنظام (نقدي / أجل)", "warning");
+            if (m.isSystem || m.id === 'cash' || m.id === 'credit' || m.id === 'vodafone_cash' || m.type === 'cash' || m.type === 'credit') {
+                if (typeof showToast === 'function') showToast("🔒 عذراً، لا يمكن تعديل وسائل الدفع الأساسية للنظام (نقدي / فودافون كاش / أجل)", "warning");
                 return;
             }
             if (titleEl) titleEl.innerHTML = '✏️ تعديل وسيلة الدفع';
@@ -468,7 +526,7 @@ function savePaymentMethodFromModal() {
 
     const methods = getPaymentMethods();
     if (editIdx !== '' && editIdx !== null && methods[editIdx]) {
-        if (methods[editIdx].isSystem || methods[editIdx].id === 'cash' || methods[editIdx].id === 'credit') {
+        if (methods[editIdx].isSystem || methods[editIdx].id === 'cash' || methods[editIdx].id === 'credit' || methods[editIdx].id === 'vodafone_cash') {
             if (typeof showToast === 'function') showToast("🔒 لا يمكن تعديل وسائل النظام الأساسية", "warning");
             return;
         }
@@ -476,6 +534,12 @@ function savePaymentMethodFromModal() {
         methods[editIdx].type = type;
         if (typeof showToast === 'function') showToast(`✅ تم تحديث وسيلة الدفع (${name}) بنجاح!`, "success");
     } else {
+        if (name.includes('فودافون') || name.toLowerCase().includes('vodafone')) {
+            if (methods.some(m => m.id === 'vodafone_cash' || (m.name && (m.name.includes('فودافون') || m.name.toLowerCase().includes('vodafone'))))) {
+                if (typeof showToast === 'function') showToast("⚠️ وسيلة (فودافون كاش) موجودة ومفعلة بالفعل كوسيلة أساسية في النظام!", "warning");
+                return;
+            }
+        }
         methods.push({
             id: 'pm_' + Date.now(),
             name: name,
@@ -493,7 +557,7 @@ function savePaymentMethodFromModal() {
 function togglePaymentMethodActive(idx) {
     const methods = getPaymentMethods();
     if (methods[idx]) {
-        if (methods[idx].isSystem || methods[idx].id === 'cash' || methods[idx].id === 'credit' || methods[idx].type === 'cash' || methods[idx].type === 'credit') {
+        if (methods[idx].isSystem || methods[idx].id === 'cash' || methods[idx].id === 'credit') {
             if (typeof showToast === 'function') showToast("🔒 وسيلة الدفع هذه أساسية في المنظومة ولا يمكن تعطيلها", "warning");
             return;
         }
@@ -507,7 +571,7 @@ function togglePaymentMethodActive(idx) {
 
 function deletePaymentMethod(idx) {
     const methods = getPaymentMethods();
-    if (methods[idx] && !methods[idx].isSystem) {
+    if (methods[idx] && !methods[idx].isSystem && methods[idx].id !== 'cash' && methods[idx].id !== 'credit') {
         const name = methods[idx].name;
         if (typeof showCustomAlert === 'function') {
             showCustomAlert({

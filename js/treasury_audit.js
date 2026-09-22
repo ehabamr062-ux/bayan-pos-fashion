@@ -163,8 +163,8 @@ function handleTreasuryCategoryChange(val) {
         }
     }
 
-    // 🎯 عند اختيار بند "مبيعات" فقط: يجلب المبيعات والمقبوضات ويجمعهم تلقائياً في المبلغ (تحت)
-    if (val === 'مبيعات') {
+    // 🎯 عند اختيار بند "مبيعات": يحسب صافي النقدية بالدرج بدقة
+    if (val === 'مبيعات' || val === 'مبيعات كاش') {
         const dateInput = document.getElementById('trDate');
         let currentDate = (dateInput && dateInput.value) ? dateInput.value.trim() : '';
         if (!currentDate) {
@@ -172,90 +172,174 @@ function handleTreasuryCategoryChange(val) {
             if (dateInput) dateInput.value = currentDate;
         }
 
-        let totalSalesAndReceipts = 0;
-
-        // 1. حساب إجمالي فواتير البيع والمقبوضات النقدية بدقة من قاعدة البيانات
-        try {
-            const allTx = (window.transactions || []);
-            const cleanDate = currentDate.slice(0, 10);
-
-            // تجميع الفواتير لتجنب تكرار بنود الفاتورة الواحدة
-            const ivMap = {};
-            const directReceipts = [];
-
-            allTx.forEach((t, i) => {
-                let tDate = (t.dateISO || t.date || '').trim();
-                if (tDate.includes('T')) tDate = tDate.split('T')[0];
-                else if (tDate.match(/^\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4}/)) {
-                    const parts = tDate.split(/[\/\.-]/);
-                    tDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-                } else if (tDate.length > 10) {
-                    tDate = tDate.slice(0, 10);
-                }
-
-                if (tDate !== cleanDate) return;
-
-                const typeStr = String(t.type || '');
-
-                // أ. فواتير البيع
-                if (typeStr.includes('بيع') && !typeStr.includes('مرتجع')) {
-                    const invId = t.invoiceId || ('sale_single_' + i);
-                    if (!ivMap[invId]) {
-                        ivMap[invId] = {
-                            total: 0,
-                            paid: 0,
-                            method: (t.method || t.paymentMethod || '').toLowerCase()
-                        };
-                    }
-                    ivMap[invId].total += (parseFloat(t.total) || parseFloat(t.price) || 0);
-                    if (t.isInvoiceHead || t.paidAmount !== undefined) {
-                        ivMap[invId].paid = Math.max(ivMap[invId].paid, (parseFloat(t.paidAmount) || 0));
-                    }
-                }
-
-                // ب. سندات القبض النقدية
-                if (typeStr.includes('قبض')) {
-                    const rAmount = parseFloat(t.total) || parseFloat(t.price) || parseFloat(t.paidAmount) || 0;
-                    directReceipts.push(rAmount);
-                }
-            });
-
-            // حساب المبالغ المحصلة من فواتير البيع (المدفوع نقداً / الكاش)
-            Object.values(ivMap).forEach(iv => {
-                const isExplicitCredit = iv.method.includes('آجل') || iv.method.includes('اجل') || iv.method.includes('credit') || iv.method.includes('تقسيط') || iv.method.includes('ذمم');
-                if (isExplicitCredit) {
-                    totalSalesAndReceipts += (iv.paid || 0);
-                } else {
-                    totalSalesAndReceipts += (iv.paid > 0 ? iv.paid : iv.total);
-                }
-            });
-
-            // إضافة سندات القبض
-            directReceipts.forEach(amt => {
-                totalSalesAndReceipts += amt;
-            });
-        } catch (e) {
-            console.warn("جاري جلب إجمالي المبيعات والمقبوضات...", e);
-        }
-
-        // 2. إذا لم يتم العثور على فواتير، نفحص إن كان هناك مبيعات مسجلة في سجلات الخزينة لهذا اليوم
-        if (totalSalesAndReceipts === 0) {
-            const records = window.treasuryAuditRecords || [];
-            const dayRecords = records.filter(r => r.date === currentDate);
-            dayRecords.forEach(r => {
-                if (r.category === 'مبيعات' || r.category === 'مبيعات كاش' || r.category === 'قبض') {
-                    totalSalesAndReceipts += (parseFloat(r.amountBottom) || 0);
-                }
-            });
-        }
+        const res = calculateNetCashDrawerInflow(currentDate);
 
         const bottomInput = document.getElementById('trAmountBottom');
         if (bottomInput) {
-            bottomInput.value = totalSalesAndReceipts > 0 ? totalSalesAndReceipts.toFixed(2) : '0.00';
+            bottomInput.value = res.netCashInflow.toFixed(2);
             bottomInput.focus();
             bottomInput.select();
         }
+
+        const notesInput = document.getElementById('trNotes');
+        if (notesInput && (!notesInput.value || notesInput.value.startsWith('صافي مبيعات كاش وقبض'))) {
+            notesInput.value = res.notesBreakdown;
+        }
+
+        if (typeof showToast === 'function') {
+            showToast(`✅ تم جلب صافي حركة المبيعات النقدية بالدرج: ${res.netCashInflow.toFixed(2)} ج.م`, 'info');
+        }
     }
+}
+
+// 🎯 دالة مركزية لحساب صافي حركة النقدية الصافية بالدرج لتاريخ محدد (مبيعات كاش + قبض كاش + مرتجع شراء كاش - مرتجع بيع كاش فقط)
+function calculateNetCashDrawerInflow(targetDate) {
+    let currentDate = targetDate ? String(targetDate).trim() : '';
+    if (!currentDate) {
+        const dateInput = document.getElementById('trDate');
+        currentDate = (dateInput && dateInput.value) ? dateInput.value.trim() : new Date().toLocaleDateString('en-CA');
+    }
+
+    let netCashInflow = 0;
+    let totalCashSales = 0;
+    let totalCashReceipts = 0;
+    let totalCashPurReturns = 0;
+    let totalCashSalesReturns = 0;
+
+    const isNonCashMethod = (m) => {
+        if (!m) return false;
+        const s = String(m).toLowerCase();
+        return s.includes('بنك') || s.includes('تحويل') || s.includes('فيزا') || s.includes('شيك') || s.includes('شبكة') || s.includes('فودافون') || s.includes('انستاباي') || s.includes('إنستاباي') || s.includes('insta') || s.includes('محفظة');
+    };
+
+    const isDeferredMethod = (m) => {
+        if (!m) return false;
+        const s = String(m).toLowerCase();
+        return s.includes('آجل') || s.includes('اجل') || s.includes('ذمم') || s.includes('credit') || s.includes('تقسيط') || s.includes('حساب');
+    };
+
+    try {
+        const allTx = (window.transactions || []);
+        const cleanDate = currentDate.slice(0, 10);
+
+        const salesInvoices = {};
+        const salesReturnsInvoices = {};
+        const purReturnsInvoices = {};
+        const directReceipts = [];
+
+        allTx.forEach((t, i) => {
+            let tDate = (t.dateISO || t.date || '').trim();
+            if (tDate.includes('T')) tDate = tDate.split('T')[0];
+            else if (tDate.match(/^\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4}/)) {
+                const parts = tDate.split(/[\/\.-]/);
+                tDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            } else if (tDate.length > 10) {
+                tDate = tDate.slice(0, 10);
+            }
+
+            if (tDate !== cleanDate) return;
+
+            const typeStr = String(t.type || '');
+            const methodStr = String(t.method || t.paymentMethod || '');
+            const partnerStr = String(t.partner || '').trim();
+            const totalAmt = parseFloat(t.total) || parseFloat(t.price) || 0;
+            const paidAmt = parseFloat(t.paidAmount != null ? t.paidAmount : (t.paid || 0));
+
+            // 1. فواتير البيع
+            if (typeStr.includes('بيع') && !typeStr.includes('مرتجع')) {
+                const invId = t.invoiceId || ('sale_' + i);
+                if (!salesInvoices[invId]) {
+                    salesInvoices[invId] = { total: 0, paid: 0, method: methodStr, partner: partnerStr };
+                }
+                salesInvoices[invId].total += totalAmt;
+                if (t.isInvoiceHead || t.paidAmount !== undefined || t.paid !== undefined) {
+                    salesInvoices[invId].paid = Math.max(salesInvoices[invId].paid, paidAmt);
+                }
+            }
+            // 2. مرتجع بيع
+            else if (typeStr.includes('مرتجع بيع')) {
+                const invId = t.invoiceId || ('ret_sale_' + i);
+                if (!salesReturnsInvoices[invId]) {
+                    salesReturnsInvoices[invId] = { total: 0, paid: 0, method: methodStr, partner: partnerStr };
+                }
+                salesReturnsInvoices[invId].total += totalAmt;
+                if (t.isInvoiceHead || t.paidAmount !== undefined || t.paid !== undefined) {
+                    salesReturnsInvoices[invId].paid = Math.max(salesReturnsInvoices[invId].paid, paidAmt);
+                }
+            }
+            // 3. مرتجع شراء
+            else if (typeStr.includes('مرتجع شراء')) {
+                const invId = t.invoiceId || ('ret_pur_' + i);
+                if (!purReturnsInvoices[invId]) {
+                    purReturnsInvoices[invId] = { total: 0, paid: 0, method: methodStr, partner: partnerStr };
+                }
+                purReturnsInvoices[invId].total += totalAmt;
+                if (t.isInvoiceHead || t.paidAmount !== undefined || t.paid !== undefined) {
+                    purReturnsInvoices[invId].paid = Math.max(purReturnsInvoices[invId].paid, paidAmt);
+                }
+            }
+            // 4. سندات القبض
+            else if (typeStr.includes('قبض')) {
+                if (!isNonCashMethod(methodStr) && !isDeferredMethod(methodStr)) {
+                    directReceipts.push(totalAmt > 0 ? totalAmt : paidAmt);
+                }
+            }
+        });
+
+        // مبيعات كاش
+        Object.values(salesInvoices).forEach(iv => {
+            if (isNonCashMethod(iv.method)) return;
+            if (isDeferredMethod(iv.method)) {
+                totalCashSales += (iv.paid || 0);
+            } else {
+                totalCashSales += (iv.paid > 0 ? iv.paid : iv.total);
+            }
+        });
+
+        // سندات قبض كاش
+        directReceipts.forEach(amt => {
+            totalCashReceipts += amt;
+        });
+
+        // مرتجع شراء كاش (مسترد كاش بالدرج: +)
+        Object.values(purReturnsInvoices).forEach(iv => {
+            if (isNonCashMethod(iv.method)) return;
+            if (isDeferredMethod(iv.method)) {
+                totalCashPurReturns += (iv.paid || 0);
+            } else {
+                totalCashPurReturns += (iv.paid > 0 ? iv.paid : iv.total);
+            }
+        });
+
+        // مرتجع بيع كاش (مردود كاش للزبون من الدرج: -)
+        Object.values(salesReturnsInvoices).forEach(iv => {
+            if (isNonCashMethod(iv.method)) return;
+            if (isDeferredMethod(iv.method)) {
+                totalCashSalesReturns += (iv.paid || 0); // الآجل لا يمس الدرج
+            } else {
+                totalCashSalesReturns += (iv.paid > 0 ? iv.paid : iv.total);
+            }
+        });
+
+        netCashInflow = (totalCashSales + totalCashReceipts + totalCashPurReturns) - totalCashSalesReturns;
+    } catch (e) {
+        console.warn("خطأ في جلب صافي حركة المبيعات بالدرج:", e);
+    }
+
+    let parts = [`مبيعات كاش: ${totalCashSales.toFixed(2)}`];
+    if (totalCashSalesReturns > 0) parts.push(`مرتجع كاش: -${totalCashSalesReturns.toFixed(2)}`);
+    if (totalCashReceipts > 0) parts.push(`قبض: +${totalCashReceipts.toFixed(2)}`);
+    if (totalCashPurReturns > 0) parts.push(`مرتجع شراء كاش: +${totalCashPurReturns.toFixed(2)}`);
+    const notesBreakdown = `صافي مبيعات كاش وقبض (${parts.join(' | ')})`;
+
+    return {
+        netCashInflow,
+        totalCashSales,
+        totalCashReceipts,
+        totalCashPurReturns,
+        totalCashSalesReturns,
+        notesBreakdown
+    };
 }
 
 // 4. تحديث إحصائيات الكروت والملخص المالي المنطقي الشامل
@@ -266,50 +350,161 @@ function updateTreasuryAuditStats() {
     // فلترة عمليات الفترة المحددة
     const filteredRecords = records.filter(r => r.date >= range.start && r.date <= range.end);
 
-    let salesTotal = 0; // إجمالي المبيعات (من مبالغ تحت الخاصة بالبند مبيعات)
-    let cashTotal = 0;  // فودافون كاش
-    let instaTotal = 0; // انستا باي
-    let sumTop = 0;     // المبالغ فوق (مثل انستا باي/فودافون الواردة فوق)
-    let sumBottom = 0;  // المبالغ تحت (المبيعات والمصروفات والخصومات)
+    let salesTotal = 0;       // إجمالي المبيعات (المطلوبة)
+    let cashTotal = 0;        // فودافون كاش
+    let instaTotal = 0;       // انستا باي
+    let actualCollected = 0;  // إجمالي المحصل الفعلي (انستاباي، فودافون كاش، مقبوضات)
+    let expensesTotal = 0;    // المصروفات والمنصرف
+    let sumTop = 0;
+    let sumBottom = 0;
 
     filteredRecords.forEach(r => {
         const top = parseFloat(r.amountTop) || 0;
         const bottom = parseFloat(r.amountBottom) || 0;
+        const rowTotal = top + bottom;
 
         sumTop += top;
         sumBottom += bottom;
 
-        if (r.category === 'مبيعات' || r.category === 'مبيعات كاش') {
-            salesTotal += bottom; // المبيعات تحت فقط
+        const cat = String(r.category || '').trim();
+
+        if (cat === 'مبيعات' || cat === 'مبيعات كاش') {
+            salesTotal += rowTotal;
+        } else if (cat === 'مصروفات خزانة' || cat === 'تحويلات خارجية' || cat.includes('مصروف') || cat.includes('سلفة') || cat.includes('خصم')) {
+            expensesTotal += rowTotal;
         } else {
-            if (r.category === 'فودافون كاش') cashTotal += (top + bottom);
-            if (r.category === 'انستا باي') instaTotal += (top + bottom);
+            // انستاباي، فودافون كاش، أو أي متحصلات
+            actualCollected += rowTotal;
+            if (cat === 'فودافون كاش') cashTotal += rowTotal;
+            if (cat === 'انستا باي') instaTotal += rowTotal;
         }
     });
 
-    // صافي الفترة = المبيعات الفعلية - الخصومات/المصروفات الأخرى
-    const otherDeductions = sumBottom - salesTotal;
-    const netTotal = salesTotal - otherDeductions;
-    
-    // فرق الخزينة = (المبيعات + المبالغ الواردة فوق) - المبالغ الصادرة/المحولة تحت
-    const diffTotal = (salesTotal + sumTop) - sumBottom;
+    // 🎯 المعادلة المحاسبية الحقيقية والمنطقية:
+    // الفارق = (الفلوس الفعلية المحصلة - المصروفات) - المبيعات المطلوبة
+    // 1. لو المحصل 500 والمبيعات 168.5 👈 زيادة +331.50 ج.م 🟢
+    // 2. لو المحصل 200 والمبيعات 500 👈 عجز -300.00 ج.م 🔴
+    // 3. لو المحصل 500 والمبيعات 500 👈 متطابق 0.00 ⚖️
+    let netDiff = 0;
+    const netActual = actualCollected - expensesTotal;
+    if (actualCollected > 0 || expensesTotal > 0) {
+        netDiff = netActual - salesTotal;
+    } else {
+        // مبيعات فقط دون إدخال مدفوعات أخرى
+        netDiff = 0;
+    }
 
     // تحديث الكروت العلوية
     if (document.getElementById('trSalesTotal')) document.getElementById('trSalesTotal').innerText = salesTotal.toFixed(2);
-    if (document.getElementById('trNetTotal')) document.getElementById('trNetTotal').innerText = netTotal.toFixed(2);
     if (document.getElementById('trOpsCount')) document.getElementById('trOpsCount').innerText = filteredRecords.length;
     if (document.getElementById('trCashTotal')) document.getElementById('trCashTotal').innerText = cashTotal.toFixed(2);
     if (document.getElementById('trInstaTotal')) document.getElementById('trInstaTotal').innerText = instaTotal.toFixed(2);
 
-    // تحديث الشريط المالي الجانبي
-    if (document.getElementById('trSumTop')) document.getElementById('trSumTop').innerText = sumTop.toFixed(2);
-    if (document.getElementById('trSumBottom')) document.getElementById('trSumBottom').innerText = sumBottom.toFixed(2);
-    if (document.getElementById('trSumSales')) document.getElementById('trSumSales').innerText = salesTotal.toFixed(2);
-    if (document.getElementById('trSumDiff')) document.getElementById('trSumDiff').innerText = diffTotal.toFixed(2);
+    // ⚖️ تحديث كارت "صافي اليوم" بالفرق المحاسبي الصريح
+    const netCard = document.getElementById('trNetTotalCard');
+    const netBadge = document.getElementById('trNetStatusBadge');
+    const netSubtext = document.getElementById('trNetTotalSubtext');
+    const netValEl = document.getElementById('trNetTotal');
+
+    if (Math.abs(netDiff) < 0.001) {
+        // متطابق 0.00 ⚖️
+        if (netValEl) netValEl.innerText = "0.00";
+        if (netCard) {
+            netCard.className = 'tr-stat-card tr-card-green';
+            netCard.style.borderColor = '#34d399';
+            netCard.style.boxShadow = '0 8px 25px rgba(16, 185, 129, 0.3)';
+        }
+        if (netBadge) {
+            netBadge.innerHTML = 'متطابق ⚖️';
+            netBadge.style.background = 'rgba(0, 0, 0, 0.5)';
+            netBadge.style.color = '#ffffff';
+            netBadge.style.border = '1px solid #34d399';
+            netBadge.style.padding = '3px 10px';
+            netBadge.style.fontWeight = '900';
+            netBadge.style.borderRadius = '8px';
+        }
+        if (netSubtext) {
+            netSubtext.innerHTML = `<span style="background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 255, 255, 0.25); color: #ffffff; padding: 4px 10px; border-radius: 8px; font-weight: 800; display: inline-block; margin-top: 4px; font-size: 0.82rem;">✅ الحسابات متطابقة تماماً (0.00 ج.م)</span>`;
+        }
+    } else if (netDiff > 0) {
+        // زيادة بالموجب (+) 🟢 فلوس زيادة في الخزينة
+        if (netValEl) netValEl.innerText = `+${netDiff.toFixed(2)}`;
+        if (netCard) {
+            netCard.className = 'tr-stat-card tr-card-green';
+            netCard.style.borderColor = '#10b981';
+            netCard.style.boxShadow = '0 8px 25px rgba(16, 185, 129, 0.4)';
+        }
+        if (netBadge) {
+            netBadge.innerHTML = '🟢 زيادة بالخزينة';
+            netBadge.style.background = 'rgba(0, 0, 0, 0.55)';
+            netBadge.style.color = '#ffffff';
+            netBadge.style.border = '1.5px solid #34d399';
+            netBadge.style.padding = '3px 10px';
+            netBadge.style.fontWeight = '900';
+            netBadge.style.borderRadius = '8px';
+        }
+        if (netSubtext) {
+            netSubtext.innerHTML = `<span style="background: rgba(0, 0, 0, 0.5); border: 1.5px solid rgba(255, 255, 255, 0.3); color: #ffffff; padding: 4px 12px; border-radius: 8px; font-weight: 900; display: inline-block; margin-top: 5px; font-size: 0.82rem;">🟢 زيادة في الخزينة بمبلغ: <strong style="color: #6ee7b7; font-size: 0.95rem;">+${netDiff.toFixed(2)} ج.م</strong></span>`;
+        }
+    } else {
+        // عجز بالسالب (-) 🔴 فلوس ناقصة
+        if (netValEl) netValEl.innerText = `-${Math.abs(netDiff).toFixed(2)}`;
+        if (netCard) {
+            netCard.className = 'tr-stat-card tr-card-red';
+            netCard.style.borderColor = '#f87171';
+            netCard.style.boxShadow = '0 8px 25px rgba(220, 38, 38, 0.45)';
+        }
+        if (netBadge) {
+            netBadge.innerHTML = '🔴 عجز بالخزينة';
+            netBadge.style.background = 'rgba(0, 0, 0, 0.65)';
+            netBadge.style.color = '#ffffff';
+            netBadge.style.border = '1.5px solid #fca5a5';
+            netBadge.style.padding = '3px 10px';
+            netBadge.style.fontWeight = '900';
+            netBadge.style.borderRadius = '8px';
+            netBadge.style.textShadow = '0 1px 2px rgba(0,0,0,0.8)';
+        }
+        if (netSubtext) {
+            netSubtext.innerHTML = `<span style="background: rgba(0, 0, 0, 0.55); border: 1.5px solid rgba(255, 255, 255, 0.35); color: #ffffff; padding: 4px 12px; border-radius: 8px; font-weight: 900; display: inline-block; margin-top: 5px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); font-size: 0.82rem;">⚠️ عجز في الخزينة بمبلغ: <strong style="color: #fde047; font-size: 0.95rem;">-${Math.abs(netDiff).toFixed(2)} ج.م</strong></span>`;
+        }
+    }
+
+    // 📊 تحديث الشريط المالي الجانبي (ملخص مالي سريع بدقة ومطابقة تامة)
+    if (document.getElementById('trSumSales')) {
+        document.getElementById('trSumSales').innerText = salesTotal.toFixed(2);
+    }
+    const collectedEl = document.getElementById('trSumCollected') || document.getElementById('trSumTop');
+    if (collectedEl) {
+        collectedEl.innerText = actualCollected.toFixed(2);
+    }
+    const expensesEl = document.getElementById('trSumExpenses') || document.getElementById('trSumBottom');
+    if (expensesEl) {
+        expensesEl.innerText = expensesTotal.toFixed(2);
+    }
+    
+    const diffEl = document.getElementById('trSumDiff');
+    if (diffEl) {
+        if (Math.abs(netDiff) < 0.001) {
+            diffEl.innerText = '0.00 (متطابق ⚖️)';
+            diffEl.style.color = '#38bdf8';
+        } else if (netDiff > 0) {
+            diffEl.innerText = `+${netDiff.toFixed(2)} (زيادة 🟢)`;
+            diffEl.style.color = '#34d399';
+        } else {
+            diffEl.innerText = `-${Math.abs(netDiff).toFixed(2)} (عجز 🔴)`;
+            diffEl.style.color = '#f87171';
+        }
+    }
 
     // تحديث إجماليات الأسفل
     if (document.getElementById('trTotalCatsDay')) document.getElementById('trTotalCatsDay').innerText = [...new Set(filteredRecords.map(r => r.category))].filter(Boolean).length;
     if (document.getElementById('trTotalOpsDay')) document.getElementById('trTotalOpsDay').innerText = filteredRecords.length;
+
+    // تحديث نافذة التفاصيل إذا كانت مفتوحة حالياً
+    const detModal = document.getElementById('treasuryDetailsModal');
+    if (detModal && detModal.style.display === 'flex' && typeof refreshTreasuryDetailsModal === 'function') {
+        refreshTreasuryDetailsModal();
+    }
 }
 
 // 5. إضافة عملية جديدة مع قواعد التحقق والتنبيه
@@ -325,16 +520,16 @@ async function addTreasuryAuditRecord() {
         category = customCategory.trim() || 'بند مخصص';
     }
 
-    // 🚨 شرط التنبيه الصارم: بند المبيعات يكتب في المبلغ (تحت) فقط!
+    // 🚨 شرط التنبيه الصارم: بند المبيعات يكتب في درج النقدية فقط!
     if ((category === 'مبيعات' || category === 'مبيعات كاش') && amountTop > 0) {
-        alert("⚠️ تنبيه هام: بند المبيعات يتسجل في المبلغ (تحت) فقط ولا يمكن إدخال مبلغ (فوق) للمبيعات!");
+        alert("⚠️ تنبيه هام: بند المبيعات يتسجل في خانة (الدرج) فقط ولا يمكن إدخال مبيعات في الخزينة الرئيسية!");
         document.getElementById('trAmountTop').value = '';
         document.getElementById('trAmountTop').focus();
         return;
     }
 
     if (!category && amountTop === 0 && amountBottom === 0) {
-        alert("⚠️ يرجى تحديد البند أو إدخال مبلغ (فوق أو تحت) على الأقل.");
+        alert("⚠️ يرجى تحديد البند أو إدخال مبلغ (في الخزينة أو الدرج) على الأقل.");
         return;
     }
 
@@ -345,7 +540,7 @@ async function addTreasuryAuditRecord() {
         id: Date.now(),
         date: date || now.toISOString().split('T')[0],
         time: timeStr,
-        lastModified: timeStr,
+        lastModified: '-',
         device: 'جهاز رئيسي',
         category: category || 'عام',
         amountBottom: amountBottom,
@@ -428,7 +623,7 @@ function renderTreasuryAuditTable() {
             <tr id="tr-row-${r.id}">
                 <td>${idx + 1}</td>
                 <td>${r.time || '-'}</td>
-                <td>${r.lastModified || '-'}</td>
+                <td>${(r.lastModified && r.lastModified !== r.time && r.lastModified !== '-') ? r.lastModified : '-'}</td>
                 <td><span style="background: rgba(59,130,246,0.15); color:#60a5fa; padding:4px 10px; border-radius:12px;">${r.category}</span></td>
                 <td style="color:#f87171; font-weight:800;">${r.amountBottom ? r.amountBottom.toFixed(2) : '0.00'}</td>
                 <td style="color:#34d399; font-weight:800;">${r.amountTop ? r.amountTop.toFixed(2) : '0.00'}</td>
@@ -448,16 +643,39 @@ function renderTreasuryAuditTable() {
     tbody.innerHTML = html;
 }
 
-// دالة التحكم في البند المخصص داخل نافذة التعديل
+// دالة التحكم في البند المخصص وتحديث المبالغ تلقائياً عند اختيار مبيعات في نافذة التعديل
 function handleEditModalCategoryChange(val) {
     const customInput = document.getElementById('editModalCustomCategory');
-    if (!customInput) return;
-    if (val === '__custom__') {
-        customInput.classList.remove('hidden');
-        customInput.focus();
-    } else {
-        customInput.classList.add('hidden');
-        customInput.value = '';
+    if (customInput) {
+        if (val === '__custom__') {
+            customInput.classList.remove('hidden');
+            customInput.focus();
+        } else {
+            customInput.classList.add('hidden');
+            customInput.value = '';
+        }
+    }
+
+    // ⚡ عند اختيار "مبيعات": تحديث المبلغ والملاحظات تلقائياً لأحدث قيمة محسوبة
+    if (val === 'مبيعات' || val === 'مبيعات كاش') {
+        const id = parseInt(document.getElementById('editModalRecordId').value);
+        const record = (window.treasuryAuditRecords || []).find(r => r.id === id);
+        const targetDate = record ? record.date : (document.getElementById('trDate') ? document.getElementById('trDate').value : '');
+
+        const res = calculateNetCashDrawerInflow(targetDate);
+        const bottomInput = document.getElementById('editModalAmountBottom');
+        if (bottomInput) {
+            bottomInput.value = res.netCashInflow.toFixed(2);
+            bottomInput.focus();
+            bottomInput.select();
+        }
+        const notesInput = document.getElementById('editModalNotes');
+        if (notesInput) {
+            notesInput.value = res.notesBreakdown;
+        }
+        if (typeof showToast === 'function') {
+            showToast(`✅ تم تحديث صافي المبيعات والقبض بالدرج: ${res.netCashInflow.toFixed(2)} ج.م`, 'info');
+        }
     }
 }
 
@@ -500,6 +718,17 @@ function editTreasuryRecord(id) {
     if (document.getElementById('editModalAmountBottom')) document.getElementById('editModalAmountBottom').value = record.amountBottom || '';
     if (document.getElementById('editModalNotes')) document.getElementById('editModalNotes').value = record.notes !== '-' ? record.notes : '';
 
+    // ⚡ إذا كانت العملية "مبيعات"، نحسب لها أحدث قيمة فورية ونضعها في الحقل
+    if (record.category === 'مبيعات' || record.category === 'مبيعات كاش') {
+        const res = calculateNetCashDrawerInflow(record.date);
+        if (document.getElementById('editModalAmountBottom')) {
+            document.getElementById('editModalAmountBottom').value = res.netCashInflow.toFixed(2);
+        }
+        if (document.getElementById('editModalNotes') && (!record.notes || record.notes === '-' || record.notes.startsWith('صافي مبيعات كاش وقبض'))) {
+            document.getElementById('editModalNotes').value = res.notesBreakdown;
+        }
+    }
+
     modal.classList.remove('hidden');
     modal.style.setProperty('display', 'flex', 'important');
     modal.style.setProperty('z-index', '9999999', 'important');
@@ -522,9 +751,9 @@ async function saveTreasuryRecordEdit() {
     const amountBottom = parseFloat(document.getElementById('editModalAmountBottom').value) || 0;
     const notes = document.getElementById('editModalNotes').value;
 
-    // 🚨 شرط التنبيه الصارم فقط على المبيعات: المبيعات تحت فقط
+    // 🚨 شرط التنبيه الصارم فقط على المبيعات: المبيعات في الدرج فقط
     if ((category === 'مبيعات' || category === 'مبيعات كاش') && amountTop > 0) {
-        alert("⚠️ تنبيه هام: بند المبيعات يتسجل في المبلغ (تحت) فقط ولا يمكن إدخال مبلغ (فوق) للمبيعات!");
+        alert("⚠️ تنبيه هام: بند المبيعات يتسجل في خانة (الدرج) فقط ولا يمكن إدخال مبيعات في الخزينة الرئيسية!");
         document.getElementById('editModalAmountTop').value = '';
         document.getElementById('editModalAmountTop').focus();
         return;
@@ -669,19 +898,81 @@ function toggleTreasuryThemeMode() {
     }
 }
 
-// 14.3 إظهار وإخفاء صندوق الإرشادات ودليل الاستخدام
-function toggleTreasuryGuide() {
-    const guideContent = document.getElementById('trGuideContent');
-    const toggleBtnText = document.getElementById('trGuideToggleBtnText');
-    if (!guideContent) return;
+// 14.3 إدارة نافذة الدليل التفاعلي الشامل لقسم مراجعة الخزينة (للمبتدئين والعملاء الجدد)
+let currentTreasuryGuideTab = 1;
 
-    if (guideContent.style.display === 'none') {
-        guideContent.style.display = 'grid';
-        if (toggleBtnText) toggleBtnText.innerText = '👁️ إخفاء الدليل';
-    } else {
-        guideContent.style.display = 'none';
-        if (toggleBtnText) toggleBtnText.innerText = '💡 عرض الدليل';
+function openTreasuryGuideModal() {
+    const modal = document.getElementById('treasuryGuideModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.style.setProperty('display', 'flex', 'important');
+    switchTreasuryGuideTab(1);
+
+    modal.onclick = function(e) {
+        if (e.target === modal) {
+            closeTreasuryGuideModal();
+        }
+    };
+}
+
+function closeTreasuryGuideModal() {
+    const modal = document.getElementById('treasuryGuideModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.setProperty('display', 'none', 'important');
     }
+}
+
+function switchTreasuryGuideTab(tabIdx) {
+    currentTreasuryGuideTab = tabIdx;
+    
+    // إخفاء كافة التبويبات وتفعيل التبويب المختار
+    for (let i = 1; i <= 5; i++) {
+        const panel = document.getElementById(`trGuideTab${i}`);
+        const btn = document.getElementById(`trTabBtn${i}`);
+        if (panel) {
+            if (i === tabIdx) {
+                panel.classList.remove('hidden');
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+        if (btn) {
+            if (i === tabIdx) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        }
+    }
+
+    // تحديث أزرار التالي والسابق
+    const prevBtn = document.getElementById('trGuidePrevBtn');
+    const nextBtn = document.getElementById('trGuideNextBtn');
+    if (prevBtn) {
+        prevBtn.style.visibility = (tabIdx === 1) ? 'hidden' : 'visible';
+    }
+    if (nextBtn) {
+        if (tabIdx === 5) {
+            nextBtn.innerText = '✓ ختام الدليل';
+            nextBtn.onclick = closeTreasuryGuideModal;
+        } else {
+            nextBtn.innerText = 'الخطوة التالية ⬅️';
+            nextBtn.onclick = () => navigateTreasuryGuide(1);
+        }
+    }
+}
+
+function navigateTreasuryGuide(step) {
+    let nextTab = currentTreasuryGuideTab + step;
+    if (nextTab < 1) nextTab = 1;
+    if (nextTab > 5) nextTab = 5;
+    switchTreasuryGuideTab(nextTab);
+}
+
+// دالة توافقية مع أي استدعاء قديم
+function toggleTreasuryGuide() {
+    openTreasuryGuideModal();
 }
 
 // 15. فتح نافذة ملاحظاتي اليومية والمفكرة
@@ -916,8 +1207,8 @@ function printTreasuryAuditReport() {
 
             <div class="stats-grid">
                 <div class="stat-box"><div class="title">📈 إجمالي المبيعات</div><div class="val" style="color:#059669;">${salesTotal.toFixed(2)}</div></div>
-                <div class="stat-box"><div class="title">💵 إجمالي الوارد (فوق)</div><div class="val" style="color:#0284c7;">${sumTop.toFixed(2)}</div></div>
-                <div class="stat-box"><div class="title">💸 إجمالي الصادر (تحت)</div><div class="val" style="color:#dc2626;">${sumBottom.toFixed(2)}</div></div>
+                <div class="stat-box"><div class="title">💵 الخزينة الرئيسية (فوق)</div><div class="val" style="color:#0284c7;">${sumTop.toFixed(2)}</div></div>
+                <div class="stat-box"><div class="title">💸 درج النقدية (الدرج)</div><div class="val" style="color:#dc2626;">${sumBottom.toFixed(2)}</div></div>
                 <div class="stat-box"><div class="title">💰 الصافي المحقق</div><div class="val" style="color:#2563eb;">${netTotal.toFixed(2)}</div></div>
                 <div class="stat-box"><div class="title">📱 فودافون كاش</div><div class="val">${cashTotal.toFixed(2)}</div></div>
                 <div class="stat-box"><div class="title">⚡ انستا باي</div><div class="val">${instaTotal.toFixed(2)}</div></div>
@@ -932,8 +1223,8 @@ function printTreasuryAuditReport() {
                         <th style="width: 35px;">م</th>
                         <th style="width: 65px;">الوقت</th>
                         <th>الفئة / البند</th>
-                        <th style="width: 85px;">المبلغ (تحت)</th>
-                        <th style="width: 85px;">المبلغ (فوق)</th>
+                        <th style="width: 85px;">الدرج</th>
+                        <th style="width: 85px;">الخزينة الرئيسية</th>
                         <th style="width: 85px;">الإجمالي</th>
                         <th>الملاحظات</th>
                         <th style="width: 85px;">المستخدم</th>
@@ -1043,11 +1334,11 @@ async function exportTreasuryAuditPDF() {
                 <div style="font-size:1.1rem; font-weight:900; color:#059669;">${salesTotal.toFixed(2)}</div>
             </div>
             <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px; text-align:center;">
-                <div style="font-size:0.75rem; color:#64748b;">إجمالي الوارد (فوق)</div>
+                <div style="font-size:0.75rem; color:#64748b;">الخزينة الرئيسية (فوق)</div>
                 <div style="font-size:1.1rem; font-weight:900; color:#0284c7;">${sumTop.toFixed(2)}</div>
             </div>
             <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px; text-align:center;">
-                <div style="font-size:0.75rem; color:#64748b;">إجمالي الصادر (تحت)</div>
+                <div style="font-size:0.75rem; color:#64748b;">درج النقدية (الدرج)</div>
                 <div style="font-size:1.1rem; font-weight:900; color:#dc2626;">${sumBottom.toFixed(2)}</div>
             </div>
             <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px; text-align:center;">
@@ -1061,8 +1352,8 @@ async function exportTreasuryAuditPDF() {
                     <th style="padding: 8px; border: 1px solid #0f172a;">م</th>
                     <th style="padding: 8px; border: 1px solid #0f172a;">الوقت</th>
                     <th style="padding: 8px; border: 1px solid #0f172a; text-align: right;">الفئة</th>
-                    <th style="padding: 8px; border: 1px solid #0f172a;">المبلغ (تحت)</th>
-                    <th style="padding: 8px; border: 1px solid #0f172a;">المبلغ (فوق)</th>
+                    <th style="padding: 8px; border: 1px solid #0f172a;">الدرج</th>
+                    <th style="padding: 8px; border: 1px solid #0f172a;">الخزينة الرئيسية</th>
                     <th style="padding: 8px; border: 1px solid #0f172a;">الإجمالي</th>
                     <th style="padding: 8px; border: 1px solid #0f172a; text-align: right;">الملاحظات</th>
                 </tr>
@@ -1156,8 +1447,8 @@ function shareTreasuryAuditWhatsApp() {
 ⏰ *وقت التقرير:* ${now}
 
 📈 *إجمالي المبيعات:* ${salesTotal.toFixed(2)}
-💵 *إجمالي الوارد (فوق):* ${sumTop.toFixed(2)}
-💸 *إجمالي الصادر (تحت):* ${sumBottom.toFixed(2)}
+💵 *الخزينة الرئيسية (فوق):* ${sumTop.toFixed(2)}
+💸 *درج النقدية (الدرج):* ${sumBottom.toFixed(2)}
 💰 *الصافي المحقق:* ${netTotal.toFixed(2)}
 🔢 *عدد المعاملات:* ${filteredRecords.length}
 ⚖️ *فرق الخزينة:* ${diffTotal.toFixed(2)}
@@ -1212,8 +1503,8 @@ function shareTreasuryAuditTelegram() {
 ⏰ *وقت التقرير:* ${now}
 
 📈 *إجمالي المبيعات:* ${salesTotal.toFixed(2)}
-💵 *إجمالي الوارد (فوق):* ${sumTop.toFixed(2)}
-💸 *إجمالي الصادر (تحت):* ${sumBottom.toFixed(2)}
+💵 *الخزينة الرئيسية (فوق):* ${sumTop.toFixed(2)}
+💸 *درج النقدية (الدرج):* ${sumBottom.toFixed(2)}
 💰 *الصافي المحقق:* ${netTotal.toFixed(2)}
 🔢 *عدد المعاملات:* ${filteredRecords.length}
 ⚖️ *فرق الخزينة:* ${diffTotal.toFixed(2)}
@@ -1250,6 +1541,10 @@ window.toggleTreasuryTableOptionsModal = toggleTreasuryTableOptionsModal;
 window.toggleTreasuryColumn = toggleTreasuryColumn;
 window.toggleAllTreasuryColumns = toggleAllTreasuryColumns;
 window.toggleTreasuryGuide = toggleTreasuryGuide;
+window.openTreasuryGuideModal = openTreasuryGuideModal;
+window.closeTreasuryGuideModal = closeTreasuryGuideModal;
+window.switchTreasuryGuideTab = switchTreasuryGuideTab;
+window.navigateTreasuryGuide = navigateTreasuryGuide;
 window.toggleTreasuryThemeMode = toggleTreasuryThemeMode;
 window.openTreasuryNotesModal = openTreasuryNotesModal;
 window.closeTreasuryNotesModal = closeTreasuryNotesModal;
@@ -1263,4 +1558,324 @@ window.printTreasuryAuditReport = printTreasuryAuditReport;
 window.exportTreasuryAuditPDF = exportTreasuryAuditPDF;
 window.shareTreasuryAuditWhatsApp = shareTreasuryAuditWhatsApp;
 window.shareTreasuryAuditTelegram = shareTreasuryAuditTelegram;
+
+// =========================================================================
+// 🌟 دوال التحكم في نافذة: المشاركة والإعدادات الأفقية الحديثة
+// =========================================================================
+function openTreasuryShareModal() {
+    const modal = document.getElementById('treasuryShareModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.style.setProperty('display', 'flex', 'important');
+}
+window.openTreasuryShareModal = openTreasuryShareModal;
+
+function closeTreasuryShareModal() {
+    const modal = document.getElementById('treasuryShareModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.setProperty('display', 'none', 'important');
+    }
+}
+window.closeTreasuryShareModal = closeTreasuryShareModal;
+
+function executeShareModalAction(actionType) {
+    closeTreasuryShareModal();
+
+    setTimeout(() => {
+        if (actionType === 'options') {
+            if (typeof toggleTreasuryTableOptionsModal === 'function') toggleTreasuryTableOptionsModal();
+        } else if (actionType === 'print') {
+            if (typeof printTreasuryAuditReport === 'function') printTreasuryAuditReport();
+        } else if (actionType === 'pdf') {
+            if (typeof exportTreasuryAuditPDF === 'function') exportTreasuryAuditPDF();
+        } else if (actionType === 'whatsapp') {
+            if (typeof shareTreasuryAuditWhatsApp === 'function') shareTreasuryAuditWhatsApp();
+        } else if (actionType === 'telegram') {
+            if (typeof shareTreasuryAuditTelegram === 'function') shareTreasuryAuditTelegram();
+        } else if (actionType === 'log' || actionType === 'sijill') {
+            if (typeof openTreasuryNotesModal === 'function') {
+                openTreasuryNotesModal();
+            } else {
+                const tableWrapper = document.querySelector('.tr-table-wrapper');
+                if (tableWrapper) tableWrapper.scrollIntoView({ behavior: 'smooth' });
+            }
+            if (typeof showToast === 'function') {
+                showToast("📜 تم فتح مفكرة وملاحظات الخزينة بنجاح", "info");
+            }
+        }
+    }, 120);
+}
+window.executeShareModalAction = executeShareModalAction;
+
+// توافقية كاملة مع الاستدعاءات السابقة
+function toggleRadialActionMenu(event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    openTreasuryShareModal();
+}
+window.toggleRadialActionMenu = toggleRadialActionMenu;
+
+function closeRadialActionMenu() {
+    closeTreasuryShareModal();
+}
+window.closeRadialActionMenu = closeRadialActionMenu;
+
+function triggerRadialAction(actionType, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    executeShareModalAction(actionType);
+}
+window.triggerRadialAction = triggerRadialAction;
+
+// مستمع للنقر خارج القائمة لإغلاقها تلقائياً
+if (!window._radialMenuListenersAttached) {
+    window._radialMenuListenersAttached = true;
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('trRadialActionMenu');
+        if (menu && menu.classList.contains('is-open') && !menu.contains(e.target)) {
+            closeRadialActionMenu();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeRadialActionMenu();
+        }
+    });
+}
+
+// =========================================================================
+// 💎 نافذة تفاصيل الكاش وانستا باي الفاخرة (مطابقة للتصميم والصورة 100%)
+// =========================================================================
+window.currentTreasuryDetailType = 'cash';
+window.currentTreasuryDetailRawRecords = [];
+
+function openTreasuryDetailsModal(type = 'cash') {
+    window.currentTreasuryDetailType = type;
+    const modal = document.getElementById('treasuryDetailsModal');
+    if (!modal) return;
+
+    // ضبط العنوان والأيقونة
+    const titleEl = document.getElementById('trDetailModalTitle');
+    const iconEl = document.getElementById('trDetailModalIcon');
+    const searchInput = document.getElementById('trDetailSearchInput');
+
+    if (searchInput) searchInput.value = '';
+
+    if (type === 'cash') {
+        if (titleEl) titleEl.innerText = 'تفاصيل الكاش (شامل فودافون)';
+        if (iconEl) iconEl.innerText = '📖';
+    } else if (type === 'instapay') {
+        if (titleEl) titleEl.innerText = 'تفاصيل انستا باي (InstaPay)';
+        if (iconEl) iconEl.innerText = '⚡';
+    } else if (type === 'sales') {
+        if (titleEl) titleEl.innerText = 'تفاصيل المبيعات النقدية';
+        if (iconEl) iconEl.innerText = '📈';
+    } else {
+        if (titleEl) titleEl.innerText = `تفاصيل ${type}`;
+        if (iconEl) iconEl.innerText = '📊';
+    }
+
+    refreshTreasuryDetailsModal();
+
+    modal.classList.remove('hidden');
+    modal.style.setProperty('display', 'flex', 'important');
+
+    setTimeout(() => {
+        if (searchInput) searchInput.focus();
+    }, 150);
+}
+window.openTreasuryDetailsModal = openTreasuryDetailsModal;
+
+function closeTreasuryDetailsModal() {
+    const modal = document.getElementById('treasuryDetailsModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.setProperty('display', 'none', 'important');
+    }
+}
+window.closeTreasuryDetailsModal = closeTreasuryDetailsModal;
+
+function refreshTreasuryDetailsModal() {
+    const type = window.currentTreasuryDetailType || 'cash';
+    const range = typeof getTreasuryDateRange === 'function' ? getTreasuryDateRange() : {
+        start: document.getElementById('trDate') ? document.getElementById('trDate').value : new Date().toLocaleDateString('en-CA'),
+        end: document.getElementById('trDate') ? document.getElementById('trDate').value : new Date().toLocaleDateString('en-CA')
+    };
+
+    const allRecords = window.treasuryAuditRecords || [];
+    const dateFiltered = allRecords.filter(r => r.date >= range.start && r.date <= range.end);
+
+    let matchedRecords = [];
+    if (type === 'cash') {
+        matchedRecords = dateFiltered.filter(r => {
+            const cat = String(r.category || '').toLowerCase();
+            return cat.includes('فودافون') || cat.includes('كاش') || cat.includes('cash');
+        });
+    } else if (type === 'instapay') {
+        matchedRecords = dateFiltered.filter(r => {
+            const cat = String(r.category || '').toLowerCase();
+            return cat.includes('انستا') || cat.includes('insta');
+        });
+    } else if (type === 'sales') {
+        matchedRecords = dateFiltered.filter(r => {
+            const cat = String(r.category || '').toLowerCase();
+            return cat.includes('مبيعات') || cat.includes('بيع');
+        });
+    } else {
+        matchedRecords = dateFiltered.filter(r => String(r.category || '') === type);
+    }
+
+    window.currentTreasuryDetailRawRecords = matchedRecords;
+
+    const searchInput = document.getElementById('trDetailSearchInput');
+    const q = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+    if (q) {
+        filterTreasuryDetailModalRecords();
+    } else {
+        renderTreasuryDetailModalContent(matchedRecords);
+    }
+}
+window.refreshTreasuryDetailsModal = refreshTreasuryDetailsModal;
+
+function filterTreasuryDetailModalRecords() {
+    const q = (document.getElementById('trDetailSearchInput') ? document.getElementById('trDetailSearchInput').value : '').trim().toLowerCase();
+    const raw = window.currentTreasuryDetailRawRecords || [];
+
+    if (!q) {
+        renderTreasuryDetailModalContent(raw);
+        return;
+    }
+
+    const filtered = raw.filter(r => {
+        const timeStr = String(r.time || '').toLowerCase();
+        const bStr = String(r.amountBottom != null ? r.amountBottom : '');
+        const tStr = String(r.amountTop != null ? r.amountTop : '');
+        const notesStr = String(r.notes || '').toLowerCase();
+        const catStr = String(r.category || '').toLowerCase();
+        const dateStr = String(r.date || '');
+
+        return timeStr.includes(q) || bStr.includes(q) || tStr.includes(q) || notesStr.includes(q) || catStr.includes(q) || dateStr.includes(q);
+    });
+
+    renderTreasuryDetailModalContent(filtered);
+}
+window.filterTreasuryDetailModalRecords = filterTreasuryDetailModalRecords;
+
+function renderTreasuryDetailModalContent(records = []) {
+    const profitEl = document.getElementById('trDetailProfitVal');
+    const totalBottomEl = document.getElementById('trDetailTotalBottom');
+    const avgEl = document.getElementById('trDetailAvg');
+    const minEl = document.getElementById('trDetailMin');
+    const countEl = document.getElementById('trDetailCount');
+    const maxEl = document.getElementById('trDetailMax');
+    const tbody = document.getElementById('trDetailTableBody');
+    const footerBar = document.getElementById('trDetailFooterBar');
+
+    let totalProfit = 0;
+    let totalBottom = 0;
+    const amountsForStats = [];
+
+    records.forEach(r => {
+        const top = parseFloat(r.amountTop) || 0;
+        const bottom = parseFloat(r.amountBottom) || 0;
+
+        totalBottom += bottom;
+
+        // حساب ربح الخدمة (بعت كام - تحت خد كام)
+        if (top > bottom && bottom > 0) {
+            totalProfit += (top - bottom);
+        }
+
+        // المبالغ المستخدمة في الإحصائيات (الدرج تحت أو العملية)
+        const opAmount = bottom > 0 ? bottom : top;
+        if (opAmount > 0) {
+            amountsForStats.push(opAmount);
+        }
+    });
+
+    const count = records.length;
+    const maxVal = amountsForStats.length ? Math.max(...amountsForStats) : 0;
+    const minVal = amountsForStats.length ? Math.min(...amountsForStats) : 0;
+    const avgVal = amountsForStats.length ? (totalBottom / amountsForStats.length) : 0;
+
+    const formatNum = (n) => {
+        if (!n && n !== 0) return '0';
+        return Number(n).toLocaleString('en-US', {
+            minimumFractionDigits: (n % 1 === 0 ? 0 : 2),
+            maximumFractionDigits: 2
+        });
+    };
+
+    if (profitEl) profitEl.innerText = formatNum(totalProfit);
+    if (totalBottomEl) totalBottomEl.innerText = formatNum(totalBottom);
+    if (avgEl) avgEl.innerText = formatNum(avgVal);
+    if (minEl) minEl.innerText = formatNum(minVal);
+    if (countEl) countEl.innerText = count;
+    if (maxEl) maxEl.innerText = formatNum(maxVal);
+
+    if (footerBar) {
+        if (count === 0) {
+            footerBar.innerText = 'لا توجد عمليات مسجلة لهذه الفترة';
+        } else if (count === 1) {
+            footerBar.innerText = 'إجمالي العمليات: عملية واحدة فقط';
+        } else if (count === 2) {
+            footerBar.innerText = 'إجمالي العمليات: عمليتان';
+        } else {
+            footerBar.innerText = `إجمالي العمليات: ${count} عمليات مسجلة`;
+        }
+    }
+
+    if (!tbody) return;
+
+    if (records.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="3" style="text-align: center; padding: 26px; color: #94a3b8; font-weight: 700; font-size: 0.95rem;">
+                    🔍 لا توجد عمليات مطابقة لخيارات البحث أو في هذه الفترة.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    let rowsHtml = '';
+    records.forEach(r => {
+        const bottom = parseFloat(r.amountBottom) || 0;
+        const time = r.time || '-';
+        const notes = r.notes && r.notes !== '-' ? r.notes : '-';
+
+        rowsHtml += `
+            <tr>
+                <td style="color: #cbd5e1; font-size: 0.88rem; font-weight: 700;">${time}</td>
+                <td style="font-weight: 900; color: #38bdf8; font-size: 0.95rem;">${formatNum(bottom)}</td>
+                <td style="color: #e2e8f0; font-weight: 700;">${notes}</td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = rowsHtml;
+}
+
+// إغلاق النوافذ بزر Escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('treasuryDetailsModal');
+        if (modal && modal.style.display === 'flex') {
+            closeTreasuryDetailsModal();
+        }
+        const shareModal = document.getElementById('treasuryShareModal');
+        if (shareModal && shareModal.style.display === 'flex') {
+            closeTreasuryShareModal();
+        }
+    }
+});
+
+
 

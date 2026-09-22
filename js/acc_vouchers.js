@@ -88,7 +88,16 @@
                     if (!ok) return false;
                 }
 
-                const dt = getTransactionDateTime('receiptDate', 'receiptTime');
+                const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+                    ? editingOriginalDate
+                    : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+                const inputDateVal = document.getElementById('receiptDate')?.value;
+                const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+                const dt = (isEditMode && origDt && !isDateManuallyChanged)
+                    ? origDt
+                    : getTransactionDateTime('receiptDate', 'receiptTime');
 
                 const notes = document.getElementById('receiptNotes') ? document.getElementById('receiptNotes').value.trim() : "";
 
@@ -175,6 +184,10 @@
                     await saveData();
                 }
 
+                if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
+                    window.updateLastSavedSequence('قبض', receiptID);
+                }
+
                 if (typeof logAuditAction === 'function') {
                     const auditAction = isEditMode ? 'تحديث سند قبض' : 'حفظ سند قبض جديد';
                     logAuditAction(auditAction, `سند قبض رقم #${receiptID}, المبلغ: ${amount.toFixed(2)} ج.م, العميل: ${payer}`);
@@ -191,12 +204,16 @@
                 });
 
                 isEditMode = false;
+                window.isEditMode = false;
 
                 editingInvoiceId = null;
+                window.editingInvoiceId = null;
 
                 editingOriginalDate = null;
+                window.editingOriginalDate = null;
 
                 editingInvoiceType = null;
+                window.editingInvoiceType = null;
 
                 const isPrintChecked = document.getElementById('receiptPrintCheck')?.checked || false;
                 const isCloseChecked = closeAfterExplicit || document.getElementById('receiptCloseCheck')?.checked || false;
@@ -214,7 +231,24 @@
                     }, 300);
                 }
 
+                if (typeof window.clearRevertedInvoiceBackup === 'function') {
+                    window.clearRevertedInvoiceBackup();
+                }
+
                 return true;
+            } catch (vErr) {
+                console.error("❌ خطأ أثناء حفظ سند القبض:", vErr);
+                if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+                    await window.rollbackLastRevertedInvoice();
+                }
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '⚠️ تعذر حفظ سند القبض',
+                    msg: isEditMode
+                        ? ('حدث خطأ أثناء حفظ التعديل، وتم استعادة سند القبض الأصلي بأمان.\n\nتفاصيل الخطأ: ' + (vErr?.message || vErr))
+                        : ('حدث خطأ غير متوقع أثناء حفظ سند القبض:\n' + (vErr?.message || vErr))
+                });
+                return false;
             } finally {
                 const saveBtns = document.querySelectorAll('#receipt-section .btn-save, #receipt-section .action-btn');
                 saveBtns.forEach(b => { b.disabled = false; b.style.pointerEvents = 'auto'; b.style.opacity = '1'; });
@@ -357,7 +391,16 @@
                     }
                 }
 
-                const dt = getTransactionDateTime('disburseDate', 'disburseTime');
+                const origDt = (typeof editingOriginalDate !== 'undefined' && editingOriginalDate && editingOriginalDate.full)
+                    ? editingOriginalDate
+                    : ((typeof window.editingOriginalDate !== 'undefined' && window.editingOriginalDate && window.editingOriginalDate.full) ? window.editingOriginalDate : null);
+
+                const inputDateVal = document.getElementById('disburseDate')?.value;
+                const isDateManuallyChanged = isEditMode && origDt && origDt.iso && inputDateVal && (inputDateVal !== origDt.iso);
+
+                const dt = (isEditMode && origDt && !isDateManuallyChanged)
+                    ? origDt
+                    : getTransactionDateTime('disburseDate', 'disburseTime');
 
                 const notes = document.getElementById('disburseNotes') ? document.getElementById('disburseNotes').value.trim() : "";
 
@@ -442,6 +485,10 @@
                     await saveData();
                 }
 
+                if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
+                    window.updateLastSavedSequence('صرف', disburseID);
+                }
+
                 if (typeof logAuditAction === 'function') {
                     const auditAction = isEditMode ? 'تحديث سند صرف' : 'حفظ سند صرف جديد';
                     logAuditAction(auditAction, `سند صرف رقم #${disburseID}, المبلغ: ${amount.toFixed(2)} ج.م, المستلم/المورد: ${payee}`);
@@ -458,12 +505,16 @@
                 });
 
                 isEditMode = false;
+                window.isEditMode = false;
 
                 editingInvoiceId = null;
+                window.editingInvoiceId = null;
 
                 editingOriginalDate = null;
+                window.editingOriginalDate = null;
 
                 editingInvoiceType = null;
+                window.editingInvoiceType = null;
 
                 const isPrintChecked = document.getElementById('disbursePrintCheck')?.checked || false;
                 const isCloseChecked = closeAfterExplicit || document.getElementById('disburseCloseCheck')?.checked || false;
@@ -481,7 +532,24 @@
                     }, 300);
                 }
 
+                if (typeof window.clearRevertedInvoiceBackup === 'function') {
+                    window.clearRevertedInvoiceBackup();
+                }
+
                 return true;
+            } catch (vErr) {
+                console.error("❌ خطأ أثناء حفظ سند الصرف:", vErr);
+                if (isEditMode && typeof window.rollbackLastRevertedInvoice === 'function') {
+                    await window.rollbackLastRevertedInvoice();
+                }
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '⚠️ تعذر حفظ سند الصرف',
+                    msg: isEditMode
+                        ? ('حدث خطأ أثناء حفظ التعديل، وتم استعادة سند الصرف الأصلي بأمان.\n\nتفاصيل الخطأ: ' + (vErr?.message || vErr))
+                        : ('حدث خطأ غير متوقع أثناء حفظ سند الصرف:\n' + (vErr?.message || vErr))
+                });
+                return false;
             } finally {
                 const saveBtns = document.querySelectorAll('#disbursement-section .btn-save, #disbursement-section .action-btn');
                 saveBtns.forEach(b => { b.disabled = false; b.style.pointerEvents = 'auto'; b.style.opacity = '1'; });

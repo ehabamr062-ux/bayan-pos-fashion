@@ -59,17 +59,31 @@ async function saveNewItem(mode = 'save') {
 
     const activeProductId = (typeof currentEditingProductId !== 'undefined' && currentEditingProductId) ? currentEditingProductId : null;
 
-    // 🛑 فحص أمان صارم: منع تكرار الباركود الأساسي مع أي صنف آخر أو تشكيلة في النظام
-    if (barcode && typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+    // 🛑 فهرس الباركودات فائق السرعة O(1) لفحص التكرار لحظياً دون استهلاك المعالج
+    const existingBarcodesMap = new Map();
+    if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+        for (let idx = 0; idx < productsDB.length; idx++) {
+            const p = productsDB[idx];
+            if (!p || (activeProductId && (p.id === activeProductId || String(p.id) === String(activeProductId)))) continue;
+            if (p.barcode) existingBarcodesMap.set(String(p.barcode).trim(), p);
+            if (p.code) existingBarcodesMap.set(String(p.code).trim(), p);
+            if (p.units && Array.isArray(p.units)) {
+                for (let u = 0; u < p.units.length; u++) {
+                    if (p.units[u].unitBarcode) existingBarcodesMap.set(String(p.units[u].unitBarcode).trim(), p);
+                }
+            }
+            if (p.variants && Array.isArray(p.variants)) {
+                for (let v = 0; v < p.variants.length; v++) {
+                    if (p.variants[v].barcode) existingBarcodesMap.set(String(p.variants[v].barcode).trim(), p);
+                }
+            }
+        }
+    }
+
+    // فحص أمان صارم: منع تكرار الباركود الأساسي
+    if (barcode) {
         const cleanBc = String(barcode).trim();
-        const duplicateProduct = productsDB.find(p => {
-            if (activeProductId && (p.id === activeProductId || String(p.id) === String(activeProductId))) return false;
-            if (p.barcode && String(p.barcode).trim() === cleanBc) return true;
-            if (p.code && String(p.code).trim() === cleanBc) return true;
-            if (p.units && Array.isArray(p.units) && p.units.some(u => u.unitBarcode && String(u.unitBarcode).trim() === cleanBc)) return true;
-            if (p.variants && Array.isArray(p.variants) && p.variants.some(v => v.barcode && String(v.barcode).trim() === cleanBc)) return true;
-            return false;
-        });
+        const duplicateProduct = existingBarcodesMap.get(cleanBc);
 
         if (duplicateProduct) {
             const errorMsg = `⚠️ تنبيه أمان: الباركود (${cleanBc}) مسجل مسبقاً للصنف "${duplicateProduct.name}"!\nيرجى استخدام باركود مختلف لمنع تضارب الأصناف في الكاشير.`;
@@ -270,24 +284,15 @@ async function saveNewItem(mode = 'save') {
             }
             vSeen.add(vBc);
 
-            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
-                const dupProduct = productsDB.find(p => {
-                    if (activeProductId && (p.id === activeProductId || String(p.id) === String(activeProductId))) return false;
-                    if (p.barcode && String(p.barcode).trim() === vBc) return true;
-                    if (p.code && String(p.code).trim() === vBc) return true;
-                    if (p.units && Array.isArray(p.units) && p.units.some(u => u.unitBarcode && String(u.unitBarcode).trim() === vBc)) return true;
-                    if (p.variants && Array.isArray(p.variants) && p.variants.some(ev => ev.barcode && String(ev.barcode).trim() === vBc)) return true;
-                    return false;
-                });
+            const dupProduct = existingBarcodesMap.get(vBc);
 
-                if (dupProduct) {
-                    const dupMsg = `⚠️ تنبيه أمان: باركود التشكيلة (${vBc}) مسجل مسبقاً للصنف "${dupProduct.name}"! يرجى تغييره.`;
-                    if (mode === 'silent') { showToast(dupMsg, "error"); return false; }
-                    if (typeof showCustomAlert === 'function') {
-                        showCustomAlert({ type: 'error', titleText: '⚠️ تكرار في الباركود', msg: dupMsg });
-                    } else { alert(dupMsg); }
-                    return false;
-                }
+            if (dupProduct) {
+                const dupMsg = `⚠️ تنبيه أمان: باركود التشكيلة (${vBc}) مسجل مسبقاً للصنف "${dupProduct.name}"! يرجى تغييره.`;
+                if (mode === 'silent') { showToast(dupMsg, "error"); return false; }
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({ type: 'error', titleText: '⚠️ تكرار في الباركود', msg: dupMsg });
+                } else { alert(dupMsg); }
+                return false;
             }
         }
     }
@@ -1106,3 +1111,70 @@ window.printCurrentProductBarcodeDirect = function() {
 // =========================================================================
 // 👕 دوال إدارة المقاسات والألوان وتوليد الباركودات الذكي (Variant Matrix Logic)
 // =========================================================================
+
+// =========================================================================
+// 📸 ضغط وتصغير صور الأصناف تلقائياً (Smart Image Compression for Low RAM/DB)
+// =========================================================================
+window.handleProductImage = function(event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const rawData = e.target.result;
+        const img = new Image();
+        img.onload = function() {
+            try {
+                const maxDim = 400; // أبعاد قصوى ممتازة للوضوح والطباعة بحجم خفيف جداً
+                let w = img.width;
+                let h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) {
+                        h = Math.round((h * maxDim) / w);
+                        w = maxDim;
+                    } else {
+                        w = Math.round((w * maxDim) / h);
+                        h = maxDim;
+                    }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, w, h);
+                // ضغط الصورة إلى JPEG عالي النقاء بحجم 25-45KB فقط
+                const compressedData = canvas.toDataURL('image/jpeg', 0.82);
+                applyCompressedImageData(compressedData);
+            } catch(err) {
+                applyCompressedImageData(rawData);
+            }
+        };
+        img.onerror = function() {
+            applyCompressedImageData(rawData);
+        };
+        img.src = rawData;
+    };
+    reader.readAsDataURL(file);
+
+    function applyCompressedImageData(finalData) {
+        const preview = document.getElementById('productImagePreview');
+        const removeBtn = document.getElementById('removeProductImageBtn');
+        window.currentProductImageData = finalData;
+        window.productImageRemoved = false;
+        if (typeof currentProductImageData !== 'undefined') currentProductImageData = finalData;
+        if (preview) {
+            preview.dataset.image = finalData;
+            preview.dataset.removed = 'false';
+            preview.style.backgroundImage = `url(${finalData})`;
+            Array.from(preview.childNodes).forEach(node => {
+                if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
+            });
+        }
+        if (removeBtn) {
+            removeBtn.classList.remove('hidden');
+            removeBtn.style.display = 'flex';
+        }
+    }
+};
