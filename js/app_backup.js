@@ -24,146 +24,257 @@ function restoreData(input, isEmergencyBypass = false) {
         return;
     }
     const reader = new FileReader();
+
+    // 📊 متابعة تقدم قراءة الملفات الكبيرة لحظياً (حتى لو وصل حجم الملف لعشرات الميجابايت)
+    reader.onprogress = function (e) {
+        if (e.lengthComputable && e.total > 0) {
+            const percent = Math.min(99, Math.round((e.loaded / e.total) * 100));
+            const loadedMb = (e.loaded / (1024 * 1024)).toFixed(1);
+            const totalMb = (e.total / (1024 * 1024)).toFixed(1);
+            const titleEl = document.getElementById('loginRestoreTitle');
+            const subEl = document.getElementById('loginRestoreSubtitle');
+            if (titleEl) {
+                titleEl.innerHTML = `<span style="color: #38bdf8;">جاري القراءة: ${percent}% (${loadedMb}/${totalMb} MB) ⏳</span>`;
+            }
+            if (subEl) {
+                subEl.innerHTML = `ملف كبير (${totalMb} MB)، يرجى الانتظار لحين اكتمال المعالجة...`;
+            }
+        }
+    };
+
+    reader.onerror = function (err) {
+        console.error("FileReader error:", err);
+        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+            window.resetLoginEmergencyRestoreCard();
+        }
+        alert("❌ تعذر قراءة الملف. قد يكون حجم الملف كبيراً جداً على ذاكرة المتصفح.");
+        if (input) input.value = '';
+    };
+
     reader.onload = async function (e) {
+        await window.restoreDataFromContent(e.target.result, file ? file.name : '', isEmergencyBypass, input);
+    };
+    reader.readAsText(file);
+}
+window.restoreData = restoreData;
+
+// =========================================================================
+// 📥 المعالج المركزي لاستعادة البيانات من نص JSON (يدعم IPC والمتصفح ويوجه للـ Roaming تلقائياً)
+// =========================================================================
+window.restoreDataFromContent = async function (jsonContent, fileName = '', isEmergencyBypass = false, input = null) {
+    const titleEl = document.getElementById('loginRestoreTitle');
+    const subEl = document.getElementById('loginRestoreSubtitle');
+    if (titleEl) {
+        titleEl.innerHTML = `<span>جاري فحص وتجهيز البيانات... ⚙️</span>`;
+    }
+    if (subEl) {
+        subEl.innerHTML = `جاري تحليل الجداول والتحقق من سلامة البيانات...`;
+    }
+    await new Promise(r => setTimeout(r, 60));
+
+    try {
+        let data;
         try {
-            let data;
+            data = JSON.parse(jsonContent);
+        } catch (parseErr) {
+            console.error("JSON parse error:", parseErr);
+            if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                window.resetLoginEmergencyRestoreCard();
+            }
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '❌ خطأ في قراءة الملف',
+                    msg: 'الملف المختار ليس ملف JSON صالحاً أو تالفاً بسبب انقطاع التصدير. يرجى اختيار ملف نسخة احتياطية سليم.'
+                });
+            } else {
+                alert("❌ الملف المختار ليس ملف JSON صالحاً.");
+            }
+            if (input) input.value = '';
+            return;
+        }
+
+        // 🛑 فحص التحقق من سلامة وصلاحية محتوى النسخة الاحتياطية قبل أي تعديل
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                window.resetLoginEmergencyRestoreCard();
+            }
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '❌ تنسيق غير صالح',
+                    msg: 'هذا الملف لا يحتوي على بيانات نسخة احتياطية صالحة لنظام بَيَان.'
+                });
+            } else {
+                alert("❌ هذا الملف لا يحتوي على بيانات نسخة احتياطية صالحة لنظام بَيَان.");
+            }
+            if (input) input.value = '';
+            return;
+        }
+
+        // 🛡️ تنظيف وتجهيز البيانات للتأكد من خلوها من أي عناصر تالفة أو null
+        const cleanProducts = Array.isArray(data.products) ? data.products.filter(p => p && typeof p === 'object' && p.id != null) : [];
+        const cleanTransactions = Array.isArray(data.transactions) ? data.transactions.filter(t => t && typeof t === 'object' && t.id != null) : [];
+        const cleanAccounts = Array.isArray(data.accounts) ? data.accounts.filter(a => a && typeof a === 'object' && a.id != null) : [];
+        const cleanTrash = Array.isArray(data.trash) ? data.trash.filter(t => t && typeof t === 'object') : [];
+        const cleanTreasury = Array.isArray(data.treasuryAudit) ? data.treasuryAudit.filter(t => t && typeof t === 'object') : [];
+        const cleanAuditLogs = Array.isArray(data.auditLogs) ? data.auditLogs.filter(l => l && typeof l === 'object') : [];
+        const cleanWarehouses = Array.isArray(data.warehouses) ? data.warehouses.filter(w => w && typeof w === 'object') : [];
+        const cleanWallpapers = Array.isArray(data.wallpapers) ? data.wallpapers.filter(w => w && typeof w === 'object') : [];
+
+        const prodCount = cleanProducts.length;
+        const txCount = cleanTransactions.length;
+        const accCount = cleanAccounts.length;
+        const hasSettings = data.settings && typeof data.settings === 'object';
+        const hasUsers = Array.isArray(data.users) && data.users.length > 0;
+
+        if (prodCount === 0 && txCount === 0 && accCount === 0 && !hasSettings && !hasUsers) {
+            if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                window.resetLoginEmergencyRestoreCard();
+            }
+            if (typeof showCustomAlert === 'function') {
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '❌ ملف فارغ أو غير متوافق',
+                    msg: 'الملف المختار لا يحتوي على أي أصناف أو فواتير أو حسابات تابعة لنظام بَيَان.\n\n🛡️ تم إلغاء العملية فوراً لحماية بياناتك الحالية من المسح.'
+                });
+            } else {
+                alert("❌ الملف المختار فارغ أو غير صالح لنظام بَيَان. تم إلغاء العملية لحماية بياناتك.");
+            }
+            if (input) input.value = '';
+            return;
+        }
+
+        // وظيفة التنفيذ الفعلي بعد تأكيد المستخدم
+        const executeRestore = async () => {
+            const titleEl = document.getElementById('loginRestoreTitle');
+            const subEl = document.getElementById('loginRestoreSubtitle');
+            const iconBox = document.getElementById('loginRestoreIconBox');
+            if (titleEl) {
+                titleEl.innerHTML = `<span style="color: #10b981; font-weight: bold;">جاري كتابة البيانات في قاعدة البيانات... 💾</span>`;
+            }
+            if (subEl) {
+                subEl.innerHTML = `جاري استرجاع ${prodCount} صنف و ${txCount} حركة... يرجى الانتظار`;
+            }
+            if (iconBox) {
+                iconBox.innerHTML = '⏳';
+            }
+
+            await new Promise(r => setTimeout(r, 60));
+
             try {
-                data = JSON.parse(e.target.result);
-            } catch (parseErr) {
-                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
-                    window.resetLoginEmergencyRestoreCard();
-                }
-                if (typeof showCustomAlert === 'function') {
-                    showCustomAlert({
-                        type: 'error',
-                        titleText: '❌ خطأ في قراءة الملف',
-                        msg: 'الملف المختار ليس ملف JSON صالحاً. يرجى التأكد من اختيار ملف نسخة احتياطية سليم.'
+                let restoredUsers = [];
+                if (hasUsers) {
+                    restoredUsers = data.users.filter(u => u && typeof u === 'object').map(u => {
+                        const copy = { ...u };
+                        const rawPin = copy.pin;
+                        const plainPin = (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.decryptPin === 'function')
+                            ? window.BayanSecurity.decryptPin(rawPin)
+                            : rawPin;
+                        copy.pin = (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.encryptPin === 'function')
+                            ? window.BayanSecurity.encryptPin(plainPin)
+                            : rawPin;
+                        return copy;
                     });
+                }
+
+                let shouldTouchUsers = false;
+                if (restoredUsers.length > 0) {
+                    shouldTouchUsers = true;
                 } else {
-                    alert("❌ الملف المختار ليس ملف JSON صالحاً.");
-                }
-                if (input) input.value = '';
-                return;
-            }
+                    let currentDbUsers = [];
+                    try {
+                        if (typeof db !== 'undefined' && db && db.users) {
+                            currentDbUsers = await db.users.toArray();
+                        }
+                    } catch (e) {}
 
-            // 🛑 فحص التحقق من سلامة وصلاحية محتوى النسخة الاحتياطية قبل أي تعديل
-            if (!data || typeof data !== 'object' || Array.isArray(data)) {
-                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
-                    window.resetLoginEmergencyRestoreCard();
+                    if (!currentDbUsers || currentDbUsers.length === 0) {
+                        restoredUsers = [{
+                            id: 1,
+                            name: 'المدير',
+                            role: 'admin',
+                            pin: (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.encryptPin === 'function')
+                                ? window.BayanSecurity.encryptPin('')
+                                : '',
+                            permissions: ['all']
+                        }];
+                        shouldTouchUsers = true;
+                    } else {
+                        shouldTouchUsers = false;
+                        console.log("🛡️ تم الإبقاء على قائمة المستخدمين الحالية لعدم وجود مستخدمين بملف النسخة الاحتياطية.");
+                    }
                 }
-                if (typeof showCustomAlert === 'function') {
-                    showCustomAlert({
-                        type: 'error',
-                        titleText: '❌ تنسيق غير صالح',
-                        msg: 'هذا الملف لا يحتوي على بيانات نسخة احتياطية صالحة لنظام بَيَان.'
-                    });
-                } else {
-                    alert("❌ هذا الملف لا يحتوي على بيانات نسخة احتياطية صالحة لنظام بَيَان.");
-                }
-                if (input) input.value = '';
-                return;
-            }
 
-            const prodCount = Array.isArray(data.products) ? data.products.length : 0;
-            const txCount = Array.isArray(data.transactions) ? data.transactions.length : 0;
-            const accCount = Array.isArray(data.accounts) ? data.accounts.length : 0;
-            const hasSettings = data.settings && typeof data.settings === 'object';
-            const hasUsers = Array.isArray(data.users) && data.users.length > 0;
-
-            if (prodCount === 0 && txCount === 0 && accCount === 0 && !hasSettings && !hasUsers) {
-                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
-                    window.resetLoginEmergencyRestoreCard();
-                }
-                if (typeof showCustomAlert === 'function') {
-                    showCustomAlert({
-                        type: 'error',
-                        titleText: '❌ ملف فارغ أو غير متوافق',
-                        msg: 'الملف المختار لا يحتوي على أي أصناف أو فواتير أو حسابات تابعة لنظام بَيَان.\n\n🛡️ تم إلغاء العملية فوراً لحماية بياناتك الحالية من المسح.'
-                    });
-                } else {
-                    alert("❌ الملف المختار فارغ أو غير صالح لنظام بَيَان. تم إلغاء العملية لحماية بياناتك.");
-                }
-                if (input) input.value = '';
-                return;
-            }
-
-            // وظيفة التنفيذ الفعلي بعد تأكيد المستخدم
-            const executeRestore = async () => {
-                const tablesToTransact = [db.products, db.transactions, db.accounts, db.users, db.trash];
+                const tablesToTransact = [db.products, db.transactions, db.accounts, db.trash];
+                if (shouldTouchUsers) tablesToTransact.push(db.users);
                 if (db.treasuryAudit) tablesToTransact.push(db.treasuryAudit);
                 if (db.auditLogs) tablesToTransact.push(db.auditLogs);
-                if (db.settings) tablesToTransact.push(db.settings);
                 if (db.warehouses) tablesToTransact.push(db.warehouses);
                 if (db.wallpapers) tablesToTransact.push(db.wallpapers);
 
                 await db.transaction('rw', tablesToTransact, async () => {
-                    // 1. مسح وإعادة كتابة الجداول الأساسية
                     await db.products.clear();
                     await db.transactions.clear();
                     await db.accounts.clear();
-                    await db.users.clear();
                     await db.trash.clear();
-                    
-                    if (data.products && data.products.length > 0) await db.products.bulkPut(data.products);
-                    if (data.transactions && data.transactions.length > 0) await db.transactions.bulkPut(data.transactions);
-                    if (data.accounts && data.accounts.length > 0) await db.accounts.bulkPut(data.accounts);
-                    if (data.users && data.users.length > 0) {
-                        // 🔒 تشفير رموز الـ PIN في قاعدة البيانات عند الاسترجاع مع دعم كامل للنسخ القديمة
-                        const restoredUsers = data.users.map(u => {
-                            if (!u) return u;
-                            const copy = { ...u };
-                            const rawPin = copy.pin;
-                            const plainPin = (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.decryptPin === 'function')
-                                ? window.BayanSecurity.decryptPin(rawPin)
-                                : rawPin;
-                            copy.pin = (typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.encryptPin === 'function')
-                                ? window.BayanSecurity.encryptPin(plainPin)
-                                : rawPin;
-                            return copy;
-                        });
+                    if (shouldTouchUsers) {
+                        await db.users.clear();
+                    }
+
+                    const CHUNK_SIZE = 50;
+                    for (let i = 0; i < cleanProducts.length; i += CHUNK_SIZE) {
+                        await db.products.bulkPut(cleanProducts.slice(i, i + CHUNK_SIZE));
+                    }
+
+                    for (let i = 0; i < cleanTransactions.length; i += 100) {
+                        await db.transactions.bulkPut(cleanTransactions.slice(i, i + 100));
+                    }
+
+                    if (cleanAccounts.length > 0) await db.accounts.bulkPut(cleanAccounts);
+                    if (cleanTrash.length > 0) await db.trash.bulkPut(cleanTrash);
+                    if (shouldTouchUsers && restoredUsers.length > 0) {
                         await db.users.bulkPut(restoredUsers);
                     }
-                    if (data.trash && data.trash.length > 0) await db.trash.bulkPut(data.trash);
-                    
-                    // 2. استرجاع سجلات الخزينة والورديات وسجلات التدقيق
+
                     if (db.treasuryAudit) {
                         await db.treasuryAudit.clear();
-                        if (data.treasuryAudit && data.treasuryAudit.length > 0) {
-                            await db.treasuryAudit.bulkPut(data.treasuryAudit);
+                        if (cleanTreasury.length > 0) {
+                            await db.treasuryAudit.bulkPut(cleanTreasury);
                         }
                     }
                     if (db.auditLogs) {
                         await db.auditLogs.clear();
-                        if (data.auditLogs && data.auditLogs.length > 0) {
-                            await db.auditLogs.bulkPut(data.auditLogs);
+                        if (cleanAuditLogs.length > 0) {
+                            await db.auditLogs.bulkPut(cleanAuditLogs);
                         }
                     }
 
-                    // 3. استرجاع المخازن المتعددة في IndexedDB
                     if (db.warehouses) {
                         await db.warehouses.clear();
-                        if (data.warehouses && data.warehouses.length > 0) {
-                            await db.warehouses.bulkPut(data.warehouses);
+                        if (cleanWarehouses.length > 0) {
+                            await db.warehouses.bulkPut(cleanWarehouses);
                         }
                     }
 
-                    // 4. استرجاع الخلفيات المخصصة في IndexedDB
                     if (db.wallpapers) {
                         await db.wallpapers.clear();
-                        if (data.wallpapers && data.wallpapers.length > 0) {
-                            await db.wallpapers.bulkPut(data.wallpapers);
+                        if (cleanWallpapers.length > 0) {
+                            await db.wallpapers.bulkPut(cleanWallpapers);
                         }
                     }
                 });
 
-                // 5. استرجاع الإعدادات العامة
-                if (data.settings) {
-                    const existingMain = await db.settings.get('main') || {};
-                    await db.settings.put({ ...existingMain, ...data.settings, id: 'main' });
+                if (data.settings && typeof data.settings === 'object') {
+                    try {
+                        const existingMain = (db && db.settings) ? (await db.settings.get('main') || {}) : {};
+                        if (db && db.settings) {
+                            await db.settings.put({ ...existingMain, ...data.settings, id: 'main' });
+                        }
+                    } catch (e) {}
                     setStore('pos_settings', JSON.stringify(data.settings));
                 }
-                
-                // 6. استرجاع المخازن المتعددة والتصنيفات وإعدادات الباركود
+
                 if (data.warehouses && data.warehouses.length > 0) {
                     setStore('pos_warehouses', JSON.stringify(data.warehouses));
                 }
@@ -183,7 +294,6 @@ function restoreData(input, isEmergencyBypass = false) {
                     setStore('bayan_global_units', JSON.stringify(data.globalUnits));
                 }
 
-                // 7. استرجاع هوية المحل والشعار والثيم والخلفيات
                 if (data.businessLogo) {
                     setStore('bayan_business_logo', data.businessLogo);
                 }
@@ -203,7 +313,6 @@ function restoreData(input, isEmergencyBypass = false) {
                     setStore('bayan_saved_wallpaper', data.savedWallpaper);
                 }
 
-                // 8. استرجاع إعدادات وقوالب الطباعة
                 if (data.printSettings && Object.keys(data.printSettings).length > 0) {
                     setStore('bayan_print_settings', JSON.stringify(data.printSettings));
                 }
@@ -220,7 +329,6 @@ function restoreData(input, isEmergencyBypass = false) {
                     setStore('pos_auto_print_enabled', String(data.autoPrintEnabled));
                 }
 
-                // 9. استرجاع سجلات الإيصالات والآلة الحاسبة وملاحظات الخزينة
                 if (data.treasuryNotes) {
                     setStore('bayan_treasury_notes', data.treasuryNotes);
                 }
@@ -236,7 +344,6 @@ function restoreData(input, isEmergencyBypass = false) {
                     setStore('bayan_calc_history', JSON.stringify(data.calcHistory));
                 }
 
-                // 10. استرجاع تخصيصات أعمدة الجداول بالكامل
                 if (data.tableColumnsSettings) {
                     if (data.tableColumnsSettings.wrCols) setStore('wrColSettings', JSON.stringify(data.tableColumnsSettings.wrCols));
                     if (data.tableColumnsSettings.invCols) setStore('pos_inv_cols_visible', JSON.stringify(data.tableColumnsSettings.invCols));
@@ -252,7 +359,6 @@ function restoreData(input, isEmergencyBypass = false) {
                     if (data.tableColumnsSettings.priceAdjColsAlt) setStore('bayan_adj_hidden_columns', JSON.stringify(data.tableColumnsSettings.priceAdjColsAlt));
                 }
 
-                // 11. استرجاع تفضيلات وطرق العرض
                 if (data.viewPreferences) {
                     if (data.viewPreferences.variantViewMode) setStore('bayan_variant_view_mode', data.viewPreferences.variantViewMode);
                     if (data.viewPreferences.variantViewModePinned) setStore('bayan_variant_view_mode_pinned', data.viewPreferences.variantViewModePinned);
@@ -265,82 +371,137 @@ function restoreData(input, isEmergencyBypass = false) {
                     }
                 }
 
-                // 12. استرجاع أسباب الخصم والإضافة والضرائب
                 if (data.discountReasons) setStore('pos_discount_reasons', JSON.stringify(data.discountReasons));
                 if (data.taxReasons) setStore('pos_tax_reasons', JSON.stringify(data.taxReasons));
                 if (data.purchaseDiscountReasons) setStore('pos_p_discount_reasons', JSON.stringify(data.purchaseDiscountReasons));
                 if (data.purchaseTaxReasons) setStore('pos_p_tax_reasons', JSON.stringify(data.purchaseTaxReasons));
 
+                if (titleEl) {
+                    titleEl.innerHTML = `<span style="color: #10b981; font-weight: bold;">✅ اكتملت الاستعادة بنجاح!</span>`;
+                }
+                if (subEl) {
+                    subEl.innerHTML = `جاري إعادة تشغيل النظام لتطبيق البيانات...`;
+                }
+
                 if (typeof showCustomAlert === 'function') {
                     showCustomAlert({
                         type: 'success',
                         titleText: '✅ تم استعادة النسخة الاحتياطية بنجاح',
-                        msg: `تمت استعادة كافة البيانات بنجاح!\n• عدد الأصناف: ${prodCount}\n• عدد الفواتير والحركات: ${txCount}\n• عدد الحسابات: ${accCount}${hasUsers ? `\n• عدد المستخدمين: ${data.users.length}` : ''}\n\nسيتم إعادة تشغيل التطبيق لتطبيق البيانات وتحديث المستخدمين فوراً.`,
+                        msg: `تمت استعادة كافة البيانات بنجاح!\n• عدد الأصناف: ${prodCount}\n• عدد الفواتير والحركات: ${txCount}\n• عدد الحسابات: ${accCount}${shouldTouchUsers ? `\n• عدد المستخدمين: ${restoredUsers.length}` : '\n• المستخدمون: تم الحفاظ على المستخدمين الحاليين'}\n\nسيتم إعادة تشغيل التطبيق لتطبيق البيانات وتحديث النظام فوراً.`,
                         confirmText: 'إعادة التشغيل الآن 🔄',
                         onConfirm: () => location.reload()
                     });
-                    setTimeout(() => location.reload(), 2500);
+                    setTimeout(() => location.reload(), 2200);
                 } else {
                     alert("✅ تم استعادة النسخة الاحتياطية بنجاح! سيتم إعادة تحميل الصفحة.");
                     location.reload();
                 }
-            };
-
-            // نافذة تأكيد قبل الاسترجاع مع كشف محتويات النسخة
-            const summaryHtml = `هل أنت متأكد من رغبتك في استعادة هذه النسخة الاحتياطية؟<br><br>` +
-                `<div style="text-align: right; background: #f8fafc; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 0.95rem; line-height: 1.8;">` +
-                `📦 <b>عدد الأصناف:</b> ${prodCount} صنف<br>` +
-                `🧾 <b>عدد الفواتير والحركات:</b> ${txCount} حركة<br>` +
-                `👥 <b>عدد الحسابات والعملاء:</b> ${accCount} حساب<br>` +
-                (hasUsers ? `👤 <b>عدد المستخدمين والموظفين:</b> ${data.users.length} مستخدم<br>` : '') +
-                `</div><br>` +
-                `<b style="color: #dc2626;">⚠️ تحذير:</b> سيتم استبدال البيانات الحالية بالبيانات المحفوظة في هذا الملف.`;
-
-            if (typeof showCustomAlert === 'function') {
-                showCustomAlert({
-                    type: 'warning',
-                    titleText: '⚠️ تأكيد استعادة النسخة الاحتياطية',
-                    msg: summaryHtml,
-                    showCancel: true,
-                    confirmText: 'نعم، استعد البيانات 🔄',
-                    cancelText: 'إلغاء ❌',
-                    onConfirm: () => executeRestore(),
-                    onCancel: () => {
-                        if (input) input.value = '';
-                        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
-                            window.resetLoginEmergencyRestoreCard();
-                        }
-                    }
-                });
-            } else {
-                if (confirm(`هل أنت متأكد من استعادة النسخة الاحتياطية؟\nالأصناف: ${prodCount}\nالفواتير: ${txCount}\nالحسابات: ${accCount}${hasUsers ? `\nالمستخدمين: ${data.users.length}` : ''}`)) {
-                    executeRestore();
+            } catch (err) {
+                console.error("Critical error in executeRestore:", err);
+                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                    window.resetLoginEmergencyRestoreCard();
+                }
+                if (typeof showCustomAlert === 'function') {
+                    showCustomAlert({
+                        type: 'error',
+                        titleText: '❌ فشل استعادة النسخة الاحتياطية',
+                        msg: `حدث خطأ غير متوقع أثناء كتابة البيانات:\n${err.message || err}\n\nتم إلغاء العملية لحماية بياناتك.`
+                    });
                 } else {
+                    alert("❌ فشل استعادة النسخة الاحتياطية: " + (err.message || err));
+                }
+            }
+        };
+
+        // نافذة تأكيد قبل الاسترجاع مع كشف محتويات النسخة
+        const summaryHtml = `هل أنت متأكد من رغبتك في استعادة هذه النسخة الاحتياطية؟<br><br>` +
+            `<div style="text-align: right; background: #f8fafc; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 0.95rem; line-height: 1.8;">` +
+            `📦 <b>عدد الأصناف:</b> ${prodCount} صنف<br>` +
+            `🧾 <b>عدد الفواتير والحركات:</b> ${txCount} حركة<br>` +
+            `👥 <b>عدد الحسابات والعملاء:</b> ${accCount} حساب<br>` +
+            (hasUsers 
+                ? `👤 <b>عدد المستخدمين والموظفين:</b> ${data.users.length} مستخدم<br>` 
+                : `<span style="color: #0284c7; font-size: 0.88rem;">🛡️ سيتم الاحتفاظ بحسابات المستخدمين الحالية بالنظام</span><br>`) +
+            `</div><br>` +
+            `<b style="color: #dc2626;">⚠️ تحذير:</b> سيتم استبدال البيانات الحالية بالبيانات المحفوظة في هذا الملف.`;
+
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'warning',
+                titleText: '⚠️ تأكيد استعادة النسخة الاحتياطية',
+                msg: summaryHtml,
+                showCancel: true,
+                confirmText: 'نعم، استعد البيانات 🔄',
+                cancelText: 'إلغاء ❌',
+                onConfirm: () => executeRestore(),
+                onCancel: () => {
                     if (input) input.value = '';
                     if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
                         window.resetLoginEmergencyRestoreCard();
                     }
                 }
-            }
-        } catch (err) {
-            console.error("Failed to restore backup:", err);
-            if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
-                window.resetLoginEmergencyRestoreCard();
-            }
-            if (typeof showCustomAlert === 'function') {
-                showCustomAlert({
-                    type: 'error',
-                    titleText: '❌ فشل الاستعادة',
-                    msg: 'حدث خطأ أثناء قراءة ملف النسخة الاحتياطية. يرجى التأكد من اختيار ملف JSON سليم.'
-                });
+            });
+        } else {
+            if (confirm(`هل أنت متأكد من استعادة النسخة الاحتياطية؟\nالأصناف: ${prodCount}\nالفواتير: ${txCount}\nالحسابات: ${accCount}${hasUsers ? `\nالمستخدمين: ${data.users.length}` : ''}`)) {
+                executeRestore();
             } else {
-                alert("❌ فشل استعادة النسخة الاحتياطية، يرجى التأكد من سلامة الملف.");
+                if (input) input.value = '';
+                if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                    window.resetLoginEmergencyRestoreCard();
+                }
             }
         }
-    };
-    reader.readAsText(file);
-}
-window.restoreData = restoreData;
+    } catch (err) {
+        console.error("Failed to restore backup:", err);
+        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+            window.resetLoginEmergencyRestoreCard();
+        }
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'error',
+                titleText: '❌ فشل الاستعادة',
+                msg: 'حدث خطأ أثناء قراءة ملف النسخة الاحتياطية. يرجى التأكد من اختيار ملف JSON سليم.'
+            });
+        } else {
+            alert("❌ فشل استعادة النسخة الاحتياطية، يرجى التأكد من سلامة الملف.");
+        }
+    }
+};
+
+// 📂 استعادة النسخة من الإعدادات مع التوجيه التلقائي لمجلد النسخ الاحتياطية في Roaming
+window.triggerAppRestore = async function() {
+    if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
+        return showToast("🚫 ليس لديك صلاحية استعادة النسخ الاحتياطية!", "error");
+    }
+
+    let ipc = null;
+    try {
+        if (typeof window !== 'undefined' && window.require) {
+            ipc = window.require('electron').ipcRenderer;
+        } else if (typeof require !== 'undefined') {
+            ipc = require('electron').ipcRenderer;
+        }
+    } catch(e) {}
+
+    if (ipc) {
+        try {
+            const res = await ipc.invoke('select-backup-file');
+            if (!res || res.canceled) return;
+            if (res.error) {
+                return alert("❌ خطأ في فتح الملف: " + res.error);
+            }
+            return await window.restoreDataFromContent(res.content, res.fileName, false, null);
+        } catch(e) {
+            console.warn("Fallback to file input:", e);
+        }
+    }
+
+    const input = document.getElementById('restoreFile');
+    if (input) {
+        input.value = '';
+        input.click();
+    }
+};
 
 // ================= منطق إضافة حساب جديد (New Account Logic) =================
 window.copyPaymentNumber = function(text) {
@@ -554,18 +715,119 @@ window.openBackupFolder = async function() {
     return false;
 };
 
+// =========================================================================
+// 📸 محرك ضغط وتصغير صور الأصناف تلقائياً لتقليص حجم النسخ الاحتياطية بنسبة 90%
+// =========================================================================
+window.compressBase64Image = function(base64Str, maxWidth = 320, maxHeight = 320, quality = 0.75) {
+    return new Promise((resolve) => {
+        if (!base64Str || typeof base64Str !== 'string' || !base64Str.startsWith('data:image')) {
+            return resolve(base64Str);
+        }
+        if (base64Str.length < 35000) {
+            return resolve(base64Str); // الصورة خفيفة بالفعل (< 25KB) لا تحتاج لإعادة ضغط
+        }
+        try {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    let w = img.width;
+                    let h = img.height;
+                    if (w > maxWidth || h > maxHeight) {
+                        if (w > h) {
+                            h = Math.round((h * maxWidth) / w);
+                            w = maxWidth;
+                        } else {
+                            w = Math.round((w * maxHeight) / h);
+                            h = maxHeight;
+                        }
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const compressed = canvas.toDataURL('image/jpeg', quality);
+                    resolve(compressed);
+                } catch(e) {
+                    resolve(base64Str);
+                }
+            };
+            img.onerror = () => resolve(base64Str);
+            img.src = base64Str;
+        } catch(e) {
+            resolve(base64Str);
+        }
+    });
+};
+
+window.optimizeAllProductImagesInDB = async function() {
+    if (typeof db === 'undefined' || !db || !db.products) return 0;
+    try {
+        const prods = await db.products.toArray();
+        let changed = 0;
+        for (let i = 0; i < prods.length; i++) {
+            const p = prods[i];
+            if (p && p.image && typeof p.image === 'string' && p.image.length > 35000) {
+                const newImg = await window.compressBase64Image(p.image, 320, 320, 0.75);
+                if (newImg && newImg.length < p.image.length) {
+                    p.image = newImg;
+                    changed++;
+                }
+            }
+        }
+        if (changed > 0) {
+            await db.products.bulkPut(prods);
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                window.productsDB = prods;
+            }
+            console.log(`✅ [ImageOptimizer] تم ضغط وتحسين صور ${changed} صنف بنجاح في قاعدة البيانات.`);
+        }
+        return changed;
+    } catch(err) {
+        console.error("Error optimizing product images in DB:", err);
+        return 0;
+    }
+};
+
 window.executeAutoBackupToFile = async function(silent = false, isManual = false) {
     if (!silent) {
         window.showBackupProgressOverlay();
     }
     
-    // 1. قراءة كافة الجداول الأساسية من IndexedDB مباشرة لضمان أعلى دقة وشمولية
+    // 1. قراءة كافة الجداول الأساسية من SQLite مباشرة لضمان أعلى دقة وشمولية
     let productsData = [];
     try {
         if (typeof db !== 'undefined' && db && db.products) productsData = await db.products.toArray();
     } catch(e) {}
     if (productsData.length === 0 && typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
         productsData = productsDB;
+    }
+    productsData = (productsData || []).filter(p => p && typeof p === 'object' && p.id != null);
+
+    // 📸 ضغط وتحسين صور الأصناف الكبيرة تلقائياً لتخفيض حجم ملف النسخة الاحتياطية بنسبة تصل إلى 90%
+    if (typeof window.compressBase64Image === 'function') {
+        let anyCompressed = false;
+        for (let i = 0; i < productsData.length; i++) {
+            const p = productsData[i];
+            if (p && p.image && typeof p.image === 'string' && p.image.length > 35000) {
+                try {
+                    const newImg = await window.compressBase64Image(p.image, 320, 320, 0.75);
+                    if (newImg && newImg.length < p.image.length) {
+                        p.image = newImg;
+                        anyCompressed = true;
+                    }
+                } catch(e) {}
+            }
+        }
+        // حفظ الأصناف المضغوطة في قاعدة البيانات لتخفيف قاعدة البيانات للأبد وتسريع المرات القادمة
+        if (anyCompressed && typeof db !== 'undefined' && db && db.products) {
+            db.products.bulkPut(productsData).catch(() => {});
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                window.productsDB = productsData;
+            }
+        }
     }
 
     let transactionsData = [];
@@ -575,6 +837,7 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     if (transactionsData.length === 0 && typeof transactions !== 'undefined' && Array.isArray(transactions)) {
         transactionsData = transactions;
     }
+    transactionsData = (transactionsData || []).filter(t => t && typeof t === 'object' && t.id != null);
 
     let accountsData = [];
     try {
@@ -583,6 +846,7 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     if (accountsData.length === 0 && typeof accounts !== 'undefined' && Array.isArray(accounts)) {
         accountsData = accounts;
     }
+    accountsData = (accountsData || []).filter(a => a && typeof a === 'object' && a.id != null);
 
     let trashData = [];
     try {
@@ -591,8 +855,9 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     if (trashData.length === 0 && typeof trashBin !== 'undefined' && Array.isArray(trashBin)) {
         trashData = trashBin;
     }
+    trashData = (trashData || []).filter(t => t && typeof t === 'object');
 
-    // 2. جلب كافة الجداول الإضافية من IndexedDB (سجلات الخزينة، التدقيق، المخازن، والخلفيات المخصصة)
+    // 2. جلب كافة الجداول الإضافية من SQLite (سجلات الخزينة، التدقيق، المخازن، والخلفيات المخصصة)
     let treasuryData = [];
     let auditLogData = [];
     let warehousesData = [];
@@ -620,8 +885,15 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         } catch(e) {}
     }
 
-    // 🔒 تأمين وتشفير رموز الـ PIN للمستخدمين في ملف النسخة الاحتياطية لمنع كشفها
-    const securedUsers = (users || []).map(u => {
+    // 🔒 قراءة وتأمين وتشفير رموز الـ PIN للمستخدمين في ملف النسخة الاحتياطية
+    let usersList = [];
+    try {
+        if (typeof db !== 'undefined' && db && db.users) usersList = await db.users.toArray();
+    } catch(e) {}
+    if ((!usersList || usersList.length === 0) && typeof users !== 'undefined' && Array.isArray(users)) {
+        usersList = users;
+    }
+    const securedUsers = (usersList || []).filter(u => u && typeof u === 'object').map(u => {
         if (!u) return u;
         const copy = { ...u };
         if (copy.pin != null && copy.pin !== '' && typeof window.BayanSecurity !== 'undefined' && typeof window.BayanSecurity.encryptPin === 'function') {
@@ -630,12 +902,22 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         return copy;
     });
 
+    const _safeParse = (val, fallback) => {
+        if (val === null || val === undefined || val === '') return fallback;
+        if (typeof val === 'object') return val;
+        try {
+            return JSON.parse(val);
+        } catch (e) {
+            return fallback;
+        }
+    };
+
     const data = {
-        version: window.appVersion || "3.1.1",
+        version: window.appVersion || "3.2.0",
         backupDate: new Date().toISOString(),
         products: productsData,
         transactions: transactionsData,
-        settings: JSON.parse(getStore('pos_settings') || '{}'),
+        settings: _safeParse(getStore('pos_settings'), {}),
         users: securedUsers,
         accounts: accountsData,
         trash: trashData,
@@ -643,24 +925,24 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         auditLogs: auditLogData,
         warehouses: warehousesData,
         wallpapers: wallpapersData,
-        inventoryCategories: (window.inventoryCategories && window.inventoryCategories.length > 0) ? window.inventoryCategories : JSON.parse(getStore('bayan_inventory_categories') || '[]'),
-        barcodeLabelSettings: JSON.parse(getStore('bayan_barcode_label_settings') || '{}'),
-        barcodeCenterSettings: JSON.parse(getStore('bayan_barcode_center_settings') || '{}'),
-        paymentMethods: JSON.parse(getStore('bayan_payment_methods') || '[]'),
-        globalUnits: JSON.parse(getStore('bayan_global_units') || '[]'),
+        inventoryCategories: (window.inventoryCategories && window.inventoryCategories.length > 0) ? window.inventoryCategories : _safeParse(getStore('bayan_inventory_categories'), []),
+        barcodeLabelSettings: _safeParse(getStore('bayan_barcode_label_settings'), {}),
+        barcodeCenterSettings: _safeParse(getStore('bayan_barcode_center_settings'), {}),
+        paymentMethods: _safeParse(getStore('bayan_payment_methods'), []),
+        globalUnits: _safeParse(getStore('bayan_global_units'), []),
         businessLogo: getStore('bayan_business_logo') || '',
         userConfirmedCustomLogo: getStore('bayan_user_confirmed_custom_logo') || '',
         theme: getStore('pos_theme') || '',
         wallpaper: getStore('bayan_wallpaper') || '',
         wallpaperType: getStore('bayan_wallpaper_type') || '',
         savedWallpaper: getStore('bayan_saved_wallpaper') || '',
-        printSettings: JSON.parse(getStore('bayan_print_settings') || '{}'),
+        printSettings: _safeParse(getStore('bayan_print_settings'), {}),
         printStyle: getStore('bayan_print_style') || '',
-        printTemplateChoice: JSON.parse(getStore('bayan_print_template_choice') || '{}'),
-        userTemplates: JSON.parse(getStore('bayan_user_templates') || '[]'),
+        printTemplateChoice: _safeParse(getStore('bayan_print_template_choice'), {}),
+        userTemplates: _safeParse(getStore('bayan_user_templates'), []),
         autoPrintEnabled: getStore('pos_auto_print_enabled') || '',
-        receiptLog: JSON.parse(getStore('bayan_receipt_log') || '[]'),
-        calcHistory: JSON.parse(getStore('bayan_calc_history') || '[]'),
+        receiptLog: _safeParse(getStore('bayan_receipt_log'), []),
+        calcHistory: _safeParse(getStore('bayan_calc_history'), []),
         treasuryNotes: getStore('bayan_treasury_notes') || '',
         treasuryNotesConfig: {
             borderColor: getStore('tr_notes_border_color') || '',
@@ -668,18 +950,18 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
             saveSystem: getStore('tr_notes_save_system') || ''
         },
         tableColumnsSettings: {
-            wrCols: JSON.parse(getStore('wrColSettings') || '{}'),
-            invCols: JSON.parse(getStore('pos_inv_cols_visible') || '{}'),
-            invColsLegacy: JSON.parse(getStore('pos_inv_cols') || '{}'),
-            histCols: JSON.parse(getStore('pos_hist_cols') || '{}'),
-            accCols: JSON.parse(getStore('pos_acc_cols') || '{}'),
-            accColsOrder: JSON.parse(getStore('pos_acc_cols_order_v2') || '[]'),
-            anCols: JSON.parse(getStore('pos_an_cols') || '{}'),
-            stmtCols: JSON.parse(getStore('pos_stmt_cols') || '{}'),
-            inquiryVariantsCols: JSON.parse(getStore('pos_inquiry_variants_cols') || '{}'),
-            transferCols: JSON.parse(getStore('transferColSettings') || '{}'),
-            priceAdjCols: JSON.parse(getStore('priceAdjHiddenCols') || '[]'),
-            priceAdjColsAlt: JSON.parse(getStore('bayan_adj_hidden_columns') || '[]')
+            wrCols: _safeParse(getStore('wrColSettings'), {}),
+            invCols: _safeParse(getStore('pos_inv_cols_visible'), {}),
+            invColsLegacy: _safeParse(getStore('pos_inv_cols'), {}),
+            histCols: _safeParse(getStore('pos_hist_cols'), {}),
+            accCols: _safeParse(getStore('pos_acc_cols'), {}),
+            accColsOrder: _safeParse(getStore('pos_acc_cols_order_v2'), []),
+            anCols: _safeParse(getStore('pos_an_cols'), {}),
+            stmtCols: _safeParse(getStore('pos_stmt_cols'), {}),
+            inquiryVariantsCols: _safeParse(getStore('pos_inquiry_variants_cols'), {}),
+            transferCols: _safeParse(getStore('transferColSettings'), {}),
+            priceAdjCols: _safeParse(getStore('priceAdjHiddenCols'), []),
+            priceAdjColsAlt: _safeParse(getStore('bayan_adj_hidden_columns'), [])
         },
         viewPreferences: {
             variantViewMode: getStore('bayan_variant_view_mode') || '',
@@ -689,10 +971,10 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
             pinnedPaymentMethod: getStore('pinned_payment_method') || '',
             pinnedPriceLevel: getStore('pos_pinned_price_level') || getStore('pos_price_level_pinned') || ''
         },
-        discountReasons: (typeof discountReasons !== 'undefined') ? discountReasons : JSON.parse(getStore('pos_discount_reasons') || '[]'),
-        taxReasons: (typeof taxReasons !== 'undefined') ? taxReasons : JSON.parse(getStore('pos_tax_reasons') || '[]'),
-        purchaseDiscountReasons: (typeof purchaseDiscountReasons !== 'undefined') ? purchaseDiscountReasons : JSON.parse(getStore('pos_p_discount_reasons') || '[]'),
-        purchaseTaxReasons: (typeof purchaseTaxReasons !== 'undefined') ? purchaseTaxReasons : JSON.parse(getStore('pos_p_tax_reasons') || '[]')
+        discountReasons: (typeof discountReasons !== 'undefined') ? discountReasons : _safeParse(getStore('pos_discount_reasons'), []),
+        taxReasons: (typeof taxReasons !== 'undefined') ? taxReasons : _safeParse(getStore('pos_tax_reasons'), []),
+        purchaseDiscountReasons: (typeof purchaseDiscountReasons !== 'undefined') ? purchaseDiscountReasons : _safeParse(getStore('pos_p_discount_reasons'), []),
+        purchaseTaxReasons: (typeof purchaseTaxReasons !== 'undefined') ? purchaseTaxReasons : _safeParse(getStore('pos_p_tax_reasons'), [])
     };
     
     setStore('pos_last_backup_time', Date.now());
@@ -838,6 +1120,9 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
 // فحص وتكرار النسخ الاحتياطي الدوري في الخلفية (كل ساعة، ساعتين، 12، 24)
 window.checkAndRunPeriodicBackup = function() {
     const settings = JSON.parse(getStore('pos_settings') || '{}');
+    const isAutoBackupEnabled = (settings.autoBackup === true || settings.autoBackup === 'true');
+    if (!isAutoBackupEnabled) return;
+
     const interval = settings.autoBackupInterval;
     
     // إذا كان الخيار غير محدد أو كان "close" (فقط عند الإغلاق/الخروج)، لا نقوم بنسخ دوري أثناء ساعات العمل
@@ -985,7 +1270,8 @@ try {
             // 2. إذا كانت كافة البيانات محفوظة، نقوم بالنسخ الاحتياطي إذا كان مفعلاً
             try {
                 const settings = JSON.parse(getStore('pos_settings') || '{}');
-                const shouldBackup = Boolean(settings.autoBackup) || settings.autoBackup === 'true' || (settings.autoBackupInterval && settings.autoBackupInterval !== 'close');
+                const isAutoBackupEnabled = (settings.autoBackup === true || settings.autoBackup === 'true');
+                const shouldBackup = isAutoBackupEnabled;
 
                 if (shouldBackup) {
                     if (typeof window.showBackupProgressOverlay === 'function') {

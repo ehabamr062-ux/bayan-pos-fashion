@@ -53,18 +53,11 @@
         // ============================================================
         //  محرك البحث الذكي الموحد والمرتب للأصناف (Smart Ranked Product Search)
         // ============================================================
+        const _digitMap = { '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9','۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9' };
         function normalizeSearchQuery(text) {
             if (text === null || text === undefined) return '';
-            const arabicDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
-            const persianDigits = ['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
-            
             let s = String(text).trim().toLowerCase();
-            
-            // تحويل الأرقام العربية والفارسية إلى أرقام إنجليزية موحدة (0-9)
-            for (let i = 0; i < 10; i++) {
-                s = s.split(arabicDigits[i]).join(String(i));
-                s = s.split(persianDigits[i]).join(String(i));
-            }
+            s = s.replace(/[٠-٩۰-۹]/g, d => _digitMap[d] || d);
             
             // تطبيع الحروف العربية وإزالة التشكيل والتطويل
             return s
@@ -544,7 +537,7 @@
             // 2. فحص أقصى رقم مسجل ومزامن من قاعدة البيانات (حتى لو لم تكن كل الفواتير السابقة محملة بذاكرة اليوم)
             if (typeKeyword) {
                 const key = 'bayan_last_seq_' + (devPrefix || '') + typeKeyword;
-                const storedVal = (typeof getStore === 'function' ? getStore(key) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null);
+                const storedVal = (typeof getStore === 'function' ? getStore(key) : null);
                 const storedMax = parseInt(storedVal || '0', 10);
                 if (!isNaN(storedMax) && storedMax > maxId) {
                     maxId = storedMax;
@@ -571,14 +564,11 @@
             const num = extractNumericInvoiceId(invoiceId, devPrefix);
             if (num > 0) {
                 const key = 'bayan_last_seq_' + (devPrefix || '') + typeKeyword;
-                const storedVal = (typeof getStore === 'function' ? getStore(key) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null);
+                const storedVal = (typeof getStore === 'function' ? getStore(key) : null);
                 const currentStored = parseInt(storedVal || '0', 10);
                 if (num > currentStored || isNaN(currentStored)) {
                     if (typeof setStore === 'function') {
                         setStore(key, String(num));
-                    }
-                    if (typeof localStorage !== 'undefined') {
-                        try { localStorage.setItem(key, String(num)); } catch(e) {}
                     }
                 }
             }
@@ -1843,7 +1833,7 @@
                     if (!window.deletedItemIds.products) window.deletedItemIds.products = [];
                     window.deletedItemIds.products.push(...targetIds);
 
-                    // 3. حذف جماعي فوري من قاعدة بيانات Dexie
+                    // 3. حذف جماعي فوري من قاعدة بيانات SQLite
                     await db.products.bulkDelete(targetIds);
 
                     // 4. تحديث المصفوفة المحلية فوراً

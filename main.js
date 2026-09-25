@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -12,19 +12,28 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 // 💾 تقليل العمليات الخلفية المجهدة للهارد الميكانيكي HDD
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess');
-// 🧠 ضبط استهلاك الذاكرة السريع لمحرك V8
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
+// 🧠 ضبط استهلاك الذاكرة لمحرك V8 لمنح البرنامج سلاسة فائقة ومنع التجميد الدوري (GC Thrashing)
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048');
 
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
     console.log('⚠️ نسخة أخرى من تطبيق Bayan POS تعمل بالفعل بالخلفية. إغلاق النسخة المكررة فوراً...');
     app.exit(0);
+} else {
+    app.on('second-instance', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
 }
 
 let openWindows = new Set();
 let mainWindow;
 let isQuitting = false;
+let autoUpdater = null;
 const LICENSE_SECRET = 'BAYAN_POS_SECRET_KEY_2026';
 
 function createWindow() {
@@ -337,6 +346,78 @@ app.on('window-all-closed', function () {
 ipcMain.handle('open-new-window', () => {
     createWindow();
     return true;
+});
+
+// 📂 اختيار ملف نسخة احتياطية مع التوجيه المباشر لمجلد النسخ في AppData/Roaming/Bayan POS/backups
+ipcMain.handle('select-backup-file', async () => {
+    try {
+        const backupDir = path.join(app.getPath('appData'), 'Bayan POS', 'backups');
+        if (!fs.existsSync(backupDir)) {
+            fs.mkdirSync(backupDir, { recursive: true });
+        }
+        const result = await dialog.showOpenDialog({
+            title: 'اختر ملف النسخة الاحتياطية',
+            defaultPath: backupDir,
+            properties: ['openFile'],
+            filters: [
+                { name: 'نسخ احتياطية لنظام بيان (*.json)', extensions: ['json'] },
+                { name: 'كافة الملفات (*.*)', extensions: ['*'] }
+            ]
+        });
+        if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+            return { canceled: true };
+        }
+        const chosenFile = result.filePaths[0];
+        const content = fs.readFileSync(chosenFile, 'utf8');
+        return {
+            canceled: false,
+            filePath: chosenFile,
+            fileName: path.basename(chosenFile),
+            fileSize: fs.statSync(chosenFile).size,
+            content: content
+        };
+    } catch(err) {
+        console.error("select-backup-file error:", err);
+        return { error: err.message };
+    }
+});
+
+// 📦 إدارة ومسار قاعدة بيانات SQLite على القرص الصلب
+ipcMain.handle('get-sqlite-status', () => {
+    try {
+        const sqliteFile = path.join(os.homedir(), '.bayan_pos', 'bayan_pos.db');
+        const exists = fs.existsSync(sqliteFile);
+        let size = 0;
+        if (exists) {
+            size = fs.statSync(sqliteFile).size;
+        }
+        return {
+            enabled: true,
+            filePath: sqliteFile,
+            exists: exists,
+            sizeBytes: size,
+            sizeFormatted: exists ? (size / 1024).toFixed(1) + ' KB' : '0 KB'
+        };
+    } catch (e) {
+        return { enabled: true, error: e.message };
+    }
+});
+
+ipcMain.handle('open-sqlite-folder', () => {
+    try {
+        const sqliteDir = path.join(os.homedir(), '.bayan_pos');
+        if (!fs.existsSync(sqliteDir)) {
+            fs.mkdirSync(sqliteDir, { recursive: true });
+        }
+        const dbPath = path.join(sqliteDir, 'bayan_pos.db');
+        if (fs.existsSync(dbPath)) {
+            shell.showItemInFolder(dbPath);
+        } else {
+            shell.openPath(sqliteDir);
+        }
+        return true;
+    } catch(e) {}
+    return false;
 });
 
 // قنوات الاتصال (IPC)
@@ -757,7 +838,6 @@ function setAutoUpdatesFrozenOnDisk(disabled) {
 // =========================================================================
 // 🚀 2. نظام التحديثات التلقائية المباشرة بالخلفية (Electron Auto Updater)
 // =========================================================================
-let autoUpdater = null;
 try {
     const { autoUpdater: updater } = require('electron-updater');
     autoUpdater = updater;
@@ -893,7 +973,7 @@ ipcMain.handle('quit-and-install-update', () => {
 
 try { ipcMain.removeHandler('get-app-version'); } catch(e) {}
 ipcMain.handle('get-app-version', () => {
-    return app.getVersion() || '3.1.1';
+    return app.getVersion() || '3.1.2';
 });
 
 // =========================================================================

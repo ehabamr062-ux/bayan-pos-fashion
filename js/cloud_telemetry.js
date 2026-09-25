@@ -19,8 +19,6 @@
                     const custom = getStore('bayan_telemetry_url');
                     if (custom && custom.startsWith('http')) return custom;
                 }
-                const local = localStorage.getItem('bayan_telemetry_url');
-                if (local && local.startsWith('http')) return local;
             } catch (e) {}
             return DEFAULT_WEB_APP_URL;
         },
@@ -29,7 +27,6 @@
             if (newUrl && typeof newUrl === 'string' && newUrl.startsWith('http')) {
                 try {
                     if (typeof setStore === 'function') setStore('bayan_telemetry_url', newUrl);
-                    localStorage.setItem('bayan_telemetry_url', newUrl);
                     console.log("✅ Cloud Telemetry URL updated successfully.");
                 } catch (e) {}
             }
@@ -101,7 +98,7 @@
                 triggerSource: triggerSource,
                 installDate: installDate ? new Date(installDate).toLocaleDateString('ar-EG') : '---',
                 lastActive: new Date().toLocaleString('ar-EG'),
-                appVersion: window.appVersion || 'V3.1.1'
+                appVersion: window.appVersion || 'V3.1.2'
             };
         },
 

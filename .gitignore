@@ -11,3 +11,6 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+.agents/
+*.backup.*
+tools/

@@ -170,8 +170,8 @@
 
         function getLoginLockoutState() {
             try {
-                const until = parseInt((typeof getStore === 'function' ? getStore('bayan_login_lockout_until') : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('bayan_login_lockout_until') : null) || '0', 10) || 0;
-                const attempts = parseInt((typeof getStore === 'function' ? getStore('bayan_login_failed_attempts') : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('bayan_login_failed_attempts') : null) || '0', 10) || 0;
+                const until = parseInt((typeof getStore === 'function' ? getStore('bayan_login_lockout_until') : null) || '0', 10) || 0;
+                const attempts = parseInt((typeof getStore === 'function' ? getStore('bayan_login_failed_attempts') : null) || '0', 10) || 0;
                 return { until, attempts };
             } catch(e) {
                 return { until: 0, attempts: 0 };
@@ -183,12 +183,6 @@
                 if (typeof setStore === 'function') {
                     setStore('bayan_login_lockout_until', String(until || 0));
                     setStore('bayan_login_failed_attempts', String(attempts || 0));
-                }
-                if (typeof localStorage !== 'undefined') {
-                    try {
-                        localStorage.removeItem('bayan_login_lockout_until');
-                        localStorage.removeItem('bayan_login_failed_attempts');
-                    } catch(e) {}
                 }
             } catch(e) {}
         }
@@ -286,7 +280,7 @@
                         setStore('bayan_terminal_warehouse', whName);
                     }
 
-                    // ✅ أمان: نحفظ في IndexedDB حصراً - الدور والصلاحيات تُحمَّل من DB
+                    // ✅ أمان: نحفظ في SQLite حصراً - الدور والصلاحيات تُحمَّل من DB
                     currentUser = { ...foundUser, warehouseName: whName };
                     window.currentUser = currentUser;
                     // 🔒 تشفير رمز PIN قبل حفظه في الجلسة المحلية لمنع ظهوره كنص صريح
@@ -439,9 +433,66 @@
         };
 
         // =========================================================================
-        // 📥 استرداد نسخة احتياطية طارئ مباشر من شاشة تسجيل الدخول
+        // 📥 استرداد نسخة احتياطية طارئ مباشر من شاشة تسجيل الدخول (يفتح مجلد النسخ في Roaming مباشرة)
         // =========================================================================
-        window.triggerLoginEmergencyRestore = function() {
+        window.triggerLoginEmergencyRestore = async function() {
+            let ipc = null;
+            try {
+                if (typeof window !== 'undefined' && window.require) {
+                    ipc = window.require('electron').ipcRenderer;
+                } else if (typeof require !== 'undefined') {
+                    ipc = require('electron').ipcRenderer;
+                }
+            } catch(e) {}
+
+            if (ipc) {
+                const card = document.getElementById('loginEmergencyRestoreCard');
+                const title = document.getElementById('loginRestoreTitle');
+                if (card) {
+                    card.style.pointerEvents = 'none';
+                    card.style.opacity = '0.85';
+                }
+                if (title) {
+                    title.innerHTML = '<span>جاري فتح مجلد النسخ الاحتياطية... 📁</span>';
+                }
+
+                try {
+                    const res = await ipc.invoke('select-backup-file');
+                    if (!res || res.canceled) {
+                        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                            window.resetLoginEmergencyRestoreCard();
+                        }
+                        return;
+                    }
+                    if (res.error) {
+                        if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                            window.resetLoginEmergencyRestoreCard();
+                        }
+                        return alert("❌ خطأ في فتح الملف: " + res.error);
+                    }
+
+                    const sizeMb = res.fileSize ? (res.fileSize / (1024 * 1024)).toFixed(1) : '0';
+                    if (title) {
+                        title.innerHTML = `<span>جاري قراءة النسخة (${sizeMb} MB)... ⏳</span>`;
+                    }
+                    const sub = document.getElementById('loginRestoreSubtitle');
+                    if (sub && parseFloat(sizeMb) > 10) {
+                        sub.innerHTML = `ملف كبير (${sizeMb} MB)، جاري القراءة والتحليل...`;
+                    }
+
+                    if (typeof window.restoreDataFromContent === 'function') {
+                        return await window.restoreDataFromContent(res.content, res.fileName, true, null);
+                    } else if (typeof restoreDataFromContent === 'function') {
+                        return await restoreDataFromContent(res.content, res.fileName, true, null);
+                    }
+                } catch(e) {
+                    console.warn("Fallback to file input in login restore:", e);
+                    if (typeof window.resetLoginEmergencyRestoreCard === 'function') {
+                        window.resetLoginEmergencyRestoreCard();
+                    }
+                }
+            }
+
             const input = document.getElementById('loginEmergencyRestoreInput');
             if (input) {
                 input.value = '';
@@ -473,12 +524,19 @@
             const title = document.getElementById('loginRestoreTitle');
             const iconBox = document.getElementById('loginRestoreIconBox');
 
+            const file = input.files[0];
+            const sizeMb = file ? (file.size / (1024 * 1024)).toFixed(1) : 0;
+
             if (card) {
                 card.style.pointerEvents = 'none';
-                card.style.opacity = '0.75';
+                card.style.opacity = '0.85';
             }
             if (title) {
-                title.innerHTML = '<span>جاري فحص النسخة... ⏳</span>';
+                title.innerHTML = `<span>جاري قراءة النسخة (${sizeMb} MB)... ⏳</span>`;
+            }
+            const sub = document.getElementById('loginRestoreSubtitle');
+            if (sub && sizeMb > 10) {
+                sub.innerHTML = `ملف كبير (${sizeMb} MB)، جاري القراءة والتحليل...`;
             }
             if (iconBox) {
                 iconBox.innerHTML = '🔄';
@@ -698,7 +756,8 @@
 
         async function performLogout() {
             const settings = JSON.parse(getStore('pos_settings') || '{}');
-            if (settings.autoBackup === true) {
+            const isAutoBackupEnabled = (settings.autoBackup === true || settings.autoBackup === 'true');
+            if (isAutoBackupEnabled) {
                 if (typeof window.executeAutoBackupToFile === 'function') {
                     await window.executeAutoBackupToFile(false);
                 }
@@ -1114,7 +1173,7 @@
                 ctx.fillStyle = '#64748b';
                 ctx.font = 'bold 13px "Cairo", "Segoe UI", Tahoma, sans-serif';
                 const todayStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
-                ctx.fillText(`⚡ نظام بَيَان POS (Fashion Edition v${window.appVersion || '3.1.1'}) | تاريخ التفعيل: ${todayStr}`, 340, 460);
+                ctx.fillText(`⚡ نظام بَيَان POS (Fashion Edition v${window.appVersion || '3.1.2'}) | تاريخ التفعيل: ${todayStr}`, 340, 460);
 
                 ctx.fillStyle = '#f59e0b';
                 ctx.font = 'bold 12px "Cairo", "Segoe UI", Tahoma, sans-serif';

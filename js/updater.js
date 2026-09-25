@@ -18,7 +18,7 @@
     const GITHUB_REPO_OWNER = 'ehabamr062-ux';
     const GITHUB_REPO_NAME = 'bayan_fashion_website';
     const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
-    const GITHUB_BROADCAST_REPO = GITHUB_REPO_NAME;
+    const GITHUB_BROADCAST_REPO = 'bayan-pos-fashion';
     const GITHUB_BROADCAST_URL = `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_BROADCAST_REPO}/main/announcements.json`;
 
     let ipcRenderer = null;
@@ -43,9 +43,7 @@
             #bayan-update-overlay {
                 position: fixed !important;
                 inset: 0 !important;
-                background: rgba(8, 8, 18, 0.92) !important;
-                -webkit-backdrop-filter: blur(10px) !important;
-                backdrop-filter: blur(10px) !important;
+                background: rgba(8, 8, 18, 0.95) !important;
                 z-index: 999999999 !important;
                 display: flex !important;
                 align-items: center !important;
@@ -160,7 +158,7 @@
                 border-radius: 16px; 
                 padding: 16px 20px; 
                 margin-bottom: 22px; 
-                max-height: 160px; 
+                max-height: 240px; 
                 overflow-y: auto; 
                 box-shadow: inset 0 2px 8px rgba(0,0,0,0.3);
             }
@@ -177,6 +175,7 @@
                 gap: 6px;
             }
             .upd-notes-body { font-size: 0.9rem; color: #e2e8f0; line-height: 1.75; font-weight: 700; }
+            .upd-notes-body img { max-width: 100%; border-radius: 10px; margin: 8px 0; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
             .upd-prog { margin-bottom: 20px; display: none; }
             .upd-prog.vis { display: block; }
             .upd-prog-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -237,7 +236,7 @@
     // حالة نظام التحديث
     // =========================================================================
     const state = {
-        currentVersion: window.appVersion || '3.1.1',
+        currentVersion: window.appVersion || '3.1.2',
         latestVersion: null,
         releaseNotes: '',
         downloadUrl: '',
@@ -266,22 +265,46 @@
     }
 
     function getCurrentAppVersion() {
-        return window.appVersion || '3.1.1';
+        return window.appVersion || '3.2.0';
     }
 
     function fmtNotes(notes) {
         if (!notes) return 'تحسينات جديدة وإصلاحات مستقرة في هذا الإصدار.';
-        // 🔒 تطهير الرموز الخاصة بـ HTML أولاً لمنع أي هجوم حقن كود خبيث من الإنترنت
-        const clean = String(notes)
+        
+        let text = String(notes);
+
+        // 🖼️ 1. التقاط وسوم الصور المكتوبة بـ HTML مثل <img ... src="..." ...> وتحويلها لرمز آمن
+        text = text.replace(/<img\s+[^>]*?src=["'](https?:\/\/[^"'>\s]+)["'][^>]*?>/gi, (match, src) => {
+            return `__IMG_TAG_SAFE__(${src})__`;
+        });
+
+        // 🔒 2. تطهير الرموز الخاصة بـ HTML لمنع أي كود خبيث
+        text = text
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
 
-        return clean
+        // 🖼️ 3. تحويل صور الماركداون ![alt](url) إلى عناصر صور حقيقية
+        text = text.replace(/!\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g, (match, alt, url) => {
+            return `<div style="margin: 10px 0; text-align: center;"><img src="${url}" alt="${alt || 'صورة التحديث'}" style="max-width: 100%; max-height: 240px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: inline-block;" loading="lazy"></div>`;
+        });
+
+        // 🖼️ 4. استرجاع وعرض صور HTML الأصلية التي تم التقاطها في الخطوة الأولى
+        text = text.replace(/__IMG_TAG_SAFE__\((https?:\/\/[^"'>\s]+)\)__/g, (match, url) => {
+            return `<div style="margin: 10px 0; text-align: center;"><img src="${url}" alt="صورة التحديث" style="max-width: 100%; max-height: 240px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: inline-block;" loading="lazy"></div>`;
+        });
+
+        // 🔗 5. دعم الروابط [title](url)
+        text = text.replace(/\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g, (match, title, url) => {
+            return `<a href="#" onclick="if(window.require){try{window.require('electron').shell.openExternal('${url}');}catch(e){window.open('${url}','_blank');}}else{window.open('${url}','_blank');}return false;" style="color:#38bdf8; font-weight:800; text-decoration:underline;">${title || url}</a>`;
+        });
+
+        // 📝 6. تنسيق النصوص والعناوين والنقاط
+        return text
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/^#{1,3}\s+(.+)$/gm, '<strong style="color:#10b981">$1</strong>')
+            .replace(/^#{1,3}\s+(.+)$/gm, '<div style="color:#10b981; font-weight:900; margin-top:8px; font-size:0.95rem;">$1</div>')
             .replace(/^[-*]\s+(.+)$/gm, '• $1')
             .replace(/\r?\n/g, '<br>');
     }
@@ -478,7 +501,7 @@
             return { hasUpdate: false, error: 'offline' };
         }
 
-        // 🔒 فحص حالة تجميد/إيقاف التحديثات التلقائية مباشرة من قاعدة بيانات IndexedDB
+        // 🔒 فحص حالة تجميد/إيقاف التحديثات التلقائية مباشرة من قاعدة بيانات SQLite
         let isAutoUpdateFrozen = false;
         try {
             const storedVal = typeof getStore === 'function' ? getStore('pos_auto_updates_disabled') : null;
@@ -498,7 +521,7 @@
                     isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
                 }
             } catch (e) {
-                console.warn('[Updater] Could not check update freeze status from IndexedDB:', e);
+                console.warn('[Updater] Could not check update freeze status from SQLite:', e);
             }
         }
 
@@ -900,10 +923,10 @@
     }
 
     // =========================================================================
-    // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر IndexedDB و Electron Disk
+    // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر SQLite و Electron Disk
     // =========================================================================
     function updateAutoUpdatesPolicyDOM(isEnabled) {
-        const curVer = window.appVersion || '3.1.1';
+        const curVer = window.appVersion || '3.1.2';
         const badge = document.getElementById('updatePolicyBadge');
         const text = document.getElementById('toggleAutoUpdatesText');
         const toggle = document.getElementById('toggleAutoUpdatesSwitch');
@@ -973,26 +996,26 @@
 
     window.toggleAutoUpdatesPolicy = async function(isEnabled) {
         const disabled = !isEnabled;
-        const curVer = window.appVersion || '3.1.1';
+        const curVer = window.appVersion || '3.1.2';
         window.__isAutoUpdatesFrozen = disabled;
 
-        // 💾 1. التخزين اللحظي في AppStore و IndexedDB
+        // 💾 1. التخزين اللحظي في AppStore و SQLite
         if (typeof setStore === 'function') {
             setStore('pos_auto_updates_disabled', disabled ? 'true' : 'false');
         } else if (window.AppStore) {
             window.AppStore['pos_auto_updates_disabled'] = disabled ? 'true' : 'false';
         }
 
-        // 💾 2. التخزين الصارم في IndexedDB
+        // 💾 2. التخزين الصارم في SQLite
         if (typeof db !== 'undefined' && db && db.settings) {
             try {
                 await db.settings.put({ id: 'pos_auto_updates_disabled', value: disabled ? 'true' : 'false' });
                 const mainSettings = (await db.settings.get('main')) || { id: 'main' };
                 mainSettings.pos_auto_updates_disabled = disabled;
                 await db.settings.put(mainSettings);
-                console.log(`💾 [IndexedDB] تم حفظ سياسة التحديثات: ${disabled ? 'مجمدة ومقفولة' : 'مفعلة'}`);
+                console.log(`💾 [SQLite] تم حفظ سياسة التحديثات: ${disabled ? 'مجمدة ومقفولة' : 'مفعلة'}`);
             } catch (err) {
-                console.error('❌ خطأ أثناء حفظ حالة التحديثات في IndexedDB:', err);
+                console.error('❌ خطأ أثناء حفظ حالة التحديثات في SQLite:', err);
             }
         }
 
@@ -1035,7 +1058,7 @@
     window.initAutoUpdatesPolicyUI = async function() {
         let isAutoUpdateFrozen = false;
 
-        // فحص سريع من قاعدة بيانات IndexedDB عبر getStore للاستجابة اللحظية
+        // فحص سريع من قاعدة بيانات SQLite عبر getStore للاستجابة اللحظية
         try {
             const storedVal = typeof getStore === 'function' ? getStore('pos_auto_updates_disabled') : null;
             if (storedVal !== null && storedVal !== undefined) {
@@ -1053,7 +1076,7 @@
             } catch (e) {}
         }
 
-        // فحص من IndexedDB كمرجع دائم
+        // فحص من SQLite كمرجع دائم
         try {
             if (typeof db !== 'undefined' && db && db.settings) {
                 const rec = await db.settings.get('pos_auto_updates_disabled');
@@ -1069,7 +1092,7 @@
                 isAutoUpdateFrozen = (window.AppStore.pos_auto_updates_disabled === 'true' || window.AppStore.pos_auto_updates_disabled === true);
             }
         } catch (e) {
-            console.warn('[Updater] Could not load update policy from IndexedDB:', e);
+            console.warn('[Updater] Could not load update policy from SQLite:', e);
         }
 
         window.__isAutoUpdatesFrozen = isAutoUpdateFrozen;
@@ -1088,6 +1111,11 @@
             }
             window.checkGitHubReleases(false);
             window.checkCloudAnnouncements();
+
+            // فحص دوري صامت كل 15 دقيقة في الخلفية لاستقبال أي إشعار جديد أثناء تشغيل البرنامج
+            setInterval(() => {
+                window.checkCloudAnnouncements();
+            }, 15 * 60 * 1000);
         }, 3000);
     };
 

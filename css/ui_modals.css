@@ -3281,17 +3281,17 @@ body.bayan-variants-disabled #bayanVariantPickerOverlay {
                 }
 
                 /* --- 🚀 Force Solid Styles on Legacy Sections --- */
-                #premium-settings-content [style*="linear-gradient"] {
+                #premium-settings-content [style*="linear-gradient"]:not(button):not([class*="btn"]):not(.sqlite-card):not(.export-card):not(.restore-card) {
                     background: white !important;
                     color: #111827 !important;
                     border: 1px solid #e5e7eb !important;
                     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
                 }
 
-                #premium-settings-content [style*="linear-gradient"] h1,
-                #premium-settings-content [style*="linear-gradient"] h2,
-                #premium-settings-content [style*="linear-gradient"] h3,
-                #premium-settings-content [style*="linear-gradient"] p {
+                #premium-settings-content [style*="linear-gradient"]:not(button):not([class*="btn"]):not(.sqlite-card):not(.export-card):not(.restore-card) h1,
+                #premium-settings-content [style*="linear-gradient"]:not(button):not([class*="btn"]):not(.sqlite-card):not(.export-card):not(.restore-card) h2,
+                #premium-settings-content [style*="linear-gradient"]:not(button):not([class*="btn"]):not(.sqlite-card):not(.export-card):not(.restore-card) h3,
+                #premium-settings-content [style*="linear-gradient"]:not(button):not([class*="btn"]):not(.sqlite-card):not(.export-card):not(.restore-card) p {
                     color: #111827 !important;
                 }
 

@@ -32,8 +32,6 @@ function getTrialInvoicesMaxLimit() {
     try {
         if (typeof getStore === 'function') {
             extra = parseInt(getStore('bayan_remote_extra_trial_limit') || '0', 10);
-        } else {
-            extra = parseInt(localStorage.getItem('bayan_remote_extra_trial_limit') || '0', 10);
         }
     } catch (e) {}
     if (isNaN(extra) || extra < 0) extra = 0;
@@ -47,7 +45,7 @@ function isDeviceRemotelyBlocked() {
         if (typeof getStore === 'function') {
             return getStore('bayan_remote_blocked') === 'true';
         }
-        return localStorage.getItem('bayan_remote_blocked') === 'true';
+        return false;
     } catch (e) { return false; }
 }
 window.isDeviceRemotelyBlocked = isDeviceRemotelyBlocked;
@@ -63,9 +61,6 @@ window.applyRemoteAdminCommand = function (cmdData) {
         if (typeof setStore === 'function') {
             setStore('bayan_remote_blocked', 'true');
             if (cmdData.message) setStore('bayan_remote_block_msg', cmdData.message);
-        } else {
-            localStorage.setItem('bayan_remote_blocked', 'true');
-            if (cmdData.message) localStorage.setItem('bayan_remote_block_msg', cmdData.message);
         }
 
         if (!wasBlocked) {
@@ -90,9 +85,6 @@ window.applyRemoteAdminCommand = function (cmdData) {
             if (typeof setStore === 'function') {
                 setStore('bayan_remote_blocked', 'false');
                 setStore('bayan_remote_block_msg', '');
-            } else {
-                localStorage.setItem('bayan_remote_blocked', 'false');
-                localStorage.removeItem('bayan_remote_block_msg');
             }
 
             console.log("✅ [Remote Control] Device unblocked by Admin (Command: " + (cmdType || 'NORMAL') + ").");
@@ -118,14 +110,12 @@ window.applyRemoteAdminCommand = function (cmdData) {
         }
 
         const extra = parseInt(cmdData.extraLimit, 10) || 0;
-        const currentExtra = parseInt((typeof getStore === 'function' ? getStore('bayan_remote_extra_trial_limit') : localStorage.getItem('bayan_remote_extra_trial_limit')) || '0', 10);
-        const lastCelebratedExtra = parseInt((typeof getStore === 'function' ? getStore('bayan_last_celebrated_extra') : localStorage.getItem('bayan_last_celebrated_extra')) || '-1', 10);
+        const currentExtra = parseInt((typeof getStore === 'function' ? getStore('bayan_remote_extra_trial_limit') : null) || '0', 10);
+        const lastCelebratedExtra = parseInt((typeof getStore === 'function' ? getStore('bayan_last_celebrated_extra') : null) || '-1', 10);
 
         if (extra > 0) {
             if (typeof setStore === 'function') {
                 setStore('bayan_remote_extra_trial_limit', String(extra));
-            } else {
-                localStorage.setItem('bayan_remote_extra_trial_limit', String(extra));
             }
 
             const newTotal = (typeof getTrialInvoicesMaxLimit === 'function') ? getTrialInvoicesMaxLimit() : (200 + extra);
@@ -138,8 +128,6 @@ window.applyRemoteAdminCommand = function (cmdData) {
             if (extra !== lastCelebratedExtra) {
                 if (typeof setStore === 'function') {
                     setStore('bayan_last_celebrated_extra', String(extra));
-                } else {
-                    localStorage.setItem('bayan_last_celebrated_extra', String(extra));
                 }
                 if (typeof window.showTrialExtensionCelebrationModal === 'function') {
                     window.showTrialExtensionCelebrationModal({ extra, newTotal, consumed, remaining });
@@ -155,14 +143,11 @@ window.applyRemoteAdminCommand = function (cmdData) {
     }
     // 3.1 أمر تصفير أو إلغاء التمديد وإعادته للـ 200 الأساسية
     else if (cmdType === 'RESET_TRIAL') {
-        const currentExtra = parseInt((typeof getStore === 'function' ? getStore('bayan_remote_extra_trial_limit') : localStorage.getItem('bayan_remote_extra_trial_limit')) || '0', 10);
+        const currentExtra = parseInt((typeof getStore === 'function' ? getStore('bayan_remote_extra_trial_limit') : null) || '0', 10);
         if (currentExtra > 0) {
             if (typeof setStore === 'function') {
                 setStore('bayan_remote_extra_trial_limit', '0');
                 setStore('bayan_last_celebrated_extra', '0');
-            } else {
-                localStorage.setItem('bayan_remote_extra_trial_limit', '0');
-                localStorage.setItem('bayan_last_celebrated_extra', '0');
             }
             if (typeof showToast === 'function') {
                 showToast('ℹ️ تمت إعادة حد الفواتير التجريبية إلى الوضع الافتراضي (200 فاتورة).', 'info', 5000);
@@ -293,8 +278,6 @@ window.unblockDeviceLocally = function () {
         setStore('bayan_remote_blocked', 'false');
         setStore('bayan_remote_block_msg', '');
     }
-    localStorage.setItem('bayan_remote_blocked', 'false');
-    localStorage.removeItem('bayan_remote_block_msg');
     if (typeof window.SubscriptionHistoryManager !== 'undefined' && typeof window.SubscriptionHistoryManager.renderTable === 'function') {
         window.SubscriptionHistoryManager.renderTable();
     }
@@ -348,7 +331,7 @@ window.SubscriptionHistoryManager = {
     getHistory: function () {
         let history = [];
         try {
-            const raw = (typeof getStore === 'function') ? getStore('bayan_subscription_history') : localStorage.getItem('bayan_subscription_history');
+            const raw = (typeof getStore === 'function') ? getStore('bayan_subscription_history') : null;
             if (raw) history = JSON.parse(raw);
         } catch (e) {
             history = [];
@@ -361,7 +344,6 @@ window.SubscriptionHistoryManager = {
         try {
             const str = JSON.stringify(history);
             if (typeof setStore === 'function') setStore('bayan_subscription_history', str);
-            else localStorage.setItem('bayan_subscription_history', str);
         } catch (e) {
             console.error("Error saving subscription history:", e);
         }
@@ -374,7 +356,7 @@ window.SubscriptionHistoryManager = {
         // 1. قراءة بيانات الترخيص من النظام
         let licenseInfo = null;
         try {
-            const rawLic = typeof getStore === 'function' ? getStore('license_info') : localStorage.getItem('license_info');
+            const rawLic = typeof getStore === 'function' ? getStore('license_info') : null;
             if (rawLic) licenseInfo = JSON.parse(rawLic);
         } catch (e) { }
 
@@ -1351,7 +1333,7 @@ window.isSubscriptionValid = function (actionType = 'invoice') {
 window.enforceSubscriptionCheck = function (actionType = 'invoice') {
     // 0. فحص الحظر الصادر عن بُعد من Google Sheets أولاً
     if (typeof isDeviceRemotelyBlocked === 'function' && isDeviceRemotelyBlocked()) {
-        const blockMsg = (typeof getStore === 'function' ? getStore('bayan_remote_block_msg') : localStorage.getItem('bayan_remote_block_msg')) || 
+        const blockMsg = (typeof getStore === 'function' ? getStore('bayan_remote_block_msg') : null) || 
             'تم تعليق ترخيص وصلاحية هذا الجهاز بقرار من إدارة بَيَان POS.\n\nيرجى التواصل مع إدارة النظام والدعم الفني للاستفسار والمتابعة.';
         
         const richMsg = `${blockMsg.replace(/\n/g, '<br>')}<br><br>
@@ -1747,7 +1729,7 @@ window.LicenseService = {
 window.BackupService = {
     createAutoBackup: async function () {
         try {
-            // تفريغ أي نسخ متراكمة قديمة من جدول db.backups لتخفيف قاعدة بيانات IndexedDB فوراً
+            // تفريغ أي نسخ متراكمة قديمة من جدول db.backups لتخفيف قاعدة بيانات SQLite فوراً
             if (typeof db !== 'undefined' && db && db.backups) {
                 try { await db.backups.clear(); } catch(ce) {}
             }

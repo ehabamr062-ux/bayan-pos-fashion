@@ -293,7 +293,15 @@ const trashManager = {
                     const cleanP = typeof p === 'object' ? { ...p } : p;
                     await db.products.put(cleanP);
                 }
-                window.productsDB = await db.products.toArray();
+                if (Array.isArray(window.productsDB)) {
+                    for (const p of itemsToRestore) {
+                        if (!p || !p.id) continue;
+                        const exIdx = window.productsDB.findIndex(x => x.id === p.id);
+                        if (exIdx !== -1) window.productsDB[exIdx] = p;
+                        else window.productsDB.push(p);
+                    }
+                    if (typeof productsDB !== 'undefined') productsDB = window.productsDB;
+                }
                 if (typeof renderInventoryTable === 'function') renderInventoryTable();
             } else if (itemType === 'transaction' || itemType === 'invoice' || itemType === 'sale' || itemType === 'purchase') {
                 const itemsToRestore = Array.isArray(data) ? data : (data.items ? data.items : [data]);
@@ -572,7 +580,7 @@ window.trashManager = trashManager;
 
 // تحميل البيانات عند بدء التشغيل
 document.addEventListener('DOMContentLoaded', () => {
-    // ننتظر قليلاً لضمان تحميل Dexie وقاعدة البيانات
+    // ننتظر قليلاً لضمان تحميل محرك SQLite وقاعدة البيانات
     setTimeout(() => {
         if (typeof trashManager !== 'undefined') trashManager.loadTrash();
     }, 1000);

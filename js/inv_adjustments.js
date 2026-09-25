@@ -1277,7 +1277,7 @@ function loadPriceAdjustmentData(selectedIds = []) {
 
         const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
             ? currentUser.warehouseName
-            : ((typeof getStore === 'function' ? getStore('activeWarehouse') : localStorage.getItem('activeWarehouse')) || 'المخزن الرئيسي')).trim();
+            : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي')).trim();
 
         targets.forEach(p => {
             const itemName = p.name || 'صنف غير مسمى';
@@ -1606,20 +1606,22 @@ async function updateRowPriceAdj(adjIndex, field, value) {
 
     updatePriceAdjStats();
 
-    // حفظ لحظي في قاعدة بيانات IndexedDB
+    // حفظ لحظي في قاعدة بيانات SQLite
     try {
         let pInDB = null;
-        if (item.id !== undefined && item.id !== null) {
-            pInDB = await db.products.get(item.id);
-            if (!pInDB && !isNaN(Number(item.id))) {
-                pInDB = await db.products.get(Number(item.id));
+        if (Array.isArray(productsDB)) {
+            pInDB = productsDB.find(x => (item.id !== undefined && String(x.id) === String(item.id)) || (item.code && x.code === item.code));
+        }
+        if (!pInDB && typeof db !== 'undefined' && db.products) {
+            if (item.id !== undefined && item.id !== null) {
+                pInDB = await db.products.get(item.id);
+                if (!pInDB && !isNaN(Number(item.id))) {
+                    pInDB = await db.products.get(Number(item.id));
+                }
             }
-        }
-        if (!pInDB && item.code) {
-            pInDB = await db.products.where('code').equals(item.code).first();
-        }
-        if (!pInDB && Array.isArray(productsDB)) {
-            pInDB = productsDB.find(x => (item.id && String(x.id) === String(item.id)) || (item.code && x.code === item.code));
+            if (!pInDB && item.code) {
+                pInDB = await db.products.where('code').equals(item.code).first();
+            }
         }
 
         if (pInDB) {
@@ -1780,7 +1782,7 @@ function openFashionVariantsPriceModal(itemIndex) {
 
     const activeWH = ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
         ? currentUser.warehouseName
-        : ((typeof getStore === 'function' ? getStore('activeWarehouse') : localStorage.getItem('activeWarehouse')) || 'المخزن الرئيسي')).trim();
+        : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي')).trim();
 
     const codeEl = document.getElementById('fvpModelCode');
     if (codeEl) {
@@ -2163,17 +2165,19 @@ async function saveFashionVariantsPrice() {
 
     try {
         let pInDB = null;
-        if (item.id !== undefined && item.id !== null) {
-            pInDB = await db.products.get(item.id);
-            if (!pInDB && !isNaN(Number(item.id))) {
-                pInDB = await db.products.get(Number(item.id));
+        if (Array.isArray(productsDB)) {
+            pInDB = productsDB.find(x => (item.id !== undefined && String(x.id) === String(item.id)) || (item.code && x.code === item.code));
+        }
+        if (!pInDB && typeof db !== 'undefined' && db.products) {
+            if (item.id !== undefined && item.id !== null) {
+                pInDB = await db.products.get(item.id);
+                if (!pInDB && !isNaN(Number(item.id))) {
+                    pInDB = await db.products.get(Number(item.id));
+                }
             }
-        }
-        if (!pInDB && item.code) {
-            pInDB = await db.products.where('code').equals(item.code).first();
-        }
-        if (!pInDB && Array.isArray(productsDB)) {
-            pInDB = productsDB.find(x => (item.id && String(x.id) === String(item.id)) || (item.code && x.code === item.code));
+            if (!pInDB && item.code) {
+                pInDB = await db.products.where('code').equals(item.code).first();
+            }
         }
 
         if (pInDB) {
@@ -2202,13 +2206,12 @@ async function saveFashionVariantsPrice() {
             pInDB.updatedAt = new Date().toISOString();
             await db.products.put(pInDB);
 
-            // تحديث المصفوفة المركزية للمنتجات في الذاكرة
-            if (typeof db !== 'undefined' && db && db.products) {
-                productsDB = await db.products.toArray();
-                window.productsDB = productsDB;
-            } else if (Array.isArray(productsDB)) {
+            // تحديث المصفوفة المركزية للمنتجات في الذاكرة مباشرة دون إعادة قراءة الجدول كاملاً
+            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
                 const mIdx = productsDB.findIndex(x => x.id === item.id);
                 if (mIdx !== -1) productsDB[mIdx] = pInDB;
+                else productsDB.push(pInDB);
+                window.productsDB = productsDB;
             }
 
             if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
@@ -2707,7 +2710,6 @@ function openPriceAdjColumnModal() {
     if (oldModal) oldModal.remove();
 
     let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
-    if (!saved && typeof localStorage !== 'undefined') saved = localStorage.getItem('priceAdjHiddenCols');
     let hiddenCols = [];
     try {
         if (saved) hiddenCols = JSON.parse(saved);
@@ -2792,7 +2794,6 @@ window.toggleSinglePriceAdjColumn = function(colId, isVisible) {
     });
 
     let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
-    if (!saved && typeof localStorage !== 'undefined') saved = localStorage.getItem('priceAdjHiddenCols');
     let hiddenCols = [];
     try {
         if (saved) hiddenCols = JSON.parse(saved);
@@ -2807,12 +2808,10 @@ window.toggleSinglePriceAdjColumn = function(colId, isVisible) {
 
     const jsonStr = JSON.stringify(hiddenCols);
     if (typeof setStore === 'function') setStore('priceAdjHiddenCols', jsonStr);
-    if (typeof localStorage !== 'undefined') localStorage.setItem('priceAdjHiddenCols', jsonStr);
 };
 
 window.applyPriceAdjColumnVisibility = function() {
     let saved = typeof getStore === 'function' ? getStore('priceAdjHiddenCols') : null;
-    if (!saved && typeof localStorage !== 'undefined') saved = localStorage.getItem('priceAdjHiddenCols');
     let hiddenCols = [];
     try {
         if (saved) hiddenCols = JSON.parse(saved);

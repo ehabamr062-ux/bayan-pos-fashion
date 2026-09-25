@@ -215,7 +215,7 @@
                 return;
             }
 
-            // ⚡ جلب حركات الفترة المحددة من IndexedDB عند الطلب
+            // ⚡ جلب حركات الفترة المحددة من SQLite عند الطلب
             if (typeof window.loadTransactionsForDateRange === 'function' && (fromDate < todayISO || toDate < todayISO)) {
                 await window.loadTransactionsForDateRange(fromDate, toDate);
             }
@@ -405,10 +405,41 @@
 
             const isTreasurySpecificNonCash = selectedTreasury !== 'all' && isNonCashMethod(selectedTreasury);
 
-            // 1. حساب الرصيد السابق الموحد لمجموع الحركات النقدية قبل تاريخ البداية
+            // 1. حساب الرصيد السابق الموحد لمجموع الحركات النقدية قبل تاريخ البداية عبر استعلام SQLite سريع ومفهرس
             let previousBalance = 0;
-            const priorRaw = transactions.filter(t => t.dateISO && t.dateISO < fromDate && matchesSelectedWarehouse(t) && matchesSelectedTreasury(t) && matchesSelectedUser(t));
-            const priorGrouped = getGroupedTransactions(priorRaw);
+            let priorGrouped = [];
+
+            if (window.BayanSQLite && window.BayanSQLite.db) {
+                try {
+                    const stmt = window.BayanSQLite.db.prepare("SELECT type, method, total, paidAmount, remaining, warehouse, cashier, invoiceId, raw_json FROM transactions WHERE dateISO < ?");
+                    stmt.bind([fromDate]);
+                    const dbPriorRows = [];
+                    while (stmt.step()) {
+                        const row = stmt.getAsObject();
+                        if (row) {
+                            if (!row.user && row.cashier) row.user = row.cashier;
+                            if (row.raw_json) {
+                                try {
+                                    const parsed = JSON.parse(row.raw_json);
+                                    if (parsed.user) row.user = parsed.user;
+                                    if (parsed.isInvoiceHead !== undefined) row.isInvoiceHead = parsed.isInvoiceHead;
+                                } catch(jsonErr) {}
+                            }
+                            if (matchesSelectedWarehouse(row) && matchesSelectedTreasury(row) && matchesSelectedUser(row)) {
+                                dbPriorRows.push(row);
+                            }
+                        }
+                    }
+                    stmt.free();
+                    priorGrouped = getGroupedTransactions(dbPriorRows);
+                } catch (e) {
+                    console.warn("DB prior balance notice:", e);
+                }
+            }
+            if (priorGrouped.length === 0) {
+                const priorRaw = transactions.filter(t => t.dateISO && t.dateISO < fromDate && matchesSelectedWarehouse(t) && matchesSelectedTreasury(t) && matchesSelectedUser(t));
+                priorGrouped = getGroupedTransactions(priorRaw);
+            }
 
             priorGrouped.forEach(g => {
                 const paid = g.paid || 0;
@@ -2348,7 +2379,7 @@
             }, delay);
         };
 
-        function renderAnalysisTable() {
+        async function renderAnalysisTable() {
             if (_analysisSearchDebounceTimer) {
                 clearTimeout(_analysisSearchDebounceTimer);
                 _analysisSearchDebounceTimer = null;
@@ -2360,6 +2391,9 @@
             // 1. جلب قيم الفلاتر والبحث
             const fromDate = document.getElementById('anDateFrom')?.value || '';
             const toDate = document.getElementById('anDateTo')?.value || '';
+            if (typeof window.loadTransactionsForDateRange === 'function' && (fromDate || toDate)) {
+                await window.loadTransactionsForDateRange(fromDate, toDate);
+            }
             const searchQuery = (document.getElementById('anSearchInput')?.value || '').trim().toLowerCase();
             const accFilter = document.getElementById('anAccount')?.value || 'all';
             const methodFilter = document.getElementById('anMethod')?.value || 'all';
@@ -2656,7 +2690,12 @@
 
             // 8. بناء الجدول - النمط التفصيلي (Detailed Mode)
             if (currentAnalysisMode === 'detailed') {
-                data.forEach((t, idx) => {
+                const totalMatching = data.length;
+                const limit = window.analysisRenderLimit || 150;
+                const displayedData = data.slice(0, limit);
+                const hasMore = totalMatching > displayedData.length;
+
+                displayedData.forEach((t, idx) => {
                     const isReturn = t.type && t.type.includes('مرتجع');
                     const qty = Math.abs(parseFloat(t.qty) || 0);
                     const price = parseFloat(t.price) || 0;
@@ -2720,6 +2759,18 @@
                         </tr>
                     `);
                 });
+
+                if (hasMore) {
+                    rowsHtml.push(`
+                        <tr>
+                            <td colspan="13" style="text-align:center; padding:15px; background:#f8fafc; border-top:1px solid #e2e8f0;">
+                                <button type="button" class="tool-btn" style="padding:8px 24px; font-size:0.95rem; font-weight:bold; background:#4f46e5; color:white; border-radius:10px; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(79,70,229,0.3);" onclick="window.analysisRenderLimit = (window.analysisRenderLimit || 150) + 150; renderAnalysisTable();">
+                                    ⬇️ عرض المزيد (+150 حركة) - معروض ${displayedData.length} من أصل ${totalMatching}
+                                </button>
+                            </td>
+                        </tr>
+                    `);
+                }
             } else {
                 // 9. بناء الجدول - النمط التجميعي (Summary Mode)
                 const groups = {};
@@ -2769,8 +2820,12 @@
                 });
 
                 const sortedGroups = Object.values(groups).sort((a, b) => b.netTotal - a.netTotal);
+                const totalGroups = sortedGroups.length;
+                const gLimit = window.analysisGroupsLimit || 250;
+                const displayedGroups = sortedGroups.slice(0, gLimit);
+                const hasMoreGroups = totalGroups > displayedGroups.length;
 
-                sortedGroups.forEach((g, idx) => {
+                displayedGroups.forEach((g, idx) => {
                     const avgPrice = g.qty !== 0 ? g.netTotal / g.qty : 0;
                     const avgCost = g.qty !== 0 ? g.cost / g.qty : 0;
                     const profitMargin = g.netTotal > 0 ? ((g.profit / g.netTotal) * 100).toFixed(1) : '0.0';
@@ -2815,6 +2870,18 @@
                         </tr>
                     `);
                 });
+
+                if (hasMoreGroups) {
+                    rowsHtml.push(`
+                        <tr>
+                            <td colspan="13" style="text-align:center; padding:15px; background:#f8fafc; border-top:1px solid #e2e8f0;">
+                                <button type="button" class="tool-btn" style="padding:8px 24px; font-size:0.95rem; font-weight:bold; background:#4f46e5; color:white; border-radius:10px; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(79,70,229,0.3);" onclick="window.analysisGroupsLimit = (window.analysisGroupsLimit || 250) + 250; renderAnalysisTable();">
+                                    ⬇️ عرض المزيد (+250 صنف) - معروض ${displayedGroups.length} من أصل ${totalGroups}
+                                </button>
+                            </td>
+                        </tr>
+                    `);
+                }
             }
 
             // إدراج الجدول دفعة واحدة لسرعة قصوى وأداء صاروخي
@@ -3242,7 +3309,9 @@
         }
         window.viewSelectedAnalysisInvoice = viewSelectedAnalysisInvoice;
 
-        function applyAnalysisPeriodFilter(period) {
+        async function applyAnalysisPeriodFilter(period) {
+            window.analysisRenderLimit = 150;
+            window.analysisGroupsLimit = 250;
             const fromInput = document.getElementById('anDateFrom');
             const toInput = document.getElementById('anDateTo');
             const customContainer = document.getElementById('anCustomDates');
@@ -3307,6 +3376,10 @@
             } else if (period === 'all') {
                 fromInput.value = '';
                 toInput.value = '';
+            }
+
+            if (typeof window.loadTransactionsForDateRange === 'function' && (fromInput.value || toInput.value)) {
+                await window.loadTransactionsForDateRange(fromInput.value, toInput.value);
             }
 
             renderAnalysisTable();
@@ -3503,7 +3576,7 @@
         window.printAnalysisReport = printAnalysisReport;
 
         // --- تقرير العملاء الأكثر إرجاعاً المطور والمحاذى بدقة ---
-        function renderMostReturningCustomers() {
+        async function renderMostReturningCustomers() {
             currentAnalysisMode = 'returns';
 
             const modeButtons = [
@@ -3528,6 +3601,9 @@
 
             const fromDate = document.getElementById('anDateFrom')?.value;
             const toDate = document.getElementById('anDateTo')?.value;
+            if (typeof window.loadTransactionsForDateRange === 'function' && (fromDate || toDate)) {
+                await window.loadTransactionsForDateRange(fromDate, toDate);
+            }
             const searchQuery = (document.getElementById('anSearchInput')?.value || '').trim().toLowerCase();
 
             let returns = (window.transactions || []).filter(t => t.type && t.type.includes('مرتجع بيع'));

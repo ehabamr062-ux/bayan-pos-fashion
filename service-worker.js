@@ -3,9 +3,9 @@
 //  النسخة المطورة للعمل أوفلاين 100%
 // ============================================================
 
-const CACHE_NAME = 'bayan-pos-v3.1.1';
-const STATIC_CACHE = 'bayan-static-v3.1.1';
-const DYNAMIC_CACHE = 'bayan-dynamic-v3.1.1';
+const CACHE_NAME = 'bayan-pos-v3.2.0';
+const STATIC_CACHE = 'bayan-static-v3.2.0';
+const DYNAMIC_CACHE = 'bayan-dynamic-v3.2.0';
 
 // كافة ملفات النظام الأساسية المتوفرة محلياً (بدون تكرار لتفادي خطأ Entry already exists على GitHub Pages)
 const STATIC_FILES = [
@@ -67,7 +67,11 @@ const STATIC_FILES = [
     './js/updater.js',
     './js/local_network_hub.js',
     './lib/html2canvas.min.js',
-    './lib/dexie.js',
+    './lib/sql-wasm-binary.js',
+    './lib/sql-wasm.js',
+    './js/sqlite_manager.js',
+    './js/db_adapter.js',
+    './js/engine_invoices.js',
     './lib/xlsx.full.min.js',
     './lib/JsBarcode.all.min.js',
     './lib/Sortable.min.js',

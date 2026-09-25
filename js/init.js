@@ -61,7 +61,7 @@ window.loadDataPromise = new Promise((resolve) => {
         }
     } catch(e) { console.warn("Admin auto-heal notice:", e); }
 
-    // 0.1 تحميل الإعدادات والشعار بعد اكتمال جلب البيانات من IndexedDB
+    // 0.1 تحميل الإعدادات والشعار بعد اكتمال جلب البيانات من SQLite
     if (typeof loadSettings === 'function') loadSettings();
     if (typeof applyBusinessTypeUI === 'function') applyBusinessTypeUI();
     if (typeof populatePaymentMethodSelects === 'function') populatePaymentMethodSelects();
@@ -103,7 +103,7 @@ window.loadDataPromise = new Promise((resolve) => {
     // 4. صمام الأمان الفولاذي: إنشاء نسخة احتياطية تلقائية وفورية في الخلفية عند الترقية لإصدار جديد
     try {
         const lastVer = getStore('bayan_last_run_version');
-        const curVer = window.appVersion || '3.1.1';
+        const curVer = window.appVersion || '3.1.2';
         if (lastVer && lastVer !== curVer) {
             console.log(`🛡️ [Safety Shield] Version upgrade detected (${lastVer} ➔ ${curVer}). Creating automatic background backup...`);
             if (typeof window.executeAutoBackupToFile === 'function') {
@@ -231,8 +231,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
                     setStore('bayan_remote_blocked', 'false');
                     setStore('bayan_remote_block_msg', '');
                 }
-                localStorage.setItem('bayan_remote_blocked', 'false');
-                localStorage.removeItem('bayan_remote_block_msg');
             } catch(e) {}
         }
 

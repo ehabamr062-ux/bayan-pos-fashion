@@ -402,7 +402,7 @@ async function renderHistoryTable(filterName = null) {
     const methodFilter = document.getElementById('historyMethodFilter')?.value;
     const whFilter = document.getElementById('historyWarehouseFilter')?.value || 'all';
 
-    // ⚡ جلب حركات الفترة المحددة من IndexedDB عند الطلب
+    // ⚡ جلب حركات الفترة المحددة من SQLite عند الطلب
     if (typeof window.loadTransactionsForDateRange === 'function' && (fromDate || toDate)) {
         const todayISO = new Date().toLocaleDateString('en-CA');
         if (fromDate < todayISO || toDate < todayISO) {
@@ -450,7 +450,7 @@ async function renderHistoryTable(filterName = null) {
         } else if (invScope === 'terminal_only') {
             let myLetter = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function') 
                 ? window.BayanNetworkHub.getTerminalLetter() 
-                : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || localStorage.getItem('local_device_letter') || '';
+                : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || (typeof getStore === 'function' ? getStore('local_device_letter') : '') || '';
             data = data.filter(t => {
                 const tUser = (t.user || '').trim().toLowerCase();
                 let tLetter = t.terminalLetter;
@@ -719,7 +719,7 @@ async function renderHistoryTable(filterName = null) {
     }
 }
 
-// متغيرات للتحكم في ظهور الأعمدة مع الحفظ في IndexedDB (getStore)
+// متغيرات للتحكم في ظهور الأعمدة مع الحفظ في SQLite (getStore)
 
 let invoicesColumnVisibility = JSON.parse(getStore('pos_inv_cols_visible') || '{"0":true,"1":true,"2":true,"3":true,"4":true,"5":true,"6":true,"7":true,"8":true,"9":true,"10":true,"11":true,"12":true,"13":true,"14":true}');
 window.invoicesColumnVisibility = invoicesColumnVisibility;
@@ -898,7 +898,7 @@ function renderInvoicesWarehouseChips() {
         if (activeUser.invoiceScope === 'terminal_only') {
             const myLetter = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function')
                 ? window.BayanNetworkHub.getTerminalLetter()
-                : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || localStorage.getItem('local_device_letter') || 'كاشير فرعي';
+                : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || (typeof getStore === 'function' ? getStore('local_device_letter') : '') || 'كاشير فرعي';
             container.innerHTML = `
                 <button class="invoice-tab active" style="border-radius: 20px; font-weight: 700; font-size: 0.85rem; padding: 6px 14px; white-space: nowrap;">
                     <span>💻</span> فواتير جهازك الحالي فقط (${myLetter})

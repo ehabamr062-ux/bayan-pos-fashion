@@ -141,17 +141,13 @@ async function handleCustomerSearch(query) {
 
     // البحث بالاسم أو الكود مباشرة في المصفوفة المحلية لسرعة الاستجابة
 
-    const queryLower = query.toLowerCase();
-
-    const combined = accounts.filter(a =>
-
-        (a.name && a.name.toLowerCase().includes(queryLower)) ||
-
-        (a.code && a.code.toString().includes(queryLower)) ||
-
-        (a.mobile && a.mobile.includes(queryLower))
-
-    );
+    const combined = (window.BayanInvoiceEngine && typeof BayanInvoiceEngine.searchAccounts === 'function')
+        ? BayanInvoiceEngine.searchAccounts(query, 'client')
+        : accounts.filter(a =>
+            (a.name && a.name.toLowerCase().includes(queryLower)) ||
+            (a.code && a.code.toString().includes(queryLower)) ||
+            (a.mobile && a.mobile.includes(queryLower))
+        );
 
     if (combined.length > 0) {
 
@@ -600,24 +596,40 @@ async function handleSearchEnter(query, event, forceAdd = false) {
         });
     }
 
-    // إذا لم نجد في الذاكرة وكانت الذاكرة غير محملة، نبحث في IndexedDB
+    // إذا لم نجد في الذاكرة وكانت الذاكرة غير محملة، نبحث في SQLite عبر استعلام محدد وسريع
     if (!pInDB && (!productsDB || productsDB.length === 0) && typeof db !== 'undefined' && db.products) {
         try {
-            const allDbProds = await db.products.toArray();
-            for (const p of allDbProds) {
-                if (p.variants && Array.isArray(p.variants)) {
-                    const vFound = p.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
-                    if (vFound) {
-                        pInDB = p;
-                        matchingVariant = vFound;
-                        if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
-                            const exIdx = productsDB.findIndex(x => x.id === p.id);
-                            if (exIdx !== -1) productsDB[exIdx] = p;
-                            else productsDB.push(p);
+            let foundP = await db.products.where('barcode').equals(cleanQuery).first();
+            if (!foundP) {
+                foundP = await db.products.where('code').equals(cleanQuery).first();
+            }
+            if (foundP) {
+                pInDB = foundP;
+                if (foundP.variants && Array.isArray(foundP.variants)) {
+                    matchingVariant = foundP.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery) || null;
+                }
+            } else if (window.BayanSQLite && window.BayanSQLite.db) {
+                const stmt = window.BayanSQLite.db.prepare("SELECT raw_json FROM products WHERE raw_json LIKE ? LIMIT 1");
+                stmt.bind([`%${cleanQuery}%`]);
+                if (stmt.step()) {
+                    const raw = stmt.get()[0];
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && parsed.variants && Array.isArray(parsed.variants)) {
+                            const vFound = parsed.variants.find(v => v.barcode && String(v.barcode).trim() === cleanQuery);
+                            if (vFound) {
+                                pInDB = parsed;
+                                matchingVariant = vFound;
+                            }
                         }
-                        break;
                     }
                 }
+                stmt.free();
+            }
+            if (pInDB && typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                const exIdx = productsDB.findIndex(x => x.id === pInDB.id);
+                if (exIdx !== -1) productsDB[exIdx] = pInDB;
+                else productsDB.push(pInDB);
             }
         } catch (err) {
             console.warn("DB variant search error:", err);
@@ -3104,8 +3116,11 @@ async function saveBill(force = false, accountChecked = false) {
 
         });
 
-        if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
-        window.accountBalancesCache = {};
+        if (isEditMode) {
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+        } else if (!isGenericCustomer && customerName) {
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache(customerName);
+        }
 
         // إعادة ضبط وضع التعديل (Reset Edit State)
 
@@ -3445,9 +3460,14 @@ async function showCurrentBillProfit() {
     let totalSale = 0;
 
     for (const item of cart) {
-        let latestProduct = await db.products.get(item.id);
-        if (!latestProduct && !isNaN(item.id)) {
-            latestProduct = await db.products.get(Number(item.id));
+        let latestProduct = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+            ? productsDB.find(p => p && (p.id === item.id || p.id == item.id))
+            : null;
+        if (!latestProduct && typeof db !== 'undefined' && db.products) {
+            latestProduct = await db.products.get(item.id);
+            if (!latestProduct && !isNaN(item.id)) {
+                latestProduct = await db.products.get(Number(item.id));
+            }
         }
 
         // 👗 فحص التكلفة الدقيقة الخاصة بالمقاس واللون (Fashion Variant Cost)

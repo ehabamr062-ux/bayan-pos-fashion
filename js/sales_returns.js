@@ -1003,8 +1003,11 @@ async function saveSalesReturn(force = false, accountChecked = false) {
         if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
             window.updateLastSavedSequence('مرتجع بيع', returnInvoiceId);
         }
-        if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
-        window.accountBalancesCache = {};
+        if (isEditMode) {
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+        } else if (!isCash && finalPartner) {
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache(finalPartner);
+        }
 
         showCustomAlert({
 
@@ -1707,8 +1710,11 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
         if (!isEditMode && typeof window.updateLastSavedSequence === 'function') {
             window.updateLastSavedSequence('مرتجع شراء', returnInvoiceId);
         }
-        if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
-        window.accountBalancesCache = {};
+        if (isEditMode) {
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+        } else if (!isCash && finalPartner) {
+            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache(finalPartner);
+        }
 
         showCustomAlert({
 
@@ -2556,7 +2562,7 @@ async function executeInvoiceSearch() {
 
     const targetType = isSalesReturn ? 'بيع' : 'شراء';
 
-    // ⚡ استدعاء الفاتورة من IndexedDB عند الطلب لضمان العثور عليها حتى لو مسجلة من سنوات
+    // ⚡ استدعاء الفاتورة من SQLite عند الطلب لضمان العثور عليها حتى لو مسجلة من سنوات
     if (ref && typeof window.ensureInvoiceLoaded === 'function') {
         await window.ensureInvoiceLoaded(ref);
     }
@@ -2812,7 +2818,7 @@ async function confirmSelectedInvoiceForReturn(invoiceId) {
 
     const targetType = isSalesReturn ? 'بيع' : 'شراء';
 
-    // جلب أصناف الفاتورة الأصلية مع استدعاء فوري من IndexedDB إذا لم تكن في الذاكرة
+    // جلب أصناف الفاتورة الأصلية مع استدعاء فوري من SQLite إذا لم تكن في الذاكرة
     let originalInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
 
     if (originalInvoiceItems.length === 0 && typeof window.ensureInvoiceLoaded === 'function') {
@@ -3025,7 +3031,7 @@ async function openSelectReturnItemsModal(invoiceId) {
 
     const targetType = isSalesReturn ? 'بيع' : 'شراء';
 
-    // جلب أصناف الفاتورة الأصلية مع استدعاء فوري من IndexedDB إذا لم تكن في الذاكرة
+    // جلب أصناف الفاتورة الأصلية مع استدعاء فوري من SQLite إذا لم تكن في الذاكرة
     currentReturnInvoiceItems = transactions.filter(t => t.invoiceId == invoiceId && t.type.includes(targetType) && !t.type.includes('مرتجع'));
 
     if (currentReturnInvoiceItems.length === 0 && typeof window.ensureInvoiceLoaded === 'function') {

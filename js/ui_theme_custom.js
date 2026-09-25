@@ -699,7 +699,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             reader.onload = async (e) => {
                 const base64Data = e.target.result;
                 try {
-                    // حفظ في IndexedDB مع الاحتفاظ بالخلفيات السابقة
+                    // حفظ في SQLite مع الاحتفاظ بالخلفيات السابقة
                     const customId = 'custom_' + Date.now();
                     await db.wallpapers.add({ name: customId, data: base64Data });
 
@@ -722,7 +722,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
             let type = getStore('bayan_wallpaper_type');
             let saved = getStore('bayan_wallpaper');
 
-            // فحص احتياطي مباشر من IndexedDB إذا لم تكن الذاكرة ممتلئة بعد
+            // فحص احتياطي مباشر من SQLite إذا لم تكن الذاكرة ممتلئة بعد
             if ((saved === null || saved === undefined) && typeof window.bayanDB !== 'undefined' && window.bayanDB && window.bayanDB.settings) {
                 try {
                     const row = await window.bayanDB.settings.get('bayan_wallpaper');
@@ -901,7 +901,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '3.1.1';
+            const version = window.appVersion || '3.1.2';
 
             const message = `السلام عليكم\nأريد الاشتراك في Bayan POS Fashion (بَيَان فاشون للملابس والأحذية)\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة المطلوبة: ${plan}\nالمبلغ: ${price} ج.م\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ وجاري انتظار كود التفعيل.`;
             

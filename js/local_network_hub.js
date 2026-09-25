@@ -142,7 +142,7 @@
             if (this.isMasterServer && typeof require !== 'undefined') {
                 return 'http://127.0.0.1:4545';
             }
-            // 2. رابط مخصص محفوظ مسبقاً في إعدادات الكاشير الفرعي عبر IndexedDB
+            // 2. رابط مخصص محفوظ مسبقاً في إعدادات الكاشير الفرعي عبر SQLite
             const stored = (typeof getStore === 'function') ? getStore('bayan_local_server_url') : null;
             if (stored && stored.startsWith('http')) return stored.trim().replace(/\/+$/, '');
 
@@ -366,7 +366,10 @@
             }
 
             // 5. التحديث الفوري المباشر للواجهة النشطة في ثوانٍ معدودة دون إعادة تحميل
-            window.accountBalancesCache = {};
+            if (accountsUpdated) {
+                window.accountBalancesCache = {};
+                if (typeof invalidateAccountBalancesCache === 'function') invalidateAccountBalancesCache();
+            }
             if (typeof invalidateStockCache === 'function') invalidateStockCache();
             if (typeof updateDatalists === 'function') updateDatalists();
 
@@ -374,16 +377,20 @@
             const currentSecId = activeSecEl ? activeSecEl.id : '';
 
             if (transactionsUpdated) {
-                if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
-                if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
-                if (typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
-                if (typeof renderDailyReportTable === 'function') renderDailyReportTable();
-                if (typeof updateDashboardStats === 'function') updateDashboardStats();
+                if (currentSecId === 'invoices-section') {
+                    if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
+                    if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+                }
+                if (currentSecId === 'sales-history-section' && typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                if (currentSecId === 'daily-report-section' && typeof renderDailyReportTable === 'function') renderDailyReportTable();
+                if (currentSecId === 'dashboard-section' && typeof updateDashboardStats === 'function') updateDashboardStats();
             }
 
             if (productsUpdated) {
-                if (typeof renderCart === 'function') renderCart();
-                if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                if (currentSecId === 'sales-section' || currentSecId === 'pos-section') {
+                    if (typeof renderCart === 'function') renderCart();
+                    if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                }
                 if (currentSecId === 'inventory-section' && typeof renderInventoryTable === 'function') renderInventoryTable();
             }
 
@@ -755,7 +762,7 @@
                 const dbPayload = {
                     products: window.productsDB || [],
                     accounts: window.accounts || [],
-                    transactions: window.transactions || [],
+                    transactions: force ? (window.transactions || []) : ((window.transactions || []).slice(-300)),
                     users: (window.users || []).map(u => ({
                         ...u,
                         pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
@@ -1339,45 +1346,34 @@
                         }
                     }
 
-                    // 6. تطهير وتنظيف قاعدة بيانات Dexie المحلية وتحديثها بدقة
+                    // 6. تطهير وتنظيف قاعدة بيانات SQLite المحلية وتحديثها بدقة عبر Delta فائق السرعة (Zero toArray)
                     if (window.bayanDB) {
                         try {
                             if (window.bayanDB.products) {
-                                const currentLocal = await window.bayanDB.products.toArray();
-                                const serverIdSet = new Set((window.productsDB || []).map(p => p.id));
-                                const obsoleteIds = currentLocal.filter(p => !serverIdSet.has(p.id) || trashedKeys.has(String(p.id))).map(p => p.id);
-                                if (obsoleteIds.length > 0) {
-                                    await window.bayanDB.products.bulkDelete(obsoleteIds);
+                                if (trashedKeys && trashedKeys.size > 0) {
+                                    const delProdIds = Array.from(trashedKeys).filter(k => !isNaN(Number(k))).map(Number);
+                                    if (delProdIds.length > 0) await window.bayanDB.products.bulkDelete(delProdIds);
                                 }
-                                if (window.productsDB && window.productsDB.length > 0) {
-                                    await window.bayanDB.products.bulkPut(window.productsDB);
+                                if (Array.isArray(db.products) && db.products.length > 0) {
+                                    await window.bayanDB.products.bulkPut(db.products);
                                 }
                             }
                             if (window.bayanDB.accounts) {
-                                const currentLocalAccs = await window.bayanDB.accounts.toArray();
-                                const serverAccIdSet = new Set((window.accounts || []).map(a => a.id));
-                                const obsoleteAccIds = currentLocalAccs.filter(a => !serverAccIdSet.has(a.id) || trashedAccountKeys.has(String(a.id))).map(a => a.id);
-                                if (obsoleteAccIds.length > 0) {
-                                    await window.bayanDB.accounts.bulkDelete(obsoleteAccIds);
+                                if (trashedAccountKeys && trashedAccountKeys.size > 0) {
+                                    const delAccIds = Array.from(trashedAccountKeys).filter(k => !isNaN(Number(k))).map(Number);
+                                    if (delAccIds.length > 0) await window.bayanDB.accounts.bulkDelete(delAccIds);
                                 }
-                                if (window.accounts && window.accounts.length > 0) {
-                                    await window.bayanDB.accounts.bulkPut(window.accounts);
+                                if (Array.isArray(db.accounts) && db.accounts.length > 0) {
+                                    await window.bayanDB.accounts.bulkPut(db.accounts);
                                 }
                             }
                             if (window.bayanDB.transactions) {
-                                const currentLocalTxs = await window.bayanDB.transactions.toArray();
-                                const activeTxIdSet = new Set((window.transactions || []).map(t => t.id));
-                                const obsoleteTxIds = currentLocalTxs.filter(t => 
-                                    !activeTxIdSet.has(t.id) || 
-                                    trashedTxKeys.has(String(t.id)) || 
-                                    trashedTxKeys.has(`id_${t.id}`) ||
-                                    (t.invoiceId != null && (trashedInvIds.has(String(t.invoiceId)) || trashedInvIds.has(Number(t.invoiceId))))
-                                ).map(t => t.id);
-                                if (obsoleteTxIds.length > 0) {
-                                    await window.bayanDB.transactions.bulkDelete(obsoleteTxIds);
+                                if (trashedTxKeys && trashedTxKeys.size > 0) {
+                                    const delTxIds = Array.from(trashedTxKeys).map(k => String(k).replace(/^id_/, '')).filter(k => !isNaN(Number(k))).map(Number);
+                                    if (delTxIds.length > 0) await window.bayanDB.transactions.bulkDelete(delTxIds);
                                 }
-                                if (mergedTransactions && mergedTransactions.length > 0) {
-                                    await window.bayanDB.transactions.bulkPut(mergedTransactions);
+                                if (Array.isArray(db.transactions) && db.transactions.length > 0) {
+                                    await window.bayanDB.transactions.bulkPut(db.transactions);
                                 }
                             }
                             if (window.bayanDB.trash) {
@@ -1585,24 +1581,32 @@
                             }
 
                             // تحديث فوري وسريع للواجهة النشطة فقط (0 Lag)
-                            window.accountBalancesCache = {};
-                            if (typeof invalidateStockCache === 'function') invalidateStockCache();
-                            if (typeof updateDatalists === 'function') updateDatalists();
-                            if (prodChanged) {
-                                if (typeof renderCart === 'function') renderCart();
-                                if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                            if (accChanged || txChanged) {
+                                window.accountBalancesCache = {};
                             }
-
+                            if (prodChanged || txChanged) {
+                                if (typeof invalidateStockCache === 'function') invalidateStockCache();
+                            }
+                            if (typeof updateDatalists === 'function') updateDatalists();
                             const activeSecEl = document.querySelector('.section-view:not(.hidden)');
                             const currentSecId = activeSecEl ? activeSecEl.id : '';
-                            if (prodChanged && currentSecId === 'inventory-section' && typeof renderInventoryTable === 'function') renderInventoryTable();
+
+                            if (prodChanged) {
+                                if (currentSecId === 'sales-section' || currentSecId === 'pos-section') {
+                                    if (typeof renderCart === 'function') renderCart();
+                                    if (typeof renderProductsGrid === 'function') renderProductsGrid();
+                                }
+                                if (currentSecId === 'inventory-section' && typeof renderInventoryTable === 'function') renderInventoryTable();
+                            }
                             if (accChanged && currentSecId === 'accounts-section' && typeof renderAccountsTable === 'function') renderAccountsTable();
                             if (txChanged) {
-                                if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
-                                if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
-                                if (typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
-                                if (typeof renderDailyReportTable === 'function') renderDailyReportTable();
-                                if (typeof updateDashboardStats === 'function') updateDashboardStats();
+                                if (currentSecId === 'invoices-section') {
+                                    if (typeof renderInvoicesWarehouseChips === 'function') renderInvoicesWarehouseChips();
+                                    if (typeof renderInvoicesTable === 'function') renderInvoicesTable();
+                                }
+                                if (currentSecId === 'sales-history-section' && typeof renderSalesHistoryTable === 'function') renderSalesHistoryTable();
+                                if (currentSecId === 'daily-report-section' && typeof renderDailyReportTable === 'function') renderDailyReportTable();
+                                if (currentSecId === 'dashboard-section' && typeof updateDashboardStats === 'function') updateDashboardStats();
                             }
 
                             if (typeof showToast === 'function') {
@@ -1656,24 +1660,17 @@
                             window.AppStore = { ...window.AppStore, ...cleanIncoming };
                         }
 
-                        // حفظ فوري في قاعدة بيانات الماستر IndexedDB وتنظيف المحذوفات
+                        // حفظ فوري في قاعدة بيانات الماستر SQLite وتنظيف المحذوفات بدقة (Delta Only)
                         if (window.bayanDB) {
                             try {
-                                if (window.productsDB && window.productsDB.length > 0) await window.bayanDB.products.bulkPut(window.productsDB);
-                                if (window.accounts && window.accounts.length > 0) await window.bayanDB.accounts.bulkPut(window.accounts);
-                                if (window.transactions && window.transactions.length > 0) {
-                                    const currentLocalTxs = await window.bayanDB.transactions.toArray();
-                                    const activeTxIdSet = new Set((window.transactions || []).map(t => t.id));
-                                    const obsoleteTxIds = currentLocalTxs.filter(t => 
-                                        !activeTxIdSet.has(t.id) || 
-                                        trashedTxKeys.has(String(t.id)) || 
-                                        trashedTxKeys.has(`id_${t.id}`) ||
-                                        (t.invoiceId != null && (trashedInvIds.has(String(t.invoiceId)) || trashedInvIds.has(Number(t.invoiceId))))
-                                    ).map(t => t.id);
-                                    if (obsoleteTxIds.length > 0) {
-                                        await window.bayanDB.transactions.bulkDelete(obsoleteTxIds);
+                                if (Array.isArray(db.products) && db.products.length > 0) await window.bayanDB.products.bulkPut(db.products);
+                                if (Array.isArray(db.accounts) && db.accounts.length > 0) await window.bayanDB.accounts.bulkPut(db.accounts);
+                                if (Array.isArray(db.transactions) && db.transactions.length > 0) {
+                                    if (trashedTxKeys && trashedTxKeys.size > 0) {
+                                        const delTxIds = Array.from(trashedTxKeys).map(k => String(k).replace(/^id_/, '')).filter(k => !isNaN(Number(k))).map(Number);
+                                        if (delTxIds.length > 0) await window.bayanDB.transactions.bulkDelete(delTxIds);
                                     }
-                                    await window.bayanDB.transactions.bulkPut(window.transactions);
+                                    await window.bayanDB.transactions.bulkPut(db.transactions);
                                 }
                                 if (window.users && window.users.length > 0) {
                                     await window.bayanDB.users.clear();

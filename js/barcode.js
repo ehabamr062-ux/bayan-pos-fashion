@@ -131,9 +131,63 @@ const BayanBarcode = (function () {
         });
     }
 
+    let _barcodeIndexMap = null;
+    let _lastIndexedListRef = null;
+    let _lastIndexedListLength = 0;
+
+    function invalidateBarcodeIndex() {
+        _barcodeIndexMap = null;
+        _lastIndexedListRef = null;
+        _lastIndexedListLength = 0;
+    }
+
+    function getBarcodeIndex(list) {
+        if (_barcodeIndexMap && _lastIndexedListRef === list && _lastIndexedListLength === list.length) {
+            return _barcodeIndexMap;
+        }
+        const index = new Map();
+        for (let i = 0; i < list.length; i++) {
+            const p = list[i];
+            if (!p) continue;
+            // 1. باركود وكود الصنف الأساسي
+            if (p.barcode) {
+                const b = String(p.barcode).trim();
+                if (b && !index.has(b)) index.set(b, { product: p, variant: null, unit: null, matchType: 'parent' });
+            }
+            if (p.code) {
+                const c = String(p.code).trim();
+                if (c && !index.has(c)) index.set(c, { product: p, variant: null, unit: null, matchType: 'parent' });
+            }
+            // 2. باركود الوحدات المتعددة
+            if (p.units && Array.isArray(p.units)) {
+                for (let k = 0; k < p.units.length; k++) {
+                    const u = p.units[k];
+                    if (u && u.unitBarcode) {
+                        const ub = String(u.unitBarcode).trim();
+                        if (ub) index.set(ub, { product: p, variant: null, unit: u, matchType: 'unit' });
+                    }
+                }
+            }
+            // 3. باركود التشكيلات (المقاسات والألوان) - أعلى أولوية
+            if (p.variants && Array.isArray(p.variants)) {
+                for (let j = 0; j < p.variants.length; j++) {
+                    const v = p.variants[j];
+                    if (v && v.barcode) {
+                        const vb = String(v.barcode).trim();
+                        if (vb) index.set(vb, { product: p, variant: v, unit: null, matchType: 'variant' });
+                    }
+                }
+            }
+        }
+        _barcodeIndexMap = index;
+        _lastIndexedListRef = list;
+        _lastIndexedListLength = list.length;
+        return index;
+    }
+
     /**
      * البحث الدقيق 100% عن الصنف أو الـ Variant بواسطة الباركود
-     * الأولوية المطلقة لباركود التشكيلات (المقاس واللون)
+     * الأولوية المطلقة لباركود التشكيلات (المقاس واللون) عبر فهرس O(1) المباشر
      */
     function findProductAndVariantByBarcode(scannedBarcode) {
         if (!scannedBarcode) return null;
@@ -144,59 +198,29 @@ const BayanBarcode = (function () {
             ? productsDB
             : ((typeof getStore === 'function') ? (getStore('bayan_products') || []) : []);
 
-        let matchedUnitResult = null;
-        let matchedParentResult = null;
-
-        // فحص مدمج فائق السرعة بدورة واحدة فقط Single Pass بدلاً من الدوران 3 مرات
-        for (let i = 0; i < list.length; i++) {
-            const p = list[i];
-            if (!p) continue;
-
-            // 1. الأولوية المطلقة لباركود التشكيلات (المقاسات والألوان)
-            if (p.variants && Array.isArray(p.variants)) {
-                for (let j = 0; j < p.variants.length; j++) {
-                    const v = p.variants[j];
-                    if (v && v.barcode && String(v.barcode).trim() === clean) {
-                        return {
-                            product: p,
-                            variant: v,
-                            unit: null,
-                            matchType: 'variant'
-                        };
+        const idx = getBarcodeIndex(list);
+        let found = idx.get(clean) || null;
+        if (!found && window.BayanSQLite && window.BayanSQLite.db) {
+            try {
+                const stmt = window.BayanSQLite.db.prepare("SELECT raw_json FROM products WHERE barcode = ? OR code = ? LIMIT 1");
+                stmt.bind([clean, clean]);
+                if (stmt.step()) {
+                    const raw = stmt.get()[0];
+                    if (raw) {
+                        const p = JSON.parse(raw);
+                        if (p) {
+                            if (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) {
+                                if (!productsDB.some(x => x.id === p.id)) productsDB.push(p);
+                            }
+                            found = { product: p, variant: null, unit: null, matchType: 'parent' };
+                            if (idx) idx.set(clean, found);
+                        }
                     }
                 }
-            }
-
-            // 2. باركود الوحدات المتعددة
-            if (!matchedUnitResult && p.units && Array.isArray(p.units)) {
-                for (let k = 0; k < p.units.length; k++) {
-                    const u = p.units[k];
-                    if (u && String(u.unitBarcode || '').trim() === clean) {
-                        matchedUnitResult = {
-                            product: p,
-                            variant: null,
-                            unit: u,
-                            matchType: 'unit'
-                        };
-                        break;
-                    }
-                }
-            }
-
-            // 3. باركود أو كود الصنف الأساسي
-            if (!matchedParentResult) {
-                if (String(p.barcode || '').trim() === clean || String(p.code || '').trim() === clean) {
-                    matchedParentResult = {
-                        product: p,
-                        variant: null,
-                        unit: null,
-                        matchType: 'parent'
-                    };
-                }
-            }
+                stmt.free();
+            } catch(e) {}
         }
-
-        return matchedUnitResult || matchedParentResult || null;
+        return found;
     }
 
     /**
@@ -1028,6 +1052,7 @@ const BayanBarcode = (function () {
         validate,
         isRecentScan,
         findProductAndVariantByBarcode,
+        invalidateBarcodeIndex,
         parseScaleBarcode,
         getActiveScanTarget,
         handleScan,

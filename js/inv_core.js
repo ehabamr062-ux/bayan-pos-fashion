@@ -1880,6 +1880,9 @@ function invalidateStockCache() {
     _stockCacheKey = null;
     _stockHistoryCache = null;
     _stockHistoryCacheKey = null;
+    if (typeof BayanBarcode !== 'undefined' && typeof BayanBarcode.invalidateBarcodeIndex === 'function') {
+        BayanBarcode.invalidateBarcodeIndex();
+    }
 }
 window.invalidateStockCache = invalidateStockCache;
 

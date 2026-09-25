@@ -263,8 +263,12 @@ async function executePrinting(modeOrTargets, copies = 1) {
 
         if (targets.length === 0) return showToast("⚠️ لم يتم العثور على بيانات الصنف المحدد للطباعة!", "error");
     } else {
-        // وضع كافة الأصناف: استرجاع كل الأصناف من قاعدة البيانات الحية (IndexedDB) لضمان جلب كل ما هو مسجل
-        if (typeof db !== 'undefined' && db.products) {
+        // وضع كافة الأصناف: استخدام الأصناف المحملة بالذاكرة أو جلبها عند الحاجة فقط
+        if (typeof productsDB !== 'undefined' && Array.isArray(productsDB) && productsDB.length > 0) {
+            targets = productsDB;
+        } else if (typeof window.productsDB !== 'undefined' && Array.isArray(window.productsDB) && window.productsDB.length > 0) {
+            targets = window.productsDB;
+        } else if (typeof db !== 'undefined' && db.products) {
             try {
                 const dbProds = await db.products.toArray();
                 if (Array.isArray(dbProds) && dbProds.length > 0) {
@@ -273,9 +277,6 @@ async function executePrinting(modeOrTargets, copies = 1) {
             } catch(e) {
                 console.warn("DB load in executePrinting error:", e);
             }
-        }
-        if (targets.length === 0) {
-            targets = (typeof productsDB !== 'undefined' && Array.isArray(productsDB)) ? [...productsDB] : [];
         }
         if (targets.length === 0) return showToast("⚠️ المخزن فارغ!", "error");
     }

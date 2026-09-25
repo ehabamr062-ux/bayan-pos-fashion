@@ -4,7 +4,7 @@
  * تدعم:
  *  - 5 أنواع مستندات: مبيعات، شراء، سندات مالية، تقارير مخزن، عام
  *  - 5 قوالب طباعة: 80mm Standard, 80mm Compact, 57mm Mobile, A4 Professional, A5 Modern
- *  - حفظ القالب المختار في IndexedDB (setStore)
+ *  - حفظ القالب المختار في SQLite (setStore)
  * 
  * invoiceData = {
  *   invoiceNumber, invoiceType, date, time, dueDate,

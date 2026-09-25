@@ -51,7 +51,7 @@
     }
 
     /**
-     * حفظ إعدادات رؤية الأعمدة في النظام عبر IndexedDB
+     * حفظ إعدادات رؤية الأعمدة في النظام عبر SQLite
      */
     function saveInquiryColsSettings(settings) {
         try {

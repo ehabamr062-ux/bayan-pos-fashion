@@ -7,9 +7,9 @@
 
 window.treasuryAuditRecords = [];
 
-// 1. تهيئة قسم مراجعة الخزينة مع استرجاع مضمون من IndexedDB
+// 1. تهيئة قسم مراجعة الخزينة مع استرجاع مضمون من SQLite
 async function initTreasuryAuditSection() {
-    console.log("🔄 جاري تهيئة وتحميل بيانات قسم مراجعة الخزينة من IndexedDB...");
+    console.log("🔄 جاري تهيئة وتحميل بيانات قسم مراجعة الخزينة من SQLite...");
     
     // ضبط تاريخ اليوم المحلي تلقائياً عند الدخول
     const dateInput = document.getElementById('trDate');
@@ -17,7 +17,7 @@ async function initTreasuryAuditSection() {
         dateInput.value = new Date().toLocaleDateString('en-CA');
     }
 
-    // جلب البيانات الدائمة والمحفوظة في Dexie (IndexedDB)
+    // جلب البيانات الدائمة والمحفوظة في SQLite
     if (window.bayanDB) {
         try {
             if (window.bayanDB.treasuryAudit) {
@@ -25,7 +25,7 @@ async function initTreasuryAuditSection() {
             } else if (window.bayanDB.tables.some(t => t.name === 'treasuryAudit')) {
                 window.treasuryAuditRecords = await window.bayanDB.table("treasuryAudit").toArray();
             }
-            console.log("✅ تم استرجاع سجلات الخزينة من IndexedDB بنجاح:", (window.treasuryAuditRecords || []).length, "عملية.");
+            console.log("✅ تم استرجاع سجلات الخزينة من SQLite بنجاح:", (window.treasuryAuditRecords || []).length, "عملية.");
         } catch (e) {
             console.warn("⚠️ تم تجهيز السجلات بنجاح في الذاكرة الحية.", e.message);
         }
@@ -553,7 +553,7 @@ async function addTreasuryAuditRecord() {
 
     window.treasuryAuditRecords.unshift(newRecord);
 
-    // 💾 الحفظ الفوري والدائم في IndexedDB (Dexie)
+    // 💾 الحفظ الفوري والدائم في SQLite
     if (window.bayanDB) {
         try {
             if (window.bayanDB.treasuryAudit) {
@@ -561,7 +561,7 @@ async function addTreasuryAuditRecord() {
             } else {
                 await window.bayanDB.table("treasuryAudit").put(newRecord);
             }
-            console.log("💾 تم حفظ عملية الخزينة بنجاح في IndexedDB.");
+            console.log("💾 تم حفظ عملية الخزينة بنجاح في SQLite.");
             window.treasuryAudit = window.treasuryAuditRecords;
             if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
                 window.BayanNetworkHub.onDataSaved();
@@ -734,7 +734,7 @@ function editTreasuryRecord(id) {
     modal.style.setProperty('z-index', '9999999', 'important');
 }
 
-// 9. حفظ التعديلات من النافذة المخصصة في IndexedDB دائمياً
+// 9. حفظ التعديلات من النافذة المخصصة في SQLite دائمياً
 async function saveTreasuryRecordEdit() {
     const id = parseInt(document.getElementById('editModalRecordId').value);
     const record = window.treasuryAuditRecords.find(r => r.id === id);
@@ -769,13 +769,13 @@ async function saveTreasuryRecordEdit() {
     record.notes = notes || '-';
     record.lastModified = timeStr;
 
-    // 💾 حفظ التعديل في IndexedDB دائمياً
+    // 💾 حفظ التعديل في SQLite دائمياً
     if (window.bayanDB) {
         try {
             await window.bayanDB.treasuryAudit.put(record);
-            console.log("💾 تم حفظ تعديل عملية الخزينة بنجاح في IndexedDB.");
+            console.log("💾 تم حفظ تعديل عملية الخزينة بنجاح في SQLite.");
         } catch (e) {
-            console.error("❌ خطأ في حفظ التعديل في IndexedDB:", e);
+            console.error("❌ خطأ في حفظ التعديل في SQLite:", e);
         }
     }
 
@@ -792,7 +792,7 @@ function closeTreasuryRecordEditModal() {
     modal.style.setProperty('display', 'none', 'important');
 }
 
-// 9. دالة الحذف الصامت والحذف الفعلي المضمون من IndexedDB والذاكرة
+// 9. دالة الحذف الصامت والحذف الفعلي المضمون من SQLite والذاكرة
 async function deleteTreasuryRecordSilent(id) {
     id = parseInt(id);
     window.treasuryAuditRecords = window.treasuryAuditRecords.filter(r => parseInt(r.id) !== id);
@@ -800,9 +800,9 @@ async function deleteTreasuryRecordSilent(id) {
     if (window.bayanDB) {
         try {
             await window.bayanDB.treasuryAudit.delete(id);
-            console.log("🗑️ تم حذف العملية من IndexedDB بنجاح رقم:", id);
+            console.log("🗑️ تم حذف العملية من SQLite بنجاح رقم:", id);
         } catch (e) {
-            console.error("❌ خطأ أثناء حذف العملية من IndexedDB:", e);
+            console.error("❌ خطأ أثناء حذف العملية من SQLite:", e);
         }
     }
 }

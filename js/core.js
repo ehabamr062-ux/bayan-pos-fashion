@@ -47,11 +47,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '3.1.1';
-window.APP_VERSION = '3.1.1';
+window.appVersion = '3.2.0';
+window.APP_VERSION = '3.2.0';
 
 async function fetchAppVersion() {
-    let version = '3.1.1';
+    let version = '3.1.2';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -65,7 +65,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '3.1.1';
+    if (!version) version = window.appVersion || '3.1.2';
     window.appVersion = version;
     window.APP_VERSION = version;
 
@@ -138,36 +138,10 @@ async function checkSubscriptionStatus() {
 
 // دالة فحص التحديثات الجديدة
 
-// تهيئة قاعدة بيانات IndexedDB بشكل كامل (Dexie)
-const db = new Dexie("BayanDatabase");
-db.version(101).stores({
-    products: "++id, name, barcode, category",
-    transactions: "++id, dateISO, type, partner, invoiceId",
-    accounts: "++id, name, type, code",
-    settings: "id",
-    trash: "++id, type, deletedAt",
-    users: "++id, name, pin",
-    auditLogs: "++id, timestamp, action",
-    backups: "++id, timestamp",
-    wallpapers: "name",
-    treasuryAudit: "++id, date, category",
-    syncQueue: "++id, timestamp, action, type, status",
-    warehouses: "++id, name"
-});
-
-// 🛡️ حماية قاعدة البيانات من التعليق والأقفال المتعارضة (Anti-Block & VersionChange Auto-Release)
-db.on('blocked', () => {
-    console.warn("⚠️ [Dexie] تم رصد قفل معلق على قاعدة البيانات من نافذة أخرى. جاري المتابعة لتفادي توقف البرنامج...");
-});
-db.on('versionchange', () => {
-    console.warn("⚠️ [Dexie] تم رصد ترقية نسخة قاعدة البيانات. إغلاق الاتصال المؤقت بسلاسة لمنع التعليق...");
-    try { db.close(); } catch(e) {}
-});
-
+// تهيئة قاعدة بيانات النظام (SQLite المباشر والدائم عبر BayanDBAdapter)
+let db = (typeof window !== 'undefined' && window.BayanDBAdapter) ? window.BayanDBAdapter : (typeof window !== 'undefined' ? window.db : null);
 window.db = db;
-if (typeof window.bayanDB === 'undefined' || !window.bayanDB) {
-    window.bayanDB = db;
-}
+window.bayanDB = db;
 
 // قاعدة بيانات وهمية للأصناف (سيتم استبدالها لاحقاً ببيانات من DB)
 
@@ -272,7 +246,7 @@ window.isUserAdminName = function(userName) {
 
 /**
  * ⚡ نظام التحميل الذكي عند الطلب ومزامنة الفواتير (Lazy & On-Demand Loader)
- * لحماية الذاكرة والسرعة الخارقة لأقل من 1 ثانية مع الاحتفاظ بكافة فواتير السنين في IndexedDB
+ * لحماية الذاكرة والسرعة الخارقة لأقل من 1 ثانية مع الاحتفاظ بكافة فواتير السنين في SQLite
  */
 window.ensureInvoiceLoaded = async function(invoiceId) {
     if (!invoiceId || invoiceId === '---') return [];
@@ -283,7 +257,7 @@ window.ensureInvoiceLoaded = async function(invoiceId) {
     const inMem = (window.transactions || []).filter(t => t && String(t.invoiceId) === sId);
     if (inMem.length > 0) return inMem;
     
-    // استدعاء فوري للفاتورة من IndexedDB عبر الفهرس السريع
+    // استدعاء فوري للفاتورة من SQLite عبر الفهرس السريع
     try {
         if (!window.db || !window.db.transactions) return [];
         const numId = Number(sId);
@@ -306,7 +280,6 @@ window.ensureInvoiceLoaded = async function(invoiceId) {
 };
 
 window.loadTransactionsForDateRange = async function(fromDate, toDate) {
-    if (!fromDate && !toDate) return;
     try {
         if (!window.db || !window.db.transactions) return;
         let q;
@@ -314,8 +287,11 @@ window.loadTransactionsForDateRange = async function(fromDate, toDate) {
             q = window.db.transactions.where('dateISO').between(fromDate, toDate, true, true);
         } else if (fromDate) {
             q = window.db.transactions.where('dateISO').aboveOrEqual(fromDate);
-        } else {
+        } else if (toDate) {
             q = window.db.transactions.where('dateISO').belowOrEqual(toDate);
+        } else {
+            // كل الفترات: جلب أحدث الحركات بأمان دون تجميد المتصفح
+            q = window.db.transactions.orderBy('id').reverse().limit(1500);
         }
         const records = await q.toArray();
         if (records && records.length > 0) {
@@ -332,19 +308,10 @@ window.loadTransactionsForDateRange = async function(fromDate, toDate) {
     }
 };
 
-window.syncMaxSequencesFromDB = async function() {
+window.syncMaxSequencesFromDB = async function(preloadedTx = null) {
     try {
         if (!window.db || !window.db.transactions) return;
 
-        // فحص عدد الحركات وقراءة الأحدث لتحديد أقصى رقم مسجل فعلياً لكل نوع
-        const totalCount = await window.db.transactions.count().catch(() => 0);
-        let recent = [];
-        if (totalCount <= 3000) {
-            recent = await window.db.transactions.toArray().catch(() => []);
-        } else {
-            recent = await window.db.transactions.orderBy('id').reverse().limit(1500).toArray().catch(() => []);
-        }
-        
         const types = ['بيع', 'شراء', 'مرتجع بيع', 'مرتجع شراء', 'تسوية', 'قبض', 'صرف'];
         const savedPrefix = (typeof getStore === 'function') ? getStore('bayan_device_prefix') : null;
         let devPrefix = (savedPrefix !== null && savedPrefix !== undefined && savedPrefix !== '') ? savedPrefix : '';
@@ -353,29 +320,18 @@ window.syncMaxSequencesFromDB = async function() {
             const shortCode = dId ? dId.replace(/^DEV-/i, '').substring(0, 3).toUpperCase() : '';
             devPrefix = shortCode ? `T${shortCode}-` : 'T-';
         }
-        
-        const memList = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
 
-        types.forEach(tp => {
+        // 1. إعادة استخدام فواتير اليوم المحملة بالذاكرة مسبقاً دون قراءة إضافية
+        const memList = (preloadedTx && Array.isArray(preloadedTx))
+            ? preloadedTx
+            : ((typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : []);
+
+        // 2. فحص أقصى تسلسل مسجل في SQLite مباشرة عبر استعلام SQL مخصص دون تحميل الجدول كاملاً ودون قراءة raw_json
+        for (const tp of types) {
             const key = 'bayan_last_seq_' + (devPrefix || '') + tp;
             let realMax = 0;
 
-            // 1. فحص الحركات الحقيقية في قاعدة البيانات
-            if (recent && recent.length > 0) {
-                recent.forEach(t => {
-                    const matchesType = (typeof window.isTransactionOfType === 'function')
-                        ? window.isTransactionOfType(t, tp)
-                        : (t && t.type && t.type.includes(tp) && (!tp.includes('بيع') || !t.type.includes('مرتجع')));
-                    if (matchesType) {
-                        const n = (typeof window.extractNumericInvoiceId === 'function')
-                            ? window.extractNumericInvoiceId(t.invoiceId, devPrefix)
-                            : parseInt(String(t.invoiceId || '').replace(/\D+/g, ''), 10);
-                        if (!isNaN(n) && n > realMax) realMax = n;
-                    }
-                });
-            }
-
-            // 2. فحص الحركات المحملة بالذاكرة
+            // أ. فحص الحركات المحملة بالذاكرة (فواتير اليوم الحالية)
             if (memList && memList.length > 0) {
                 memList.forEach(t => {
                     const matchesType = (typeof window.isTransactionOfType === 'function')
@@ -390,10 +346,68 @@ window.syncMaxSequencesFromDB = async function() {
                 });
             }
 
-            // 3. تصحيح الذاكرة الدائمة وتصفير أو تعديل الأرقام التالفة المتضخمة فورياً
+            // ب. استعلام SQLite الفوري: قراءة عمود invoiceId فقط لأحدث السجلات (LIMIT 10) مستفيداً من الفهرس idx_tx_type
+            let queriedFromDb = false;
+            if (window.BayanSQLite && window.BayanSQLite.db) {
+                try {
+                    let stmt = null;
+                    if (tp === 'بيع') {
+                        stmt = window.BayanSQLite.db.prepare("SELECT invoiceId FROM transactions WHERE type LIKE '%بيع%' AND type NOT LIKE '%مرتجع%' ORDER BY id DESC LIMIT 10;");
+                    } else if (tp === 'شراء') {
+                        stmt = window.BayanSQLite.db.prepare("SELECT invoiceId FROM transactions WHERE type LIKE '%شراء%' AND type NOT LIKE '%مرتجع%' ORDER BY id DESC LIMIT 10;");
+                    } else if (tp === 'مرتجع بيع') {
+                        stmt = window.BayanSQLite.db.prepare("SELECT invoiceId FROM transactions WHERE type LIKE '%مرتجع%بيع%' ORDER BY id DESC LIMIT 10;");
+                    } else if (tp === 'مرتجع شراء') {
+                        stmt = window.BayanSQLite.db.prepare("SELECT invoiceId FROM transactions WHERE type LIKE '%مرتجع%شراء%' ORDER BY id DESC LIMIT 10;");
+                    } else {
+                        stmt = window.BayanSQLite.db.prepare("SELECT invoiceId FROM transactions WHERE type LIKE ? ORDER BY id DESC LIMIT 10;");
+                        stmt.bind([`%${tp}%`]);
+                    }
+
+                    if (stmt) {
+                        while (stmt.step()) {
+                            const row = stmt.get();
+                            if (row && row[0] != null) {
+                                const n = (typeof window.extractNumericInvoiceId === 'function')
+                                    ? window.extractNumericInvoiceId(row[0], devPrefix)
+                                    : parseInt(String(row[0] || '').replace(/\D+/g, ''), 10);
+                                if (!isNaN(n) && n > realMax) realMax = n;
+                            }
+                        }
+                        stmt.free();
+                        queriedFromDb = true;
+                    }
+                } catch(sqlErr) {
+                    console.warn(`⚠️ [SQLite] syncMaxSequences fast query notice for ${tp}:`, sqlErr.message || sqlErr);
+                }
+            }
+
+            // ج. صمام أمان بديل في حال تعذر الاستعلام المباشر عبر المحرك (يقرأ بحد أقصى 10 سجلات عبر المحول)
+            if (!queriedFromDb && window.db && window.db.transactions) {
+                try {
+                    const fallbackRecords = await window.db.transactions
+                        .where('type').startsWith(tp)
+                        .reverse()
+                        .limit(10)
+                        .toArray()
+                        .catch(() => []);
+                    fallbackRecords.forEach(t => {
+                        const matchesType = (typeof window.isTransactionOfType === 'function')
+                            ? window.isTransactionOfType(t, tp)
+                            : (t && t.type && t.type.includes(tp) && (!tp.includes('بيع') || !t.type.includes('مرتجع')));
+                        if (matchesType) {
+                            const n = (typeof window.extractNumericInvoiceId === 'function')
+                                ? window.extractNumericInvoiceId(t.invoiceId, devPrefix)
+                                : parseInt(String(t.invoiceId || '').replace(/\D+/g, ''), 10);
+                            if (!isNaN(n) && n > realMax) realMax = n;
+                        }
+                    });
+                } catch(fbErr) {}
+            }
+
+            // د. تصحيح الذاكرة الدائمة وتصفير أو تعديل الأرقام التالفة المتضخمة فورياً
             if (typeof setStore === 'function') setStore(key, String(realMax));
-            try { localStorage.setItem(key, String(realMax)); } catch(e) {}
-        });
+        }
     } catch(e) {
         console.warn("⚠️ syncMaxSequencesFromDB notice:", e);
     }
@@ -423,12 +437,12 @@ if (getStore('bayan_inventory_categories')) {
 
 }
 
-// --- نظام الحفظ والاسترجاع (IndexedDB) ---
+// --- نظام الحفظ والاسترجاع (SQLite) ---
 
 // --- نظام الحسابات والديناميكية ---
 
 async function loadData() {
-    // 0. تهيئة نظام التخزين الوسيط والمزامنة مع IndexedDB
+    // 0. تهيئة نظام التخزين الوسيط والمزامنة مع SQLite
     if (typeof initAppStore === 'function') {
         await initAppStore();
     }
@@ -463,11 +477,11 @@ async function loadData() {
             new Promise((_, reject) => setTimeout(() => reject(new Error('db.open timeout after 3s')), 3000))
         ]);
     } catch (openError) {
-        console.warn("⚠️ [Dexie] ملاحظة فتح قاعدة البيانات:", openError.message || openError);
+        console.warn("⚠️ [SQLite] ملاحظة فتح قاعدة البيانات:", openError.message || openError);
     }
 
     try {
-        // 1. تحميل بيانات اليوم بيومه من IndexedDB بالتوازي لتسريع بدء التشغيل لأقل من ثانية مهما كبرت الداتا عبر السنين
+        // 1. تحميل بيانات اليوم بيومه من SQLite بالتوازي لتسريع بدء التشغيل لأقل من ثانية مهما كبرت الداتا عبر السنين
         const todayDateISO = new Date().toLocaleDateString('en-CA');
         const [pData, tTodayData, tPendingTransfers, aData, uData, trData, logData, wData] = await Promise.all([
             db.products.toArray().catch(e => { console.warn("products load:", e); return []; }),
@@ -489,8 +503,8 @@ async function loadData() {
         transactions = Array.from(initialTxMap.values());
         window.transactions = transactions;
 
-        // 🛡️ مزامنة أقصى تسلسل للفواتير من قاعدة البيانات لضمان عدم تكرار الأرقام حتى لو فواتير اليوم فارغة
-        await window.syncMaxSequencesFromDB();
+        // 🛡️ مزامنة أقصى تسلسل للفواتير بإعادة استخدام فواتير اليوم واستعلام SQLite السريع دون تحميل مكرر
+        await window.syncMaxSequencesFromDB(transactions);
 
         accounts = aData || [];
 
@@ -552,14 +566,15 @@ async function loadData() {
                         : u.pin
                 }));
                 await db.users.bulkPut(encryptedUsers);
-                console.log("🔒 [Security] تم تشفير وتأمين كافة رموز PIN في قاعدة بيانات IndexedDB بنجاح.");
+                console.log("🔒 [Security] تم تشفير وتأمين كافة رموز PIN في قاعدة بيانات SQLite بنجاح.");
             } catch (migErr) {
-                console.warn("⚠️ [Security] تعذر التحديث التلقائي لتشفير رموز PIN في IndexedDB:", migErr);
+                console.warn("⚠️ [Security] تعذر التحديث التلقائي لتشفير رموز PIN في SQLite:", migErr);
             }
         }
 
         // 🛠️ تصحيح تلقائي لأي فواتير نقدية/بنكية/شبكة سابقة حُفظت بمدفوع صفر بسبب خطأ الحفظ السابق
         let txMigrationNeeded = false;
+        const healedTransactions = [];
         if (Array.isArray(transactions)) {
             transactions.forEach(t => {
                 if (!t) return;
@@ -573,19 +588,20 @@ async function loadData() {
                         if (invTot > 0) {
                             t.paidAmount = invTot;
                             txMigrationNeeded = true;
+                            healedTransactions.push(t);
                         }
                     }
                 }
             });
-            if (txMigrationNeeded && typeof db !== 'undefined' && db.transactions) {
+            if (txMigrationNeeded && healedTransactions.length > 0 && typeof db !== 'undefined' && db.transactions) {
                 try {
-                    await db.transactions.bulkPut(transactions);
-                    console.log("🛠️ [Payment Fix] تم تصحيح الفواتير النقدية والبنكية المسجلة بمدفوع صفر بنجاح.");
+                    await db.transactions.bulkPut(healedTransactions);
+                    console.log(`🛠️ [Payment Fix] تم تصحيح (${healedTransactions.length}) فاتورة نقدية وبنكية مسجلة بمدفوع صفر بنجاح.`);
                 } catch(e) { console.warn("Auto-heal transactions error:", e); }
             }
         }
 
-        // تفريغ كاش الأرصدة لضمان احتسابها على البيانات المحملة حديثاً من IndexedDB
+        // تفريغ كاش الأرصدة لضمان احتسابها على البيانات المحملة حديثاً من SQLite
         if (typeof window.invalidateAccountBalancesCache === 'function') {
             window.invalidateAccountBalancesCache();
         }
@@ -608,9 +624,14 @@ async function loadData() {
             });
         }
 
-        console.log("✅ Data successfully loaded and synchronized from IndexedDB.");
+        console.log("✅ Data successfully loaded and synchronized from SQLite.");
+
+        // ⚡ تهيئة بصمات الكيانات لتفعيل الحفظ الجزئي فائق السرعة (Incremental / Delta Save Engine)
+        if (typeof initEntitySignatures === 'function') {
+            initEntitySignatures();
+        }
     } catch (err) {
-        console.error("❌ Failed to load data from IndexedDB:", err);
+        console.error("❌ Failed to load data from SQLite:", err);
         users = [];
         trashBin = [];
         auditLogs = [];
@@ -619,7 +640,7 @@ async function loadData() {
     window.warehouses = warehouses;
 
 
-    // تحميل أسباب الخصم والإضافة التلقائية من IndexedDB
+    // تحميل أسباب الخصم والإضافة التلقائية من SQLite
 
     if (getStore('pos_discount_reasons')) discountReasons = JSON.parse(getStore('pos_discount_reasons'));
 
@@ -717,7 +738,7 @@ async function loadData() {
         initLogin();
     }
 
-    // ✅ أمان: استعادة الجلسة من IndexedDB عبر PIN فقط (لا نثق بالبيانات المخزنة في localStorage)
+    // ✅ أمان: استعادة الجلسة من SQLite عبر PIN فقط
     if (savedSession) {
 
         try {
@@ -726,7 +747,7 @@ async function loadData() {
             const savedPin = sessionData.pin;
             const savedWarehouse = sessionData.warehouseName || 'المخزن الرئيسي';
 
-            // نبحث عن المستخدم في IndexedDB بالـ PIN (لا نثق بالبيانات المكتوبة في localStorage)
+            // نبحث عن المستخدم في SQLite بالـ PIN
             if (savedPin) {
                 const decSavedPin = (window.BayanSecurity && typeof window.BayanSecurity.decryptPin === 'function')
                     ? window.BayanSecurity.decryptPin(savedPin)
@@ -776,11 +797,257 @@ window.deletedItemIds = {
     users: []
 };
 
+// ⚡ نظام تتبع العناصر المتغيرة والبصمات لحفظ الفروقات فقط (Incremental / Delta Engine)
+window.dirtyItemIds = {
+    products: new Set(),
+    accounts: new Set(),
+    transactions: new Set()
+};
+
+window._entitySignatures = {
+    products: new Map(),
+    accounts: new Map(),
+    transactions: new Map()
+};
+
+function getProductSignature(p) {
+    if (!p) return '';
+    const whStockStr = p.warehouseStocks ? JSON.stringify(p.warehouseStocks) : '';
+    const varStr = (p.variants && p.variants.length > 0) ? JSON.stringify(p.variants) : '';
+    const unitStr = (p.units && p.units.length > 0) ? JSON.stringify(p.units) : '';
+    const imgSig = p.image ? (typeof p.image === 'string' ? (p.image.length + '_' + p.image.slice(-30)) : '1') : '';
+    return `${p.id}|${p.name || ''}|${p.code || ''}|${p.barcode || ''}|${p.cost || 0}|${p.price || 0}|${p.wholesale || 0}|${p.stock || 0}|${p.category || ''}|${p.unit || ''}|${p.minStock || ''}|${p.maxStock || ''}|${imgSig}|${p.updatedAt || ''}|${p.editDate || ''}|${p.status || ''}|${whStockStr}|${varStr}|${unitStr}`;
+}
+
+function getTransactionSignature(t) {
+    if (!t) return '';
+    return `${t.id || ''}|${t.invoiceId || ''}|${t.type || ''}|${t.dateISO || ''}|${t.timeISO || t.time || ''}|${t.method || ''}|${t.partner || ''}|${t.total || 0}|${t.paidAmount || 0}|${t.remaining || 0}|${t.invoiceGrandTotal || 0}|${t.warehouse || ''}|${t.transferStatus || ''}|${t.editDate || ''}|${t.product || ''}|${t.qty || 0}|${t.price || 0}|${t.isInvoiceHead ? 1 : 0}|${t.notes || ''}`;
+}
+
+function getAccountSignature(a) {
+    if (!a) return '';
+    return `${a.id || ''}|${a.name || ''}|${a.code || ''}|${a.type || ''}|${a.mobile || ''}|${a.balance || 0}|${a.address || ''}|${a.taxNumber || ''}|${a.notes || ''}`;
+}
+
+function initEntitySignatures() {
+    if (!window._entitySignatures) {
+        window._entitySignatures = {
+            products: new Map(),
+            accounts: new Map(),
+            transactions: new Map()
+        };
+    }
+    if (Array.isArray(window.productsDB)) {
+        window.productsDB.forEach(p => {
+            if (p && p.id != null) window._entitySignatures.products.set(p.id, getProductSignature(p));
+        });
+    }
+    if (Array.isArray(window.transactions)) {
+        window.transactions.forEach(t => {
+            if (t && t.id != null) window._entitySignatures.transactions.set(t.id, getTransactionSignature(t));
+        });
+    }
+    if (Array.isArray(window.accounts)) {
+        window.accounts.forEach(a => {
+            if (a && a.id != null) window._entitySignatures.accounts.set(a.id, getAccountSignature(a));
+        });
+    }
+}
+window.initEntitySignatures = initEntitySignatures;
+
+function updateEntitySignatures(table, items) {
+    if (!window._entitySignatures || !window._entitySignatures[table]) initEntitySignatures();
+    const sigMap = window._entitySignatures ? window._entitySignatures[table] : null;
+    if (!sigMap || !Array.isArray(items)) return;
+
+    const getSig = (table === 'products') ? getProductSignature
+                 : (table === 'transactions') ? getTransactionSignature
+                 : getAccountSignature;
+
+    items.forEach(it => {
+        if (it && it.id != null) {
+            sigMap.set(it.id, getSig(it));
+            if (window.dirtyItemIds && window.dirtyItemIds[table]) {
+                window.dirtyItemIds[table].delete(it.id);
+            }
+        }
+    });
+}
+window.updateEntitySignatures = updateEntitySignatures;
+
+function markDirty(table, itemOrId) {
+    if (!itemOrId) return;
+    const id = (typeof itemOrId === 'object') ? itemOrId.id : itemOrId;
+    if (id != null && window.dirtyItemIds && window.dirtyItemIds[table]) {
+        window.dirtyItemIds[table].add(id);
+    }
+}
+window.markDirty = markDirty;
+
+function getDirtyOrChangedProducts(explicitModified = null, forceFull = false) {
+    if (!Array.isArray(productsDB) || productsDB.length === 0) return [];
+    if (forceFull) return productsDB;
+
+    const dirtyList = [];
+    const seenIds = new Set();
+
+    if (Array.isArray(explicitModified) && explicitModified.length > 0) {
+        explicitModified.forEach(p => {
+            if (p) {
+                dirtyList.push(p);
+                if (p.id != null) seenIds.add(p.id);
+            }
+        });
+    }
+
+    if (window.dirtyItemIds && window.dirtyItemIds.products && window.dirtyItemIds.products.size > 0) {
+        window.dirtyItemIds.products.forEach(id => {
+            if (!seenIds.has(id)) {
+                const found = productsDB.find(p => p && p.id === id);
+                if (found) {
+                    dirtyList.push(found);
+                    seenIds.add(id);
+                }
+            }
+        });
+    }
+
+    const sigMap = window._entitySignatures ? window._entitySignatures.products : null;
+    if (sigMap && sigMap.size > 0) {
+        for (let i = 0; i < productsDB.length; i++) {
+            const p = productsDB[i];
+            if (!p) continue;
+            if (p.id != null && seenIds.has(p.id)) continue;
+
+            if (p.id == null) {
+                dirtyList.push(p);
+            } else {
+                const savedSig = sigMap.get(p.id);
+                const currentSig = getProductSignature(p);
+                if (savedSig === undefined || savedSig !== currentSig) {
+                    dirtyList.push(p);
+                    seenIds.add(p.id);
+                }
+            }
+        }
+    } else {
+        return productsDB;
+    }
+
+    return dirtyList;
+}
+
+function getDirtyOrChangedTransactions(explicitModified = null, forceFull = false) {
+    if (!Array.isArray(transactions) || transactions.length === 0) return [];
+    if (forceFull) return transactions;
+
+    const dirtyList = [];
+    const seenIds = new Set();
+
+    if (Array.isArray(explicitModified) && explicitModified.length > 0) {
+        explicitModified.forEach(t => {
+            if (t) {
+                dirtyList.push(t);
+                if (t.id != null) seenIds.add(t.id);
+            }
+        });
+    }
+
+    if (window.dirtyItemIds && window.dirtyItemIds.transactions && window.dirtyItemIds.transactions.size > 0) {
+        window.dirtyItemIds.transactions.forEach(id => {
+            if (!seenIds.has(id)) {
+                const found = transactions.find(t => t && t.id === id);
+                if (found) {
+                    dirtyList.push(found);
+                    seenIds.add(id);
+                }
+            }
+        });
+    }
+
+    const sigMap = window._entitySignatures ? window._entitySignatures.transactions : null;
+    if (sigMap && sigMap.size > 0) {
+        for (let i = 0; i < transactions.length; i++) {
+            const t = transactions[i];
+            if (!t) continue;
+            if (t.id != null && seenIds.has(t.id)) continue;
+
+            if (t.id == null) {
+                dirtyList.push(t);
+            } else {
+                const savedSig = sigMap.get(t.id);
+                const currentSig = getTransactionSignature(t);
+                if (savedSig === undefined || savedSig !== currentSig) {
+                    dirtyList.push(t);
+                    seenIds.add(t.id);
+                }
+            }
+        }
+    } else {
+        return transactions;
+    }
+
+    return dirtyList;
+}
+
+function getDirtyOrChangedAccounts(explicitModified = null, forceFull = false) {
+    if (!Array.isArray(accounts) || accounts.length === 0) return [];
+    if (forceFull) return accounts;
+
+    const dirtyList = [];
+    const seenIds = new Set();
+
+    if (Array.isArray(explicitModified) && explicitModified.length > 0) {
+        explicitModified.forEach(a => {
+            if (a) {
+                dirtyList.push(a);
+                if (a.id != null) seenIds.add(a.id);
+            }
+        });
+    }
+
+    if (window.dirtyItemIds && window.dirtyItemIds.accounts && window.dirtyItemIds.accounts.size > 0) {
+        window.dirtyItemIds.accounts.forEach(id => {
+            if (!seenIds.has(id)) {
+                const found = accounts.find(a => a && a.id === id);
+                if (found) {
+                    dirtyList.push(found);
+                    seenIds.add(id);
+                }
+            }
+        });
+    }
+
+    const sigMap = window._entitySignatures ? window._entitySignatures.accounts : null;
+    if (sigMap && sigMap.size > 0) {
+        for (let i = 0; i < accounts.length; i++) {
+            const a = accounts[i];
+            if (!a) continue;
+            if (a.id != null && seenIds.has(a.id)) continue;
+
+            if (a.id == null) {
+                dirtyList.push(a);
+            } else {
+                const savedSig = sigMap.get(a.id);
+                const currentSig = getAccountSignature(a);
+                if (savedSig === undefined || savedSig !== currentSig) {
+                    dirtyList.push(a);
+                    seenIds.add(a.id);
+                }
+            }
+        }
+    } else {
+        return accounts;
+    }
+
+    return dirtyList;
+}
+
 let isSavingDbData = false;
 let pendingSaveDbRequest = false;
 let dbSaveQueue = Promise.resolve();
 
-// 🔒 منسق طابور الحفظ (Save Lock Coordinator) لمنع تضارب العمليات المتزامنة في IndexedDB
+// 🔒 منسق طابور الحفظ (Save Lock Coordinator) لمنع تضارب العمليات المتزامنة في SQLite
 function runDbSaveTask(task) {
     const nextTask = dbSaveQueue.then(async () => {
         return await task();
@@ -791,7 +1058,7 @@ function runDbSaveTask(task) {
     return nextTask;
 }
 
-async function saveData(targetTables = null) {
+async function saveData(targetTables = null, deltaOptions = null) {
     if (isSavingDbData) {
         pendingSaveDbRequest = true;
         return;
@@ -800,13 +1067,37 @@ async function saveData(targetTables = null) {
 
     return runDbSaveTask(async () => {
         try {
-            const requested = targetTables ? (Array.isArray(targetTables) ? targetTables : [targetTables]) : null;
-            const shouldSave = (tbl) => !requested || requested.includes(tbl);
+            let requested = targetTables;
+            let delta = deltaOptions;
+
+            // دعم استدعاء saveData بكائن خيارات مباشر: saveData({ tables: [...], modifiedProducts: [...] })
+            if (targetTables && typeof targetTables === 'object' && !Array.isArray(targetTables)) {
+                delta = targetTables;
+                requested = targetTables.tables || targetTables.targetTables || null;
+            }
+
+            const requestedList = requested ? (Array.isArray(requested) ? requested : [requested]) : null;
+            const shouldSave = (tbl) => !requestedList || requestedList.includes(tbl);
+
+            const forceFull = delta ? Boolean(delta.forceFull) : false;
+            const explicitProducts = delta ? (delta.modifiedProducts || delta.products) : null;
+            const explicitAccounts = delta ? (delta.modifiedAccounts || delta.accounts) : null;
+            const explicitTransactions = delta ? (delta.newTransactions || delta.modifiedTransactions || delta.transactions) : null;
+
+            // تحديد السجلات المتغيرة فقط (Incremental / Delta Save)
+            const deltaProducts = shouldSave('products') ? getDirtyOrChangedProducts(explicitProducts, forceFull) : [];
+            const hasDeletedProducts = Boolean(window.deletedItemIds && window.deletedItemIds.products && window.deletedItemIds.products.length > 0);
+
+            const deltaAccounts = shouldSave('accounts') ? getDirtyOrChangedAccounts(explicitAccounts, forceFull) : [];
+            const hasDeletedAccounts = Boolean(window.deletedItemIds && window.deletedItemIds.accounts && window.deletedItemIds.accounts.length > 0);
+
+            const deltaTransactions = shouldSave('transactions') ? getDirtyOrChangedTransactions(explicitTransactions, forceFull) : [];
+            const hasDeletedTransactions = Boolean(window.deletedItemIds && window.deletedItemIds.transactions && window.deletedItemIds.transactions.length > 0);
 
             const tablesToTransact = [];
-            if (shouldSave('products') && db.products) tablesToTransact.push(db.products);
-            if (shouldSave('accounts') && db.accounts) tablesToTransact.push(db.accounts);
-            if (shouldSave('transactions') && db.transactions) tablesToTransact.push(db.transactions);
+            if (shouldSave('products') && db.products && (deltaProducts.length > 0 || hasDeletedProducts)) tablesToTransact.push(db.products);
+            if (shouldSave('accounts') && db.accounts && (deltaAccounts.length > 0 || hasDeletedAccounts)) tablesToTransact.push(db.accounts);
+            if (shouldSave('transactions') && db.transactions && (deltaTransactions.length > 0 || hasDeletedTransactions)) tablesToTransact.push(db.transactions);
             if (shouldSave('users') && db.users) tablesToTransact.push(db.users);
             if (shouldSave('trash') && db.trash) tablesToTransact.push(db.trash);
             if (shouldSave('auditLogs') && db.auditLogs) tablesToTransact.push(db.auditLogs);
@@ -814,94 +1105,115 @@ async function saveData(targetTables = null) {
             if (shouldSave('warehouses') && db.warehouses) tablesToTransact.push(db.warehouses);
             if (shouldSave('treasuryAudit') && db.treasuryAudit) tablesToTransact.push(db.treasuryAudit);
 
-            if (tablesToTransact.length === 0) return;
+            if (tablesToTransact.length > 0) {
+                await db.transaction('rw', tablesToTransact, async () => {
+                    // 1. حفظ وتحديث الأصناف المتغيرة فقط (Delta Save)
+                    if (shouldSave('products') && Array.isArray(productsDB)) {
+                        if (hasDeletedProducts) {
+                            await db.products.bulkDelete(window.deletedItemIds.products);
+                            if (window._entitySignatures && window._entitySignatures.products) {
+                                window.deletedItemIds.products.forEach(id => window._entitySignatures.products.delete(id));
+                            }
+                            window.deletedItemIds.products = [];
+                        }
+                        if (deltaProducts.length > 0) {
+                            const keys = await db.products.bulkPut(deltaProducts, { allKeys: true });
+                            if (keys && keys.length === deltaProducts.length) {
+                                deltaProducts.forEach((p, i) => { if (!p.id) p.id = keys[i]; });
+                            }
+                            updateEntitySignatures('products', deltaProducts);
+                        }
+                    }
 
-            await db.transaction('rw', tablesToTransact, async () => {
-                // 1. حفظ وتحديث الأصناف
-                if (shouldSave('products') && Array.isArray(productsDB)) {
-                    if (window.deletedItemIds.products && window.deletedItemIds.products.length > 0) {
-                        await db.products.bulkDelete(window.deletedItemIds.products);
-                        window.deletedItemIds.products = [];
+                    // 2. حفظ وتحديث الحسابات المتغيرة فقط (Delta Save)
+                    if (shouldSave('accounts') && Array.isArray(accounts)) {
+                        if (hasDeletedAccounts) {
+                            await db.accounts.bulkDelete(window.deletedItemIds.accounts);
+                            if (window._entitySignatures && window._entitySignatures.accounts) {
+                                window.deletedItemIds.accounts.forEach(id => window._entitySignatures.accounts.delete(id));
+                            }
+                            window.deletedItemIds.accounts = [];
+                        }
+                        if (deltaAccounts.length > 0) {
+                            const keys = await db.accounts.bulkPut(deltaAccounts, { allKeys: true });
+                            if (keys && keys.length === deltaAccounts.length) {
+                                deltaAccounts.forEach((a, i) => { if (!a.id) a.id = keys[i]; });
+                            }
+                            updateEntitySignatures('accounts', deltaAccounts);
+                        }
                     }
-                    if (productsDB.length > 0) {
-                        await db.products.bulkPut(productsDB);
-                    }
-                }
 
-                // 2. حفظ وتحديث الحسابات (عملاء وموردين)
-                if (shouldSave('accounts') && Array.isArray(accounts)) {
-                    if (window.deletedItemIds.accounts && window.deletedItemIds.accounts.length > 0) {
-                        await db.accounts.bulkDelete(window.deletedItemIds.accounts);
-                        window.deletedItemIds.accounts = [];
+                    // 3. حفظ وتحديث العمليات والفواتير الجديدة والمعدلة فقط (Delta Save)
+                    if (shouldSave('transactions') && Array.isArray(transactions)) {
+                        if (hasDeletedTransactions) {
+                            await db.transactions.bulkDelete(window.deletedItemIds.transactions);
+                            if (window._entitySignatures && window._entitySignatures.transactions) {
+                                window.deletedItemIds.transactions.forEach(id => window._entitySignatures.transactions.delete(id));
+                            }
+                            window.deletedItemIds.transactions = [];
+                        }
+                        if (deltaTransactions.length > 0) {
+                            const keys = await db.transactions.bulkPut(deltaTransactions, { allKeys: true });
+                            if (keys && keys.length === deltaTransactions.length) {
+                                deltaTransactions.forEach((t, i) => { if (!t.id) t.id = keys[i]; });
+                            }
+                            updateEntitySignatures('transactions', deltaTransactions);
+                        }
                     }
-                    if (accounts.length > 0) {
-                        await db.accounts.bulkPut(accounts);
-                    }
-                }
 
-                // 3. حفظ وتحديث العمليات والفواتير
-                if (shouldSave('transactions') && Array.isArray(transactions)) {
-                    if (window.deletedItemIds.transactions && window.deletedItemIds.transactions.length > 0) {
-                        await db.transactions.bulkDelete(window.deletedItemIds.transactions);
-                        window.deletedItemIds.transactions = [];
+                    // 4. حفظ وتحديث المستخدمين ومزامنة جدول SQLite 100% لمنع بقاء أي مستخدم محذوف
+                    if (shouldSave('users') && Array.isArray(users)) {
+                        window.users = users;
+                        if (window.deletedItemIds && window.deletedItemIds.users && window.deletedItemIds.users.length > 0) {
+                            await db.users.bulkDelete(window.deletedItemIds.users);
+                            window.deletedItemIds.users = [];
+                        }
+                        if (users.length > 0) {
+                            const secureUsers = users.map(u => ({
+                                ...u,
+                                pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                                    ? window.BayanSecurity.encryptPin(u.pin)
+                                    : u.pin
+                            }));
+                            await db.users.clear();
+                            await db.users.bulkPut(secureUsers);
+                        }
                     }
-                    if (transactions.length > 0) {
-                        await db.transactions.bulkPut(transactions);
+
+                    // 5. حفظ المهملات
+                    if (shouldSave('trash') && Array.isArray(trashBin) && trashBin.length > 0) {
+                        if (trashBin.length > 500) {
+                            trashBin = trashBin.slice(-500);
+                            window.trashBin = trashBin;
+                        }
+                        await db.trash.bulkPut(trashBin);
                     }
-                }
 
-                // 4. حفظ وتحديث المستخدمين ومزامنة جدول IndexedDB 100% لمنع بقاء أي مستخدم محذوف
-                if (shouldSave('users') && Array.isArray(users)) {
-                    window.users = users;
-                    if (window.deletedItemIds && window.deletedItemIds.users && window.deletedItemIds.users.length > 0) {
-                        await db.users.bulkDelete(window.deletedItemIds.users);
-                        window.deletedItemIds.users = [];
+                    // 6. حفظ سجل التدقيق
+                    if (shouldSave('auditLogs') && Array.isArray(auditLogs) && auditLogs.length > 0) {
+                        if (auditLogs.length > 500) {
+                            auditLogs = auditLogs.slice(-500);
+                            window.auditLogs = auditLogs;
+                        }
+                        await db.auditLogs.bulkPut(auditLogs);
                     }
-                    if (users.length > 0) {
-                        const secureUsers = users.map(u => ({
-                            ...u,
-                            pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
-                                ? window.BayanSecurity.encryptPin(u.pin)
-                                : u.pin
-                        }));
-                        await db.users.clear();
-                        await db.users.bulkPut(secureUsers);
+
+                    // 7. حفظ الإعدادات
+                    if (shouldSave('settings')) {
+                        const settings = JSON.parse(getStore('pos_settings') || '{}');
+                        await db.settings.put({ id: 'main', ...settings });
                     }
-                }
 
-                // 5. حفظ المهملات
-                if (shouldSave('trash') && Array.isArray(trashBin) && trashBin.length > 0) {
-                    if (trashBin.length > 500) {
-                        trashBin = trashBin.slice(-500);
-                        window.trashBin = trashBin;
+                    // 8. حفظ المخازن
+                    if (shouldSave('warehouses') && Array.isArray(warehouses) && warehouses.length > 0) {
+                        await db.warehouses.bulkPut(warehouses);
                     }
-                    await db.trash.bulkPut(trashBin);
-                }
+                });
+            }
 
-                // 6. حفظ سجل التدقيق
-                if (shouldSave('auditLogs') && Array.isArray(auditLogs) && auditLogs.length > 0) {
-                    if (auditLogs.length > 500) {
-                        auditLogs = auditLogs.slice(-500);
-                        window.auditLogs = auditLogs;
-                    }
-                    await db.auditLogs.bulkPut(auditLogs);
-                }
-
-                // 7. حفظ الإعدادات
-                if (shouldSave('settings')) {
-                    const settings = JSON.parse(getStore('pos_settings') || '{}');
-                    await db.settings.put({ id: 'main', ...settings });
-                }
-
-                // 8. حفظ المخازن
-                if (shouldSave('warehouses') && Array.isArray(warehouses) && warehouses.length > 0) {
-                    await db.warehouses.bulkPut(warehouses);
-                }
-            });
-
-            console.log("✅ Data successfully saved atomically to IndexedDB.");
+            console.log("✅ Data successfully saved incrementally to SQLite.");
         } catch (err) {
-            console.error("❌ Failed to save data to IndexedDB:", err);
+            console.error("❌ Failed to save data to SQLite:", err);
         } finally {
             window.accountBalancesCache = {}; // Invalidate balance cache
             if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
@@ -912,7 +1224,7 @@ async function saveData(targetTables = null) {
             }
         }
 
-        // حفظ الإعدادات السريعة في IndexedDB عبر setStore
+        // حفظ الإعدادات السريعة في SQLite عبر setStore
         setStore('pos_discount_reasons', JSON.stringify(discountReasons));
         setStore('pos_tax_reasons', JSON.stringify(taxReasons));
         setStore('pos_p_discount_reasons', JSON.stringify(purchaseDiscountReasons));
@@ -971,6 +1283,7 @@ async function saveTransactionChanges({ newTransactions = [], modifiedProducts =
                     if (keys && keys.length === newTransactions.length) {
                         newTransactions.forEach((t, i) => { if (!t.id) t.id = keys[i]; });
                     }
+                    if (typeof updateEntitySignatures === 'function') updateEntitySignatures('transactions', newTransactions);
                 }
                 // 2. تحديث الأصناف التي تأثرت كمياتها أو أسعارها فقط
                 if (modifiedProducts.length > 0 && db.products) {
@@ -978,6 +1291,7 @@ async function saveTransactionChanges({ newTransactions = [], modifiedProducts =
                     if (keys && keys.length === modifiedProducts.length) {
                         modifiedProducts.forEach((p, i) => { if (!p.id) p.id = keys[i]; });
                     }
+                    if (typeof updateEntitySignatures === 'function') updateEntitySignatures('products', modifiedProducts);
                 }
                 // 3. تحديث الحسابات المتأثرة فقط
                 if (modifiedAccounts.length > 0 && db.accounts) {
@@ -985,6 +1299,7 @@ async function saveTransactionChanges({ newTransactions = [], modifiedProducts =
                     if (keys && keys.length === modifiedAccounts.length) {
                         modifiedAccounts.forEach((a, i) => { if (!a.id) a.id = keys[i]; });
                     }
+                    if (typeof updateEntitySignatures === 'function') updateEntitySignatures('accounts', modifiedAccounts);
                 }
             });
 
@@ -1008,9 +1323,22 @@ async function saveTransactionChanges({ newTransactions = [], modifiedProducts =
                 });
             }
 
-            // مسح كاش الأرصدة والمخزون
-            window.accountBalancesCache = {};
-            if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
+            // مسح كاش الأرصدة والمخزون بذكاء عند تأثر الحسابات فقط
+            const hasAccountChanges = (modifiedAccounts.length > 0) || (newTransactions.some(t => t && t.partner && (!window.isGenericCashPartner || !window.isGenericCashPartner(t.partner))));
+            if (hasAccountChanges) {
+                if (typeof window.invalidateAccountBalancesCache === 'function') {
+                    if (modifiedAccounts.length > 0) {
+                        modifiedAccounts.forEach(a => { if (a && a.name) window.invalidateAccountBalancesCache(a.name); });
+                    }
+                    newTransactions.forEach(t => {
+                        if (t && t.partner && (!window.isGenericCashPartner || !window.isGenericCashPartner(t.partner))) {
+                            window.invalidateAccountBalancesCache(t.partner);
+                        }
+                    });
+                } else {
+                    window.accountBalancesCache = {};
+                }
+            }
             if (typeof invalidateStockCache === 'function') invalidateStockCache();
             if (typeof window.invalidateStockCache === 'function') window.invalidateStockCache();
             scheduleNotificationsUpdate();
@@ -1025,7 +1353,7 @@ async function saveTransactionChanges({ newTransactions = [], modifiedProducts =
             console.log("⚡ [FastSave] Transaction saved incrementally in ultra-fast mode.");
         } catch (err) {
             console.warn("⚠️ [FastSave] Incremental save failed, falling back to full saveData:", err);
-            await saveData();
+            await saveData(null, { modifiedProducts, newTransactions, modifiedAccounts });
         }
     });
 }
@@ -1040,7 +1368,7 @@ async function saveSettingsDirect(settingsObj) {
     try {
         const currentSettings = settingsObj || JSON.parse(getStore('pos_settings') || '{}');
         await db.settings.put({ id: 'main', ...currentSettings });
-        console.log("⚡ [Settings] Saved directly to IndexedDB settings table.");
+        console.log("⚡ [Settings] Saved directly to SQLite settings table.");
     } catch(err) {
         console.error("❌ Failed to save settings directly:", err);
     }
@@ -1063,7 +1391,7 @@ async function wipeAllSystemData() {
 
     try {
 
-        // مسح كافة الجداول في IndexedDB
+        // مسح كافة الجداول في SQLite
 
         await Promise.all([
 
@@ -1083,7 +1411,7 @@ async function wipeAllSystemData() {
 
         ]);
 
-        // مسح الإعدادات من IndexedDB عبر removeStore
+        // مسح الإعدادات من SQLite عبر removeStore
 
         const keysToRemove = [
 
@@ -1134,6 +1462,7 @@ window.syncAllVariantPricesWithProductBase = async function() {
     if (productsToUpdateInDb.length > 0 && typeof db !== 'undefined' && db.products) {
         try {
             await db.products.bulkPut(productsToUpdateInDb);
+            if (typeof updateEntitySignatures === 'function') updateEntitySignatures('products', productsToUpdateInDb);
             console.log(`✅ [Bayan Sync] Synced variant prices for ${productsToUpdateInDb.length} products with base prices.`);
         } catch(e) {
             console.warn("Error in syncAllVariantPricesWithProductBase:", e);

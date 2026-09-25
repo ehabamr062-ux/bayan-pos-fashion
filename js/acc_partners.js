@@ -1554,7 +1554,7 @@
             const targetPartnerClean = cleanAr(acc.name);
             const targetAccCode = (acc.code || '').toString().trim();
 
-            // ⚡ جلب فوري لحركات الشريك من IndexedDB عبر الفهرس السريع O(log N) لضمان استيعاب مئات الآلاف من الفواتير
+            // ⚡ جلب فوري لحركات الشريك من SQLite عبر الفهرس السريع O(log N) لضمان استيعاب مئات الآلاف من الفواتير
             let dbPartnerTxs = [];
             if (typeof db !== 'undefined' && db.transactions) {
                 try {
@@ -1565,7 +1565,7 @@
                 }
             }
 
-            // دمج حركات IndexedDB مع حركات الذاكرة الحالية بأمان وبدون أي تكرار
+            // دمج حركات SQLite مع حركات الذاكرة الحالية بأمان وبدون أي تكرار
             const txMap = new Map();
             (dbPartnerTxs || []).forEach(t => { if (t && t.id) txMap.set(t.id, t); });
             (typeof transactions !== 'undefined' && Array.isArray(transactions) ? transactions : []).forEach(t => {

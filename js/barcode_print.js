@@ -2,7 +2,7 @@
  * ============================================================
  *  مركز طباعة الباركود المخصص لقطاع الملابس والأحذية والأصناف العامة
  *  Bayan POS - Barcode & Fashion Label Printing Engine
- *  Version: 3.1.1
+ *  Version: 3.1.2
  * ============================================================
  */
 
@@ -40,7 +40,7 @@
 
         // 1. من كائن pos_settings المخزن محلياً (المصدر الأساسي والدائم لإعدادات المنشأة والمحل)
         try {
-            const rawPos = (typeof getStore === 'function') ? getStore('pos_settings') : localStorage.getItem('pos_settings');
+            const rawPos = (typeof getStore === 'function') ? getStore('pos_settings') : null;
             if (rawPos) {
                 const parsed = JSON.parse(rawPos);
                 if (parsed && parsed.name && String(parsed.name).trim()) {
@@ -60,7 +60,7 @@
         // 3. من أي مفتاح مباشر آخر باسم shopName
         if (!storeName) {
             try {
-                const direct = (typeof getStore === 'function') ? getStore('shopName') : localStorage.getItem('shopName');
+                const direct = (typeof getStore === 'function') ? getStore('shopName') : null;
                 if (direct && String(direct).trim()) {
                     storeName = String(direct).trim();
                 }
@@ -93,7 +93,7 @@
     function getBpActiveWarehouse() {
         return ((typeof currentUser !== 'undefined' && currentUser && currentUser.warehouseName)
             ? currentUser.warehouseName
-            : ((typeof getStore === 'function' ? getStore('activeWarehouse') : localStorage.getItem('activeWarehouse')) || 'المخزن الرئيسي')).trim();
+            : ((typeof getStore === 'function' ? getStore('activeWarehouse') : null) || 'المخزن الرئيسي')).trim();
     }
 
     /**
@@ -138,7 +138,7 @@
      */
     function loadBpSettings() {
         try {
-            const saved = (typeof getStore === 'function' ? getStore('bayan_barcode_label_settings') : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('bayan_barcode_label_settings') : null);
+            const saved = (typeof getStore === 'function' ? getStore('bayan_barcode_label_settings') : null);
             if (saved) {
                 const parsed = typeof saved === 'object' ? saved : JSON.parse(saved);
                 bpCurrentSettings = Object.assign({}, DEFAULT_BP_SETTINGS, parsed);
@@ -167,9 +167,6 @@
             readBpSettingsFromUI();
             if (typeof setStore === 'function') {
                 setStore('bayan_barcode_label_settings', JSON.stringify(bpCurrentSettings));
-            }
-            if (typeof localStorage !== 'undefined') {
-                try { localStorage.removeItem('bayan_barcode_label_settings'); } catch(e) {}
             }
             renderBpPreview();
             if (typeof showToast === 'function') {
@@ -1174,9 +1171,6 @@
             if (iconEl) iconEl.textContent = '👁️‍🗨️';
             if (textEl) textEl.textContent = 'المعاينة الحية: إخفاء';
             if (typeof setStore === 'function') setStore('bayan_bp_preview_visible', 'true');
-            if (typeof localStorage !== 'undefined') {
-                try { localStorage.removeItem('bayan_bp_preview_visible'); } catch(e) {}
-            }
             // رسم المعاينة فور إظهارها
             renderBpPreview(true);
         } else {
@@ -1186,9 +1180,6 @@
             if (iconEl) iconEl.textContent = '👁️';
             if (textEl) textEl.textContent = 'المعاينة الحية: إظهار';
             if (typeof setStore === 'function') setStore('bayan_bp_preview_visible', 'false');
-            if (typeof localStorage !== 'undefined') {
-                try { localStorage.removeItem('bayan_bp_preview_visible'); } catch(e) {}
-            }
         }
     }
 
@@ -1300,7 +1291,6 @@
         if (typeof setStore === 'function') {
             setStore('bayan_barcode_label_settings', JSON.stringify(bpCurrentSettings));
         }
-        try { localStorage.setItem('bayan_barcode_label_settings', JSON.stringify(bpCurrentSettings)); } catch (e) {}
 
         // تحويل عناصر القائمة المجهزة إلى الصيغة المعتمدة لدالة executePrinting المركزية
         const targets = bpQueue.map(item => ({
@@ -1386,7 +1376,7 @@
         // تطبيق حالة إظهار/إخفاء المعاينة الحية (الافتراضي: مخفية لتوسيع مساحة العمل)
         let savedPreview = false;
         try {
-            const raw = (typeof getStore === 'function' ? getStore('bayan_bp_preview_visible') : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('bayan_bp_preview_visible') : null);
+            const raw = (typeof getStore === 'function' ? getStore('bayan_bp_preview_visible') : null);
             savedPreview = raw === 'true' || raw === true;
         } catch (e) {}
         toggleBpPreviewColumn(savedPreview);

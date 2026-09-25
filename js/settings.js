@@ -56,7 +56,7 @@ async function saveSettings() {
         name: document.getElementById('shopName').value,
         phones: [p1, p2, p3, p4],
         address: document.getElementById('shopAddress').value,
-        autoBackup: document.getElementById('autoBackupSetting').checked || (document.getElementById('autoBackupInterval').value !== 'close'),
+        autoBackup: document.getElementById('autoBackupSetting').checked,
         autoBackupInterval: document.getElementById('autoBackupInterval').value,
         printFooterMsg: document.getElementById('printFooterMsg').value,
         printSocialQrLink: document.getElementById('printSocialQrLink') ? document.getElementById('printSocialQrLink').value.trim() : '',
@@ -286,11 +286,6 @@ function loadSettings() {
         autoIntervalEl.onchange = function() {
             const cur = JSON.parse(getStore('pos_settings') || '{}');
             cur.autoBackupInterval = this.value;
-            if (this.value !== 'close') {
-                cur.autoBackup = true;
-                const autoBackupEl = document.getElementById('autoBackupSetting');
-                if (autoBackupEl) autoBackupEl.checked = true;
-            }
             setStore('pos_settings', JSON.stringify(cur));
             if (typeof window.checkAndRunPeriodicBackup === 'function') {
                 window.checkAndRunPeriodicBackup();
@@ -1912,7 +1907,7 @@ function deleteUser(idx) {
         users.splice(idx, 1);
         window.users = users;
 
-        // حذف مباشر وفوري من جدول قاعدة البيانات IndexedDB لمنع أي بقاء له على الهارد ديسك
+        // حذف مباشر وفوري من جدول قاعدة البيانات SQLite لمنع أي بقاء له على القرص
         if (typeof db !== 'undefined' && db.users) {
             db.users.delete(deletedId).catch(e => console.warn("Direct db.users.delete notice:", e));
         }
@@ -1991,11 +1986,10 @@ function resolvePermissionKey(action) {
 }
 
 function checkPermission(action) {
-    // ✅ أمان: التحقق من صحة المستخدم عبر مصفوفة users المحملة من IndexedDB
-    // لا نثق بالبيانات المخزنة في localStorage مباشرة لأن أي شخص يستطيع تعديلها
+    // ✅ أمان: التحقق من صحة المستخدم عبر مصفوفة users المحملة من SQLite
     if (!currentUser) return false;
 
-    // إعادة التحقق من الـ PIN مقابل مصفوفة users الحقيقية من IndexedDB
+    // إعادة التحقق من الـ PIN مقابل مصفوفة users الحقيقية من SQLite
     if (typeof users !== 'undefined' && users.length > 0) {
         const pin = currentUser.pin;
         const realUser = users.find(u => u.pin === pin);
@@ -2016,7 +2010,7 @@ function checkPermission(action) {
             return false;
         }
 
-        // نستخدم بيانات المستخدم الحقيقية من IndexedDB (ليس من localStorage)
+        // نستخدم بيانات المستخدم الحقيقية من SQLite
         if (realUser.role === 'admin') {
             const isProfitsBlocked = realUser.permissions?.general && (realUser.permissions.general.hideProfits === true || realUser.permissions.general.profits === false);
             if (action === 'general_profits' && isProfitsBlocked) {
@@ -2173,7 +2167,7 @@ function checkPermission(action) {
 
 function hasPermission(action) {
     if (!currentUser) return false;
-    // ✅ أمان: التحقق من الـ PIN مقابل مصفوفة users من IndexedDB
+    // ✅ أمان: التحقق من الـ PIN مقابل مصفوفة users من SQLite
     if (typeof users !== 'undefined' && users.length > 0) {
         const realUser = users.find(u => u.pin === currentUser.pin);
         if (!realUser) return false;
@@ -2912,7 +2906,7 @@ function changeLanguage(lang) {
 
 /**
  * دالة تصفير قاعدة البيانات بالكامل (Reset Database)
- * تقوم بحذف كافة البيانات من Dexie ومسح الإعدادات مع الحفاظ على هوية الجهاز
+ * تقوم بحذف كافة البيانات من SQLite ومسح الإعدادات مع الحفاظ على هوية الجهاز
  */
 async function confirmFullReset() {
     if (typeof showCustomAlert !== 'function') {
@@ -2951,7 +2945,7 @@ async function confirmFullReset() {
             showToast("⏳ جاري تصفير قاعدة البيانات... يرجى عدم إغلاق المتصفح", "info");
 
             try {
-                // 1. مسح جداول البيانات فقط من Dexie (نحافظ على جدول settings الذي يحتوي HWID + الترخيص)
+                // 1. مسح جداول البيانات فقط من SQLite (نحافظ على جدول settings الذي يحتوي HWID + الترخيص)
                 const tables = ['products', 'transactions', 'accounts', 'users', 'trash', 'auditLogs', 'wallpapers'];
                 if (typeof db !== 'undefined') {
                     for (const table of tables) {
@@ -2959,7 +2953,7 @@ async function confirmFullReset() {
                     }
                 }
 
-                // 2. مسح جدول settings في IndexedDB بالكامل عبر clearStore()
+                // 2. مسح جدول settings في SQLite بالكامل عبر clearStore()
                 clearStore();
 
                 showToast("✅ تم تصفير النظام بنجاح. سيتم إعادة تحميل الصفحة الآن.", "success");

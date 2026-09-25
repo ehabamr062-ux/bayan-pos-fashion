@@ -174,7 +174,9 @@ window.POSState.purchases = window.POSState.purchases || {
 
 async function selectProductToPurchaseHeader(productId) {
 
-    const product = (typeof db !== 'undefined') ? await db.products.get(productId) : productsDB.find(p => p.id === productId);
+    const product = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+        ? productsDB.find(p => p && (p.id === productId || p.id == productId))
+        : ((typeof db !== 'undefined' && db.products) ? await db.products.get(productId) : null);
 
     if (!product) return;
 
@@ -591,7 +593,9 @@ function handleSupplierSearch(query) {
 
     if (!query) { resultsDiv.style.display = 'none'; return; }
 
-    const filtered = accounts.filter(a => a.name.includes(query));
+    const filtered = (window.BayanInvoiceEngine && typeof BayanInvoiceEngine.searchAccounts === 'function')
+        ? BayanInvoiceEngine.searchAccounts(query, 'supplier')
+        : accounts.filter(a => a && a.name && a.name.includes(query));
 
     if (filtered.length > 0) {
 
@@ -1299,8 +1303,11 @@ function updateProductPricesInDB(item) {
 
     if (!item || !item.id) return;
 
-    db.products.get(item.id).then(product => {
+    const memProd = (typeof productsDB !== 'undefined' && Array.isArray(productsDB))
+        ? productsDB.find(p => p && (p.id === item.id || p.id == item.id))
+        : null;
 
+    const onProductLoaded = (product) => {
         if (!product) return;
 
         // حساب متوسط التكلفة الجديد (Weighted Average Cost)
@@ -1376,9 +1383,13 @@ function updateProductPricesInDB(item) {
             }
 
         });
+    };
 
-    }).catch(err => console.error("Update DB Price Error:", err));
-
+    if (memProd) {
+        onProductLoaded(memProd);
+    } else if (typeof db !== 'undefined' && db.products) {
+        db.products.get(item.id).then(onProductLoaded).catch(err => console.error("Update DB Price Error:", err));
+    }
 }
 
 function calculatePurchaseTotals(sub) {
@@ -2046,9 +2057,6 @@ async function savePurchase(force = false, accountChecked = false) {
 function resetPurchase() {
 
     purchaseCart = [];
-
-    if (typeof window.invalidateAccountBalancesCache === 'function') window.invalidateAccountBalancesCache();
-    window.accountBalancesCache = {};
 
     // إنهاء وضع التعديل إذا كان نشطاً
 

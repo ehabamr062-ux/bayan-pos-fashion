@@ -221,7 +221,7 @@
 
         // ⚡ فهرس ذكي فوري يجمع معاملات كل شريك مرة واحدة O(N) بدلاً من ملايين التكرارات O(N*M)
         function ensurePartnerTransactionsIndex() {
-            if (window._partnerTransactionsIndex !== null) return window._partnerTransactionsIndex;
+            if (window._partnerTransactionsIndex instanceof Map) return window._partnerTransactionsIndex;
             const index = new Map();
             const txs = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
             for (let i = 0; i < txs.length; i++) {
@@ -256,10 +256,32 @@
             return window._accountsByNameClean.get(targetNameClean);
         }
 
-        window.invalidateAccountBalancesCache = function() {
-            window.accountBalancesCache = {};
-            window._partnerTransactionsIndex = null;
-            window._accountsByNameClean = null;
+        window.invalidateAccountBalancesCache = function(partnerName = null) {
+            if (partnerName) {
+                const targetNameClean = cleanArabicCached(partnerName);
+                if (window.accountBalancesCache) {
+                    for (const k in window.accountBalancesCache) {
+                        if (k.startsWith(targetNameClean + "_")) {
+                            delete window.accountBalancesCache[k];
+                        }
+                    }
+                }
+                if (window._partnerTransactionsIndex instanceof Map) {
+                    const txs = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : [];
+                    const pList = [];
+                    for (let i = 0; i < txs.length; i++) {
+                        const t = txs[i];
+                        if (t && t.partner && cleanArabicCached(t.partner) === targetNameClean) {
+                            pList.push(t);
+                        }
+                    }
+                    window._partnerTransactionsIndex.set(targetNameClean, pList);
+                }
+            } else {
+                window.accountBalancesCache = {};
+                window._partnerTransactionsIndex = null;
+                window._accountsByNameClean = null;
+            }
         };
 
         // ⚡ دالة حساب رصيد العميل/المورد فائقة السرعة مع الفهرس المباشر
@@ -603,7 +625,7 @@
             const fromDate = document.getElementById('invoicesDateFrom')?.value || '';
             const toDate = document.getElementById('invoicesDateTo')?.value || '';
 
-            // ⚡ جلب الفواتير السابقة أو المحددة من IndexedDB عند الطلب
+            // ⚡ جلب الفواتير السابقة أو المحددة من SQLite عند الطلب
             if (searchId && typeof window.ensureInvoiceLoaded === 'function') {
                 await window.ensureInvoiceLoaded(searchId);
             }
@@ -664,7 +686,7 @@
                     // حصر الفواتير بجهاز الموظف الحالي أو اسمه فقط
                     let myLetter = (window.BayanNetworkHub && typeof window.BayanNetworkHub.getTerminalLetter === 'function') 
                         ? window.BayanNetworkHub.getTerminalLetter() 
-                        : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || localStorage.getItem('local_device_letter') || '';
+                        : (window.localNetworkHub && window.localNetworkHub.deviceLetter) || (typeof getStore === 'function' ? getStore('local_device_letter') : '') || '';
                     rawData = rawData.filter(t => {
                         const tUser = (t.user || '').trim().toLowerCase();
                         let tLetter = t.terminalLetter;
@@ -1097,7 +1119,7 @@
                 invoiceItems = invoiceItems.filter(t => t.type && !t.type.includes('قبض') && !t.type.includes('صرف'));
             }
             
-            // ⚡ إذا لم تكن في الذاكرة (فاتورة قديمة)، نستدعيها من IndexedDB فوراً
+            // ⚡ إذا لم تكن في الذاكرة (فاتورة قديمة)، نستدعيها من SQLite فوراً
             if (invoiceItems.length === 0 && typeof window.ensureInvoiceLoaded === 'function') {
                 await window.ensureInvoiceLoaded(invoiceId);
                 invoiceItems = transactions.filter(t => {
@@ -2508,12 +2530,12 @@
                         }
                     });
 
-                    // تحديث المنتجات في IndexedDB إن وُجد
+                    // تحديث المنتجات في SQLite إن وُجد
                     if (typeof db !== 'undefined' && db.products && typeof db.products.bulkPut === 'function') {
                         try {
                             await db.products.bulkPut(backup.backupProducts);
                         } catch (pErr) {
-                            console.warn("⚠️ تعذر تحديث المنتجات المستعادة في IndexedDB مباشرة:", pErr);
+                            console.warn("⚠️ تعذر تحديث المنتجات المستعادة في SQLite مباشرة:", pErr);
                         }
                     }
                 }
@@ -2534,12 +2556,12 @@
                         });
                     }
 
-                    // إعادة إدراج السجلات في IndexedDB
+                    // إعادة إدراج السجلات في SQLite
                     if (typeof db !== 'undefined' && db.transactions && typeof db.transactions.bulkPut === 'function') {
                         try {
                             await db.transactions.bulkPut(backup.oldItems);
                         } catch (tErr) {
-                            console.warn("⚠️ تعذر إعادة السجلات إلى IndexedDB:", tErr);
+                            console.warn("⚠️ تعذر إعادة السجلات إلى SQLite:", tErr);
                         }
                     }
                 }

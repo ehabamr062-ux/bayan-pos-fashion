@@ -364,7 +364,7 @@ function showVariantSelectionModal(product, context = 'sales') {
     const dynamicColors = [...new Set(variants.map(v => (v.color || '').trim()).filter(c => c !== ''))];
     dynamicColors.sort((a, b) => a.localeCompare(b, 'ar'));
 
-    // استرجاع الوضع المفضل (افتراضياً: باللون رأسي لطلب العميل) عبر IndexedDB
+    // استرجاع الوضع المفضل (افتراضياً: باللون رأسي لطلب العميل) عبر SQLite
     let currentMode = (typeof getStore === 'function' ? getStore('bayan_variant_view_mode') : null) || 'by_color';
     if (!['by_size', 'by_color'].includes(currentMode)) currentMode = 'by_color';
     const isPinned = (typeof getStore === 'function' ? getStore('bayan_variant_view_mode_pinned') : null) === 'true';
