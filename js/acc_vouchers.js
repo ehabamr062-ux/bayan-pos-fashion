@@ -133,7 +133,7 @@
                     : { terminal: 'الجهاز الرئيسي 💻', terminalLetter: 'MASTER', terminalOrder: 0, terminalId: '' };
                 const terminalName = tInfo.terminal;
                 const receiptTreasury = document.getElementById('receiptTreasurySelect')?.value || 'نقدية';
-                const receiptMethod = (receiptTreasury.includes('بنك') || receiptTreasury.includes('فيزا') || receiptTreasury.includes('تحويل')) ? receiptTreasury : 'نقدية';
+                const receiptMethod = receiptTreasury;
 
                 // تسجيل الحركة في السجل العام
 
@@ -347,8 +347,11 @@
                 }
 
                 const disburseTreasury = document.getElementById('disburseTreasurySelect')?.value || 'نقدية';
-                const disburseMethod = (disburseTreasury.includes('بنك') || disburseTreasury.includes('فيزا') || disburseTreasury.includes('تحويل')) ? disburseTreasury : 'نقدية';
-                const isCash = !disburseMethod.includes('بنك') && !disburseMethod.includes('فيزا') && !disburseMethod.includes('تحويل');
+                const disburseMethod = disburseTreasury;
+                const isDisburseNonCash = (typeof window.isNonCashPaymentMethod === 'function')
+                    ? window.isNonCashPaymentMethod(disburseMethod)
+                    : (disburseMethod.includes('بنك') || disburseMethod.includes('فيزا') || disburseMethod.includes('تحويل') || disburseMethod.includes('فودافون') || disburseMethod.includes('انستا') || disburseMethod.includes('محفظة'));
+                const isCash = !isDisburseNonCash;
 
                 // 🛑 فحص رصيد الدرج / الخزينة قبل صرف النقدية لمنع العجز غير المراقب
                 if (isCash && !force) {
@@ -356,8 +359,11 @@
                         let c = 0;
                         const isNonCash = (m) => {
                             if (!m) return false;
-                            const s = String(m).toLowerCase();
-                            return s.includes('فيزا') || s.includes('بنك') || s.includes('شيك') || s.includes('تحويل') || s.includes('آجل') || s.includes('حساب');
+                            if (typeof window.isNonCashPaymentMethod === 'function' && window.isNonCashPaymentMethod(m)) {
+                                return true;
+                            }
+                            const s = String(m).toLowerCase().replace(/[أإآ]/g, 'ا');
+                            return s.includes('فيزا') || s.includes('بنك') || s.includes('شيك') || s.includes('تحويل') || s.includes('اجل') || s.includes('حساب') || s.includes('محفظ');
                         };
                         (window.transactions || []).forEach(t => {
                             if (isNonCash(t.method)) return;

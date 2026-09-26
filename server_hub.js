@@ -843,7 +843,8 @@ function updateMasterDbData(db, sourceDeviceId = null, isMasterServer = false) {
             settings: (isDelta && Object.keys(cleanIncomingSettings).length === 0) ? (masterDbData.settings || {}) : { ...masterDbData.settings, ...cleanIncomingSettings },
             lastUpdated: new Date().toISOString()
         };
-        saveMasterDb();
+        const hasCriticalData = (Array.isArray(db.transactions) && db.transactions.length > 0) || (Array.isArray(db.treasuryAudit) && db.treasuryAudit.length > 0);
+        saveMasterDb(hasCriticalData);
         syncInTransitFromTransactions(masterDbData.transactions);
         // بث التحديث الجزئي اللحظي فوراً لجميع الأجهزة المتصلة بدون انتظار
         broadcastLiveStreamEvent('DELTA_UPDATE', {

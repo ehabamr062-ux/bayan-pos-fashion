@@ -901,7 +901,7 @@ function updateSubscriptionUI(hwid, plan, daysLeft) {
                 return;
             }
 
-            const version = window.appVersion || '3.1.2';
+            const version = window.appVersion || '3.2.2';
 
             const message = `السلام عليكم\nأريد الاشتراك في Bayan POS Fashion (بَيَان فاشون للملابس والأحذية)\n\nاسم المحل: ${shopName}\nMachine ID: ${mId}\nرقم الهاتف: ${phone}\nالباقة المطلوبة: ${plan}\nالمبلغ: ${price} ج.م\nإصدار البرنامج: ${version}\n\nتم تحويل المبلغ وجاري انتظار كود التفعيل.`;
             

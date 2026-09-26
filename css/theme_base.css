@@ -1916,20 +1916,20 @@ body.has-wallpaper .login-overlay {
 .login-glass-card {
     position: relative;
     width: 100%;
-    /* تدرج بنفسجي غامق ملكي فاخر وثري جداً (Royal Deep Velvet Purple) */
-    background: linear-gradient(145deg, #2e1065, #1e1b4b);
-    border-radius: 28px;
-    padding: 30px 35px 25px; /* تقليل الارتفاع والمسافات الرأسية */
+    /* خلفية كحلية داكنة ملكية فائقة النقاء Cosmic Dark Glass */
+    background: linear-gradient(160deg, #091428, #050b16);
+    border-radius: 26px;
+    padding: 26px 32px 22px;
     overflow: hidden;
     z-index: 10;
-    box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.75), 0 0 35px rgba(147, 51, 234, 0.35);
+    box-shadow: 0 25px 65px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 242, 254, 0.28);
     display: flex;
     flex-direction: column;
     animation: loginFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-    border: 1.5px solid rgba(192, 132, 252, 0.35);
+    border: 2px solid transparent;
 }
 
-/* تأثير الإطار المتلألئ النيون باللون الأخضر الزمردي السميك والقوي */
+/* تأثير الإطار المتلألئ النيون المتدرج سيان وبنفسجي خفيف كما في الصورة */
 .login-glass-card::before {
     content: '';
     position: absolute;
@@ -1937,17 +1937,17 @@ body.has-wallpaper .login-overlay {
     left: -50%;
     width: 200%;
     height: 200%;
-    background: conic-gradient(transparent, #22c55e, #4ade80, #10b981, #86efac, #16a34a, transparent); 
-    animation: rotateBorder 4s linear infinite;
+    background: conic-gradient(from 0deg, #00f2fe, #38bdf8, #818cf8, #c084fc, #38bdf8, #00f2fe); 
+    animation: rotateBorder 6s linear infinite;
     z-index: -1;
 }
 
 .login-glass-card::after {
     content: '';
     position: absolute;
-    inset: 4.5px; /* زيادة سمك الإطار ليصبح سميكاً وواضحاً جداً */
-    background: linear-gradient(160deg, #1e113a, #130a24); /* بنفسجي غامق مريح وفخم جداً */
-    border-radius: 24px;
+    inset: 3px; /* سمك الإطار النيون المتوهج الأنيق */
+    background: linear-gradient(160deg, #0a1628, #050d1a);
+    border-radius: 23px;
     z-index: -1;
 }
 
@@ -1963,57 +1963,45 @@ body.has-wallpaper .login-overlay {
 
 .login-header {
     text-align: center;
-    margin-bottom: 20px;
-}
-
-.login-logo {
-    display: inline-block;
-    font-size: 2.2rem;
-    filter: drop-shadow(0 0 10px #ff3366);
-    animation: pulseHeart 2s infinite;
-}
-
-@keyframes pulseHeart {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.1); opacity: 0.8; }
+    margin-bottom: 16px;
 }
 
 .login-header h1 {
-    font-size: 2rem;
+    font-size: 1.35rem;
     font-weight: 900;
-    color: #ffffff !important;
+    color: #fde68a !important;
     margin: 0;
-    letter-spacing: 1px;
-    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 12px rgba(253, 230, 138, 0.35);
 }
 
 .login-header p {
-    color: #f1f5f9 !important;
-    font-size: 0.9rem;
+    color: #94a3b8 !important;
+    font-size: 0.85rem;
     font-weight: 800;
-    margin-top: 6px;
+    margin-top: 4px;
     text-shadow: 0 1px 4px rgba(0,0,0,0.6);
 }
 
 .login-input-group {
     position: relative;
-    margin-bottom: 11px; /* مسافات مضغوطة ورشيقة جداً */
+    margin-bottom: 12px;
 }
 
 /* تصميم رشيق وفائق الوضوح والنقاء للكتابة (Ultra-Clear Typography) */
 .login-select, .login-password-wrapper input {
     width: 100%;
-    height: 44px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1.5px solid rgba(255, 255, 255, 0.25);
-    border-radius: 11px;
+    height: 48px;
+    background: rgba(15, 23, 42, 0.82);
+    border: 1.5px solid rgba(56, 189, 248, 0.35);
+    border-radius: 12px;
     color: #ffffff !important;
-    padding: 0 16px;
+    padding: 0 44px 0 38px;
     font-size: 0.95rem;
-    font-weight: 900 !important; /* خط سميك وواضح جداً */
+    font-weight: 800 !important;
     outline: none;
-    transition: all 0.2s ease;
-    text-align: center;
+    transition: all 0.25s ease;
+    text-align: right;
     appearance: none;
     -webkit-appearance: none;
     box-sizing: border-box;
@@ -2022,20 +2010,21 @@ body.has-wallpaper .login-overlay {
 
 /* توضيح نصوص الـ Placeholder لتكون ناصعة وصافية */
 .login-password-wrapper input::placeholder {
-    color: #cbd5e1 !important;
+    color: #94a3b8 !important;
     font-weight: 800;
-    opacity: 1;
+    opacity: 0.9;
 }
 
 .login-select:hover, .login-password-wrapper input:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.45);
+    background: rgba(15, 23, 42, 0.95);
+    border-color: #38bdf8;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
 }
 
 .login-select:focus, .login-password-wrapper input:focus {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: #22c55e;
-    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+    background: #0f172a;
+    border-color: #00f2fe;
+    box-shadow: 0 0 16px rgba(0, 242, 254, 0.45);
 }
 
 .login-select option {
@@ -2046,8 +2035,8 @@ body.has-wallpaper .login-overlay {
 }
 
 .login-password-wrapper input {
-    letter-spacing: 4px;
-    font-size: 1.25rem;
+    letter-spacing: 3px;
+    font-size: 1.15rem;
     font-weight: 900;
     color: #38bdf8 !important; /* لون سماوي مضيء واضح جداً */
 }
@@ -2065,25 +2054,25 @@ body.has-wallpaper .login-overlay {
 }
 
 .login-eye-icon:hover {
-    color: #22c55e;
-    transform: translateY(-50%) scale(1.2);
+    color: #38bdf8;
+    transform: translateY(-50%) scale(1.15);
 }
 
 .login-btn-glow {
     width: 100%;
-    height: 46px; /* زر رشيق وأنيق */
-    background: linear-gradient(135deg, #10b981, #059669);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 11px;
+    height: 48px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border: none;
+    border-radius: 13px;
     color: #ffffff !important;
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     font-weight: 900;
     cursor: pointer;
     position: relative;
     overflow: hidden;
     transition: all 0.2s ease;
-    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
-    margin-top: 6px;
+    box-shadow: 0 4px 18px rgba(16, 185, 129, 0.45);
+    margin-top: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2092,8 +2081,8 @@ body.has-wallpaper .login-overlay {
 }
 
 .login-btn-glow:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.65);
     filter: brightness(1.1);
 }
 
@@ -3331,59 +3320,61 @@ details>summary {
         }
 
 .quick-wp-bar {
-            position: fixed;
-            bottom: 20px;
-            left: 18px;
-            z-index: 100000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 5px;
-            background: #0f172a;
-            padding: 8px 5px;
-            border-radius: 12px;
-            border: 1.5px solid rgba(255, 255, 255, 0.2);
-            transition: transform 0.15s ease;
-            max-height: 72vh;
-            overflow-y: auto;
-            scrollbar-width: none;
-        }
-        .quick-wp-bar::-webkit-scrollbar {
-            display: none;
-        }
+    position: fixed;
+    bottom: 15px;
+    left: 15px;
+    z-index: 100000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: rgba(8, 20, 38, 0.85);
+    padding: 6px 3px;
+    border-radius: 18px;
+    border: 1.5px solid #00f2fe;
+    box-shadow: 0 0 16px rgba(0, 242, 254, 0.4), inset 0 0 8px rgba(0, 242, 254, 0.15);
+    backdrop-filter: blur(16px);
+    transition: all 0.25s ease;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+.quick-wp-bar::-webkit-scrollbar {
+    display: none;
+}
 
-        .quick-info-widget {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 100000;
-            background: #0f172a;
-            padding: 12px 20px;
-            border-radius: 14px;
-            border: 1.5px solid rgba(255, 255, 255, 0.2);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 5px;
-            transition: transform 0.15s ease;
-            min-width: 180px;
-            text-align: center;
-        }
+.quick-info-widget {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 100000;
+    background: #0f172a;
+    padding: 12px 20px;
+    border-radius: 14px;
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: transform 0.15s ease;
+    min-width: 180px;
+    text-align: center;
+}
 
-        .quick-wp-bar:hover,
-        .quick-info-widget:hover {
-            border-color: rgba(255, 255, 255, 0.4);
-        }
+.quick-wp-bar:hover,
+.quick-info-widget:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
 
-        .wp-swatch {
-            width: 42px;
-            height: 42px;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            border: 2.5px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+.wp-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    border: 1.5px solid rgba(255, 255, 255, 0.75);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
             position: relative;
             overflow: hidden;
         }

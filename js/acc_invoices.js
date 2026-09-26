@@ -569,16 +569,23 @@
             });
 
             Object.values(groups).forEach(g => {
-                const m = (g.method || '').toLowerCase();
-                const isExplicitCredit = m.includes('آجل') || m.includes('أجل') || m.includes('ذمم') || m.includes('credit') || m.includes('تقسيط');
+                const rawM = String(g.method || '').toLowerCase().trim();
+                const cleanM = rawM.replace(/[أإآ]/g, 'ا');
+                const isExplicitCredit = cleanM.includes('اجل') || cleanM.includes('ذمم') || cleanM.includes('ذمه') || cleanM.includes('تقسيط') || cleanM.includes('حساب') || cleanM.includes('credit') || cleanM.includes('deferred') || (g.remaining > 0);
                 
                 if (isExplicitCredit) {
-                    g.remaining = Math.max(0, g.total - g.paid);
-                } else if (m.includes('نقدي') || m.includes('نقدية') || m.includes('كاش') || m.includes('تحويل') || m.includes('بنك') || m.includes('شبكة') || m.includes('فيزا') || m.includes('فودافون') || m.includes('vodafone') || m.includes('انستا') || m.includes('insta') || m.includes('محفظة') || m.includes('wallet') || m.includes('اورنج') || m.includes('اتصالات') || g.type.includes('تسوية') || g.type.includes('قبض') || g.type.includes('صرف') || g.paid === 0) {
-                    g.paid = g.total;
-                    g.remaining = 0;
+                    g.remaining = Math.max(0, g.total - (parseFloat(g.paid) || 0));
+                } else if (cleanM.includes('نقدي') || cleanM.includes('نقديه') || cleanM.includes('كاش') || cleanM.includes('تحويل') || cleanM.includes('بنك') || cleanM.includes('شبكه') || cleanM.includes('فيزا') || cleanM.includes('فودافون') || cleanM.includes('vodafone') || cleanM.includes('انستا') || cleanM.includes('insta') || cleanM.includes('محفظه') || cleanM.includes('wallet') || cleanM.includes('اورنج') || cleanM.includes('اتصالات') || g.type.includes('تسوية') || g.type.includes('قبض') || g.type.includes('صرف')) {
+                    if (g.paid === 0 && (!g.remaining || g.remaining === 0)) {
+                        g.paid = g.total;
+                        g.remaining = 0;
+                    } else if (g.paid > 0 && g.paid < g.total) {
+                        g.remaining = Math.max(0, g.total - g.paid);
+                    } else {
+                        g.remaining = 0;
+                    }
                 } else {
-                    g.remaining = Math.max(0, g.total - g.paid);
+                    g.remaining = Math.max(0, g.total - (parseFloat(g.paid) || 0));
                 }
             });
 

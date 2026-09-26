@@ -290,12 +290,32 @@ async function executePrinting(modeOrTargets, copies = 1) {
     targets.forEach(p => {
         if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
             p.variants.forEach((v, vIdx) => {
+                const vStock = (v.stock !== undefined && v.stock !== null) ? parseInt(v.stock, 10) : 0;
+                // في وضع طباعة كافة أصناف المخزن، نستبعد أي مقاس رصيده صفر لتجنب هدر الورق والتكلفة
+                if (modeOrTargets === 'all' && vStock <= 0) {
+                    return;
+                }
+
                 let vBc = String(v.barcode || '').trim();
                 if (!vBc) {
                     vBc = generateVariantBarcode(v.size, v.color, vIdx + 1);
                     v.barcode = vBc;
                 }
                 const vPrice = (v.price !== undefined && v.price !== null && v.price !== '') ? parseFloat(v.price) : (parseFloat(p.price) || 0);
+
+                let itemCopies = 1;
+                if (modeOrTargets === 'all') {
+                    itemCopies = vStock > 0 ? vStock : 1;
+                } else if (v.copies !== undefined && v.copies !== null) {
+                    itemCopies = parseInt(v.copies, 10) || 0;
+                } else if (p.copies !== undefined && p.copies !== null) {
+                    itemCopies = parseInt(p.copies, 10) || 0;
+                } else {
+                    itemCopies = parseInt(copies, 10) || 1;
+                }
+
+                if (itemCopies <= 0) return;
+
                 printableItems.push({
                     name: p.name,
                     size: v.size || '',
@@ -303,15 +323,33 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     code: p.code || p.id,
                     barcode: vBc,
                     price: vPrice,
-                    copies: parseInt(v.stock || p.copies || copies) || 1
+                    copies: itemCopies
                 });
             });
         } else {
+            const pStock = (p.stock !== undefined && p.stock !== null) ? parseInt(p.stock, 10) : 0;
+            // في وضع طباعة كافة أصناف المخزن، نستبعد أي صنف رصيده صفر
+            if (modeOrTargets === 'all' && pStock <= 0) {
+                return;
+            }
+
             let barcodeVal = String(p.barcode || p.code || '').trim();
             if (!barcodeVal) {
                 barcodeVal = (typeof generateVariantBarcode === 'function') ? generateVariantBarcode('', '', 1) : ('20' + String(Date.now()).slice(-8));
                 p.barcode = barcodeVal;
             }
+
+            let itemCopies = 1;
+            if (modeOrTargets === 'all') {
+                itemCopies = pStock > 0 ? pStock : 1;
+            } else if (p.copies !== undefined && p.copies !== null) {
+                itemCopies = parseInt(p.copies, 10) || 0;
+            } else {
+                itemCopies = parseInt(copies, 10) || 1;
+            }
+
+            if (itemCopies <= 0) return;
+
             printableItems.push({
                 name: p.name,
                 size: p.size || '',
@@ -319,7 +357,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                 code: p.code || barcodeVal,
                 barcode: barcodeVal,
                 price: parseFloat(p.price) || 0,
-                copies: parseInt(p.copies || copies) || 1
+                copies: itemCopies
             });
         }
     });
@@ -333,8 +371,8 @@ async function executePrinting(modeOrTargets, copies = 1) {
     const isSmall = labelWidth <= 42 || labelHeight <= 28;
     
     // سُمك خطوط الباركود عريض وسريع القراءة مع مسافة أمان لمنع الخروج عن الحواف
-    const barcodeW = isSmall ? 1.25 : 1.35;
-    const barcodeH = parseInt(bSettings.barcodeHeight || (isSmall ? 18 : 22), 10);
+    const barcodeW = isSmall ? 1.32 : 1.45;
+    const barcodeH = parseInt(bSettings.barcodeHeight || (isSmall ? 21 : 25), 10);
 
     // 1. إنشاء عناصر الباركود ورسم الـ SVG محلياً عبر JsBarcode الموجود في النافذة
     let labelsHtml = '';
@@ -368,7 +406,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                         width: barcodeW,
                         height: barcodeH,
                         displayValue: true,
-                        fontSize: isSmall ? 7.8 : 8.8,
+                        fontSize: isSmall ? 8.2 : 9.5,
                         font: "Segoe UI, Arial, sans-serif",
                         fontOptions: "bold",
                         textMargin: 1,
@@ -471,21 +509,21 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     margin: 0.2mm 0;
                 }
                 .item-name { 
-                    font-size: ${isSmall ? '7.2pt' : '8.2pt'}; 
+                    font-size: ${isSmall ? '8.8pt' : '10.2pt'}; 
                     font-weight: 900; 
-                    margin: 0; 
+                    margin: 0 0 0.4mm 0; 
                     white-space: nowrap; 
                     overflow: hidden; 
                     text-overflow: ellipsis; 
                     max-width: 100%; 
                     color: #000000; 
-                    line-height: 1.1; 
+                    line-height: 1.15; 
                     text-align: center;
                     padding: 0 1.5mm;
                 }
                 .svg-wrap {
                     width: 100%;
-                    max-width: 95%;
+                    max-width: 96%;
                     display: flex;
                     justify-content: center;
                     align-items: center;
@@ -494,7 +532,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     overflow: hidden;
                 }
                 svg { 
-                    max-width: 95% !important; 
+                    max-width: 96% !important; 
                     width: auto !important;
                     height: auto !important;
                     margin: 0 auto !important; 
@@ -511,7 +549,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     box-sizing: border-box;
                 }
                 .variant-text {
-                    font-size: ${isSmall ? '7.2pt' : '8.2pt'};
+                    font-size: ${isSmall ? '8pt' : '9.5pt'};
                     font-weight: 900;
                     color: #000000;
                     text-align: right;
@@ -532,7 +570,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     vertical-align: bottom;
                 }
                 .price-val {
-                    font-size: ${isSmall ? '8pt' : '9.5pt'};
+                    font-size: ${isSmall ? '9.8pt' : '11.8pt'};
                     font-weight: 900;
                     color: #000000;
                     text-align: left;
@@ -1614,6 +1652,7 @@ function printProductVariantHangtags() {
     }
 
     const targets = [];
+    let skippedZero = 0;
     for (let i = 0; i < rows.length; i++) {
         const size = rows[i].querySelector('.var-size-input')?.value || 'قياسي';
         const color = rows[i].querySelector('.var-color-input')?.value || 'موحد';
@@ -1623,7 +1662,13 @@ function printProductVariantHangtags() {
             if (rows[i].querySelector('.var-barcode-input')) rows[i].querySelector('.var-barcode-input').value = barcode;
         }
         const price = parseFloat(rows[i].querySelector('.var-price-input')?.value) || parseFloat(document.getElementById('newItemPrice')?.value) || 0;
-        const stock = parseInt(rows[i].querySelector('.var-stock-input')?.value) || 1;
+        const stock = parseInt(rows[i].querySelector('.var-stock-input')?.value, 10) || 0;
+
+        // استبعاد أي مقاس رصيده صفر أو أقل لتجنب هدر الورق والتكلفة
+        if (stock <= 0) {
+            skippedZero++;
+            continue;
+        }
 
         targets.push({
             name: productName,
@@ -1631,14 +1676,19 @@ function printProductVariantHangtags() {
             color: color,
             barcode: barcode,
             price: price,
-            copies: Math.max(1, stock)
+            copies: stock
         });
+    }
+
+    if (targets.length === 0) {
+        return showToast("⚠️ كافة مقاسات هذا الصنف رصيدها صفر في المخزن! لا توجد كميات متاحة للطباعة.", "warning");
     }
 
     if (typeof executePrinting === 'function') {
         executePrinting(targets, 1);
         if (typeof showToast === 'function') {
-            showToast(`🖨️ جاري إرسال (${targets.length}) تشكيلة للطباعة بالقالب الموحد...`, "success");
+            const skipNote = skippedZero > 0 ? ` (تم تخطي ${skippedZero} مقاس بدون رصيد)` : '';
+            showToast(`🖨️ جاري إرسال (${targets.length}) تشكيلة للطباعة طبقاً للأرصدة المتاحة${skipNote}...`, "success");
         }
     } else {
         if (typeof showToast === 'function') {

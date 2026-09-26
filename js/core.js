@@ -47,11 +47,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '3.2.0';
-window.APP_VERSION = '3.2.0';
+window.appVersion = '3.2.2';
+window.APP_VERSION = '3.2.2';
 
 async function fetchAppVersion() {
-    let version = '3.1.2';
+    let version = '3.2.2';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -65,7 +65,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '3.1.2';
+    if (!version) version = window.appVersion || '3.2.2';
     window.appVersion = version;
     window.APP_VERSION = version;
 
@@ -1348,6 +1348,11 @@ async function saveTransactionChanges({ newTransactions = [], modifiedProducts =
                 window.BayanNetworkHub.onDeltaSaved({ newTransactions, modifiedProducts, modifiedAccounts });
             } else if (window.BayanNetworkHub && typeof window.BayanNetworkHub.onDataSaved === 'function') {
                 window.BayanNetworkHub.onDataSaved();
+            }
+
+            // 💾 ضمان الحفظ الفوري اللحظي لملف قاعدة البيانات على الهارد ديسك بدون أي تأخير
+            if (window.BayanSQLite && typeof window.BayanSQLite.persistNow === 'function') {
+                await window.BayanSQLite.persistNow();
             }
 
             console.log("⚡ [FastSave] Transaction saved incrementally in ultra-fast mode.");

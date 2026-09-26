@@ -57,10 +57,10 @@
             window._secondaryLibsLoadingStarted = true;
             const secondaryList = [
                 'lib/html2canvas.min.js', 'lib/xlsx.full.min.js', 'lib/chart.min.js',
-                'lib/Sortable.min.js', 'js/barcode_print.js?v=3.2.0',
-                'js/app_backup.js?v=3.2.0', 'js/app_export_share.js?v=3.2.0',
-                'js/cloud_telemetry.js?v=3.2.0', 'js/updater.js?v=3.2.0',
-                'js/treasury_audit.js?v=3.2.0'
+                'lib/Sortable.min.js', 'js/barcode_print.js?v=3.2.2',
+                'js/app_backup.js?v=3.2.2', 'js/app_export_share.js?v=3.2.2',
+                'js/cloud_telemetry.js?v=3.2.2', 'js/updater.js?v=3.2.2',
+                'js/treasury_audit.js?v=3.2.2'
             ];
             secondaryList.forEach(src => {
                 const s = document.createElement('script');
@@ -84,62 +84,82 @@
                 module = tempModule;
             }
         });
+
+        // 🌟 دالة التبديل الفوري لاحتساب رصيد الدرج (متاحة عالمياً قبل وبعد تحميل التقارير)
+        window.toggleIncludePrevBalanceInAudit = function() {
+            if (window.currentDrawerClosingState) {
+                window.currentDrawerClosingState.includePrevBalance = !window.currentDrawerClosingState.includePrevBalance;
+                if (typeof window.updateDrawerAuditPanelUI === 'function') {
+                    window.updateDrawerAuditPanelUI(
+                        window.currentDrawerClosingState.previousBalance,
+                        window.currentDrawerClosingState.netCashMovement,
+                        window.currentDrawerClosingState.finalCashBalance,
+                        window.currentDrawerClosingState.selectedUser
+                    );
+                }
+                if (typeof showToast === 'function') {
+                    showToast(window.currentDrawerClosingState.includePrevBalance 
+                        ? "🏛️ تم احتساب الرصيد التراكمي السابق مع نقدية اليوم" 
+                        : "🔄 تم ضبط المطلوب على حركة اليوم بيومه فقط", "info");
+                }
+            }
+        };
     </script>
 
     <!-- استيراد خط القاهرة محلياً 100% أوفلاين فائق السرعة -->
     <link rel="stylesheet" href="fonts/cairo.css">
 
-    <link rel="stylesheet" href="css/theme_base.css?v=3.2.0">
-    <link rel="stylesheet" href="css/sales_pos.css?v=3.2.0">
-    <link rel="stylesheet" href="css/inventory_products.css?v=3.2.0">
-    <link rel="stylesheet" href="css/accounts_reports.css?v=3.2.0">
-    <link rel="stylesheet" href="css/ui_modals.css?v=3.2.0">
-    <link rel="stylesheet" href="css/scrollbars.css?v=3.2.0">
-    <link rel="stylesheet" href="css/premium.css?v=3.2.0">
-    <link rel="stylesheet" href="css/treasury_audit.css?v=3.2.0">
-    <link rel="stylesheet" href="css/barcode_print.css?v=3.2.0">
+    <link rel="stylesheet" href="css/theme_base.css?v=3.2.2">
+    <link rel="stylesheet" href="css/sales_pos.css?v=3.2.2">
+    <link rel="stylesheet" href="css/inventory_products.css?v=3.2.2">
+    <link rel="stylesheet" href="css/accounts_reports.css?v=3.2.2">
+    <link rel="stylesheet" href="css/ui_modals.css?v=3.2.2">
+    <link rel="stylesheet" href="css/scrollbars.css?v=3.2.2">
+    <link rel="stylesheet" href="css/premium.css?v=3.2.2">
+    <link rel="stylesheet" href="css/treasury_audit.css?v=3.2.2">
+    <link rel="stylesheet" href="css/barcode_print.css?v=3.2.2">
 
-    <script src="lib/sql-wasm-binary.js?v=3.2.0"></script>
-    <script src="lib/sql-wasm.js?v=3.2.0"></script>
-    <script src="js/sqlite_manager.js?v=3.2.0" defer></script>
-    <script src="js/db_adapter.js?v=3.2.0" defer></script>
-    <script src="js/store.js?v=3.2.0" defer></script>
-    <script src="js/security.js?v=3.2.0" defer></script>
-    <script src="js/core.js?v=3.2.0" defer></script>
+    <script src="lib/sql-wasm-binary.js?v=3.2.2"></script>
+    <script src="lib/sql-wasm.js?v=3.2.2"></script>
+    <script src="js/sqlite_manager.js?v=3.2.2" defer></script>
+    <script src="js/db_adapter.js?v=3.2.2" defer></script>
+    <script src="js/store.js?v=3.2.2" defer></script>
+    <script src="js/security.js?v=3.2.2" defer></script>
+    <script src="js/core.js?v=3.2.2" defer></script>
     <script src="lib/JsBarcode.all.min.js" defer></script>
     <script src="lib/qrcode.min.js" defer></script>
-    <script src="js/utils_helpers.js?v=3.2.0" defer></script>
-    <script src="js/app_units_payments.js?v=3.2.0" defer></script>
-    <script src="js/app_license.js?v=3.2.0" defer></script>
-    <script src="js/settings.js?v=3.2.0" defer></script>
-    <script src="js/ui_theme_custom.js?v=3.2.0" defer></script>
-    <script src="js/ui_tabs.js?v=3.2.0" defer></script>
-    <script src="js/ui_modals_notifications.js?v=3.2.0" defer></script>
-    <script src="js/ui_auth.js?v=3.2.0" defer></script>
-    <script src="js/ui_calculator.js?v=3.2.0" defer></script>
-    <script src="js/inv_core.js?v=3.2.0" defer></script>
-    <script src="js/inv_products.js?v=3.2.0" defer></script>
-    <script src="js/inv_variants.js?v=3.2.0" defer></script>
-    <script src="js/inv_adjustments.js?v=3.2.0" defer></script>
-    <script src="js/trash.js?v=3.2.0" defer></script>
-    <script src="js/engine_invoices.js?v=3.2.0" defer></script>
-    <script src="js/sales_purchases.js?v=3.2.0" defer></script>
-    <script src="js/sales_pos.js?v=3.2.0" defer></script>
-    <script src="js/sales_fashion_picker.js?v=3.2.0" defer></script>
-    <script src="js/sales_inquiry_modal.js?v=3.2.0" defer></script>
-    <script src="js/sales_returns.js?v=3.2.0" defer></script>
-    <script src="js/sales_history_view.js?v=3.2.0" defer></script>
-    <script src="js/inv_transfers.js?v=3.2.0" defer></script>
-    <script src="js/acc_invoices.js?v=3.2.0" defer></script>
-    <script src="js/acc_vouchers.js?v=3.2.0" defer></script>
-    <script src="js/acc_reports.js?v=3.2.0" defer></script>
-    <script src="js/acc_partners.js?v=3.2.0" defer></script>
-    <script src="js/init.js?v=3.2.0" defer></script>
-    <script src="js/print.js?v=3.2.0" defer></script>
-    <script src="js/receipt_disburse_fixes.js?v=3.2.0" defer></script>
-    <script src="js/history_enhancements.js?v=3.2.0" defer></script>
-    <script src="js/barcode.js?v=3.2.0" defer></script>
-    <script src="js/local_network_hub.js?v=3.2.0" defer></script>
+    <script src="js/utils_helpers.js?v=3.2.2" defer></script>
+    <script src="js/app_units_payments.js?v=3.2.2" defer></script>
+    <script src="js/app_license.js?v=3.2.2" defer></script>
+    <script src="js/settings.js?v=3.2.2" defer></script>
+    <script src="js/ui_theme_custom.js?v=3.2.2" defer></script>
+    <script src="js/ui_tabs.js?v=3.2.2" defer></script>
+    <script src="js/ui_modals_notifications.js?v=3.2.2" defer></script>
+    <script src="js/ui_auth.js?v=3.2.2" defer></script>
+    <script src="js/ui_calculator.js?v=3.2.2" defer></script>
+    <script src="js/inv_core.js?v=3.2.2" defer></script>
+    <script src="js/inv_products.js?v=3.2.2" defer></script>
+    <script src="js/inv_variants.js?v=3.2.2" defer></script>
+    <script src="js/inv_adjustments.js?v=3.2.2" defer></script>
+    <script src="js/trash.js?v=3.2.2" defer></script>
+    <script src="js/engine_invoices.js?v=3.2.2" defer></script>
+    <script src="js/sales_purchases.js?v=3.2.2" defer></script>
+    <script src="js/sales_pos.js?v=3.2.2" defer></script>
+    <script src="js/sales_fashion_picker.js?v=3.2.2" defer></script>
+    <script src="js/sales_inquiry_modal.js?v=3.2.2" defer></script>
+    <script src="js/sales_returns.js?v=3.2.2" defer></script>
+    <script src="js/sales_history_view.js?v=3.2.2" defer></script>
+    <script src="js/inv_transfers.js?v=3.2.2" defer></script>
+    <script src="js/acc_invoices.js?v=3.2.2" defer></script>
+    <script src="js/acc_vouchers.js?v=3.2.2" defer></script>
+    <script src="js/acc_reports.js?v=3.2.2" defer></script>
+    <script src="js/acc_partners.js?v=3.2.2" defer></script>
+    <script src="js/init.js?v=3.2.2" defer></script>
+    <script src="js/print.js?v=3.2.2" defer></script>
+    <script src="js/receipt_disburse_fixes.js?v=3.2.2" defer></script>
+    <script src="js/history_enhancements.js?v=3.2.2" defer></script>
+    <script src="js/barcode.js?v=3.2.2" defer></script>
+    <script src="js/local_network_hub.js?v=3.2.2" defer></script>
 
     <style>
         /* 🔒 منع التحديد بالماوس في كامل واجهة البرنامج لتجربة تطبيق سطح مكتب وكاشير احترافية */
@@ -2559,19 +2579,29 @@
                     <!-- بطاقة الفاتورة المرتبطة (مرتجع مبيعات) -->
                     <div id="srReturnInvoiceCard"
                         style="display:none; margin-top:6px; background:linear-gradient(135deg,#fffbeb,#fef9c3); border:1px solid #fde68a; border-radius:10px; padding:10px;">
-                        <div style="font-weight:900; color:#b45309; margin-bottom:6px; font-size:0.78rem;">🧾 الفاتورة
-                            الأصلية</div>
+                        <div style="font-weight:900; color:#b45309; margin-bottom:6px; font-size:0.78rem; display:flex; justify-content:space-between; align-items:center;">
+                            <span>🧾 بيانات الفاتورة الأصلية المستدعاة</span>
+                            <span id="srInvIdBadge" style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:4px; font-size:0.7rem;">#---</span>
+                        </div>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; text-align:center;">
                             <div style="background:#fff; border-radius:6px; padding:5px; border:1px solid #fde68a;">
-                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">📋 الإجمالي</div>
+                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">📋 إجمالي الفاتورة</div>
                                 <div id="srInvTotal" style="font-weight:900; color:#92400e; font-size:0.85rem;">0.00
                                 </div>
                             </div>
                             <div style="background:#fff; border-radius:6px; padding:5px; border:1px solid #bbf7d0;">
-                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">💰 المتبقي</div>
+                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">💰 المتبقي منها</div>
                                 <div id="srInvRemaining" style="font-weight:900; color:#16a34a; font-size:0.85rem;">0.00
                                 </div>
                             </div>
+                        </div>
+                        <!-- 🌟 طريقة الدفع الأصلية المربوطة بالفاتورة -->
+                        <div style="margin-top:6px; background:#fff; border-radius:6px; padding:5px 8px; border:1px solid #fed7aa; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-size:0.7rem; font-weight:bold;">💳 طريقة دفع الفاتورة الأصلية:</span>
+                            <span id="srInvMethod" style="font-weight:900; color:#b45309; font-size:0.82rem;">-</span>
+                        </div>
+                        <div id="srMethodMatchNotice" style="display:none; margin-top:4px; font-size:0.68rem; color:#059669; font-weight:bold; text-align:center; background:#ecfdf5; border-radius:4px; padding:3px;">
+                            🎯 تم ضبط طريقة الرد تلقائياً لتطابق الفاتورة الأصلية
                         </div>
                     </div>
                 </div>
@@ -2594,12 +2624,15 @@
                 </div>
 
                 <div style="margin-top:15px; width:100%;">
-                    <label class="form-label" style="font-weight: 800; font-size: 0.85rem;">خيارات رد المبلغ:</label>
+                    <label class="form-label" style="font-weight: 800; font-size: 0.85rem;">خيارات رد المبلغ للعميل:</label>
                     <div style="margin-top: 6px; width:100%;">
                         <select id="sales-return-sectionPaymentMethodSelect" onchange="selectMethod(this)"
                             style="width: 100%; height: 48px; border-radius: 12px; border: 2px solid var(--accent-gold); padding: 0 10px; font-weight: 800; font-size: 0.92rem; background: var(--card-bg); color: var(--text-primary); cursor: pointer; outline: none; transition: 0.3s; box-shadow: 0 3px 8px rgba(0,0,0,0.05); text-align: right;">
-                            <option value="نقدي (من الخزنة)">💵 نقدي (من الخزنة)</option>
-                            <option value="خصم من حساب العميل">💳 خصم من حساب العميل</option>
+                            <option value="نقدي (من الخزنة)">💵 نقدي (من الخزنة / الدرج)</option>
+                            <option value="فودافون كاش">📱 فودافون كاش (محفظة إلكترونية)</option>
+                            <option value="فيزا">💳 فيزا / شبكة</option>
+                            <option value="تحويل بنكي">🏦 تحويل بنكي / إنستاباي</option>
+                            <option value="خصم من حساب العميل">⏳ خصم من حساب العميل (آجل)</option>
                         </select>
                     </div>
                 </div>
@@ -2859,19 +2892,29 @@
                     <!-- بطاقة الفاتورة المرتبطة (مرتجع مشتريات) -->
                     <div id="prReturnInvoiceCard"
                         style="display:none; margin-top:6px; background:linear-gradient(135deg,#fffbeb,#fef9c3); border:1px solid #fde68a; border-radius:10px; padding:10px;">
-                        <div style="font-weight:900; color:#b45309; margin-bottom:6px; font-size:0.78rem;">🧾 الفاتورة
-                            الأصلية</div>
+                        <div style="font-weight:900; color:#b45309; margin-bottom:6px; font-size:0.78rem; display:flex; justify-content:space-between; align-items:center;">
+                            <span>🧾 بيانات فاتورة الشراء الأصلية</span>
+                            <span id="prInvIdBadge" style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:4px; font-size:0.7rem;">#---</span>
+                        </div>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; text-align:center;">
                             <div style="background:#fff; border-radius:6px; padding:5px; border:1px solid #fde68a;">
-                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">📋 الإجمالي</div>
+                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">📋 إجمالي الفاتورة</div>
                                 <div id="prInvTotal" style="font-weight:900; color:#92400e; font-size:0.85rem;">0.00
                                 </div>
                             </div>
                             <div style="background:#fff; border-radius:6px; padding:5px; border:1px solid #bbf7d0;">
-                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">💰 المتبقي</div>
+                                <div style="color:#64748b; font-size:0.68rem; font-weight:bold;">💰 المتبقي منها</div>
                                 <div id="prInvRemaining" style="font-weight:900; color:#16a34a; font-size:0.85rem;">0.00
                                 </div>
                             </div>
+                        </div>
+                        <!-- 🌟 طريقة السداد في فاتورة الشراء الأصلية -->
+                        <div style="margin-top:6px; background:#fff; border-radius:6px; padding:5px 8px; border:1px solid #fed7aa; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:#64748b; font-size:0.7rem; font-weight:bold;">💳 طريقة السداد الأصلية:</span>
+                            <span id="prInvMethod" style="font-weight:900; color:#b45309; font-size:0.82rem;">-</span>
+                        </div>
+                        <div id="prMethodMatchNotice" style="display:none; margin-top:4px; font-size:0.68rem; color:#059669; font-weight:bold; text-align:center; background:#ecfdf5; border-radius:4px; padding:3px;">
+                            🎯 تم ضبط طريقة الاسترداد تلقائياً لتطابق فاتورة الشراء
                         </div>
                     </div>
                 </div>
@@ -2892,12 +2935,15 @@
 
                 <div style="margin-top:15px; width:100%;">
                     <label class="form-label" style="font-size: 0.85rem; color: #991b1b; font-weight: 800;">خيارات
-                        استرداد المبلغ:</label>
+                        استرداد المبلغ من المورد:</label>
                     <div style="margin-top: 6px; width:100%;">
                         <select id="purchase-return-sectionPaymentMethodSelect" onchange="selectMethod(this)"
                             style="width: 100%; height: 48px; border-radius: 12px; border: 2px solid #fda4af; padding: 0 10px; font-weight: 800; font-size: 0.92rem; background: #fff; color: #1e293b; cursor: pointer; outline: none; transition: 0.3s; box-shadow: 0 3px 8px rgba(0,0,0,0.05); text-align: right;">
-                            <option value="نقدي (إلى الخزنة)">💵 نقدي (إلى الخزنة)</option>
-                            <option value="إضافة إلى حساب المورد">💳 إضافة إلى حساب المورد</option>
+                            <option value="نقدي (إلى الخزنة)">💵 نقدي (إلى الخزنة / الدرج)</option>
+                            <option value="فودافون كاش">📱 فودافون كاش (محفظة إلكترونية)</option>
+                            <option value="فيزا">💳 فيزا / شبكة</option>
+                            <option value="تحويل بنكي">🏦 تحويل بنكي / إنستاباي</option>
+                            <option value="إضافة إلى حساب المورد">⏳ إضافة إلى حساب المورد (آجل)</option>
                         </select>
                     </div>
                 </div>
@@ -3311,11 +3357,12 @@
                             <span id="dailyAmountsEyeIcon" style="font-size: 1rem;">👁️</span>
                             <span id="dailyAmountsEyeText">إخفاء المبالغ</span>
                         </button>
-                        <div id="dailyTotalSalesReceipts" onclick="copyDailyTotal()" title="انقر لنسخ المبلغ"
-                            style="font-size: 0.9rem; color: #fff; font-weight: bold; background: linear-gradient(135deg, #27ae60, #2ecc71); padding: 6px 15px; border-radius: 20px; box-shadow: 0 4px 12px rgba(46, 204, 113, 0.2); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; transition: 0.3s;"
+                        <div id="dailyTotalSalesReceipts" onclick="copyDailyTotal()" title="انقر لعرض تفاصيل واحتساب اليومية والدرج"
+                            style="font-size: 0.9rem; color: #fff; font-weight: bold; background: linear-gradient(135deg, #1e3a8a, #2563eb); padding: 6px 15px; border-radius: 20px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25); border: 1px solid rgba(255,255,255,0.15); cursor: pointer; transition: 0.3s; display: inline-flex; align-items: center; gap: 6px;"
                             onmouseover="this.style.transform='scale(1.05)'"
                             onmouseout="this.style.transform='scale(1)'">
-                            إجمالي يومية: <span id="dailyTotalVal">0.00</span> ج.م 📋
+                            <span>💰 صافي نقدية اليوم:</span> <span id="dailyTotalVal" style="font-size: 1.02rem; font-weight: 900;">0.00</span> ج.م
+                            <span style="opacity: 0.7; font-size: 0.8rem; margin: 0 2px;">📋</span>
                         </div>
                         <div id="dailyTotalDiscountsBadge" title="إجمالي الخصومات الممنوحة على الفواتير خلال الفترة المحددة"
                             style="font-size: 0.9rem; color: #fff; font-weight: bold; background: linear-gradient(135deg, #ef4444, #dc2626); padding: 6px 15px; border-radius: 20px; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; transition: 0.3s; display: inline-flex; align-items: center; gap: 6px;"
@@ -3414,71 +3461,138 @@
                     <button class="btn-excel" onclick="printReportData()" style="background:#7f8c8d;">طباعة 🖨️</button>
                 </div>
 
-                <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px;">
-                    <!-- 2. جدول ملخص العمليات -->
-                    <div style="flex: 2; min-width: 400px; background: var(--card-bg); color: var(--text-primary); border-radius: 20px; padding: 20px; box-shadow: var(--shadow-medium); border: 1px solid var(--border-color); transition: 0.3s;"
-                        onmouseover="this.style.transform='translateY(-5px) scale(1.01)';"
-                        onmouseout="this.style.transform='translateY(0) scale(1)'">
-                        <h3
-                            style="color: #fff; background: linear-gradient(135deg, #10b981, #059669); padding: 12px 20px; margin: -20px -20px 20px -20px; border-radius: 20px 20px 0 0; font-size: 1.2rem; font-weight: 800; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid rgba(0,0,0,0.05);">
-                            <span>📊</span> ملخص العمليات المالية
+                <!-- 🌟 الصف الموحد المتناسق للجداول الثلاثة جنب بعض في شاشة واحدة -->
+                <div class="daily-tables-row" style="display: flex; gap: 14px; width: 100%; box-sizing: border-box; align-items: stretch; margin-top: 15px; flex-wrap: nowrap;">
+                    
+                    <!-- 1. جدول ملخص العمليات المالية -->
+                    <div style="flex: 2.3; min-width: 0; background: var(--card-bg, #ffffff); color: var(--text-primary, #0f172a); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow-medium, 0 4px 12px rgba(0,0,0,0.06)); border: 1.5px solid var(--border-color, #e2e8f0); display: flex; flex-direction: column;">
+                        <h3 style="color: #fff; background: linear-gradient(135deg, #10b981, #059669); padding: 10px 14px; margin: -14px -14px 12px -14px; border-radius: 14px 14px 0 0; font-size: 1.05rem; font-weight: 800; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(0,0,0,0.05);">
+                            <span style="display: flex; align-items: center; gap: 8px;"><span>📊</span> ملخص العمليات المالية</span>
+                            <span style="font-size: 0.78rem; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 6px; font-weight: normal;">تجزئة • جملة • فودافون كاش</span>
                         </h3>
-                        <table class="report-table"
-                            style="width: 100%; border-collapse: separate; border-spacing: 0 6px;">
-                            <thead>
-                                <tr>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">البيان</th>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">عدد الفواتير</th>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">الإجمالي</th>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">نقدي</th>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">آجل</th>
-                                </tr>
-                            </thead>
-                            <tbody id="opsSummaryBody"></tbody>
-                        </table>
+                        <div style="overflow-x: auto; flex: 1;">
+                            <table class="report-table" style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+                                <thead>
+                                    <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+                                        <th style="padding: 8px 6px; text-align: right; color: #334155;">البيان</th>
+                                        <th style="padding: 8px 6px; text-align: center; color: #334155; width: 65px;">الفواتير</th>
+                                        <th style="padding: 8px 6px; text-align: center; color: #334155; width: 85px;">الإجمالي</th>
+                                        <th style="padding: 8px 6px; text-align: center; color: #334155; width: 105px;">نقدي / محصل</th>
+                                        <th style="padding: 8px 6px; text-align: center; color: #334155; width: 80px;">آجل</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="opsSummaryBody"></tbody>
+                            </table>
+                        </div>
                     </div>
 
-                    <!-- 3. جدول ملخص الخزينة -->
-                    <div style="flex: 1; min-width: 300px; background: var(--card-bg); color: var(--text-primary); border-radius: 20px; padding: 20px; box-shadow: var(--shadow-medium); border: 1px solid var(--border-color); transition: 0.3s;"
-                        onmouseover="this.style.transform='translateY(-5px) scale(1.01)';"
-                        onmouseout="this.style.transform='translateY(0) scale(1)'">
-                        <h3
-                            style="color: #fff; background: linear-gradient(135deg, #3b82f6, #2563eb); padding: 12px 20px; margin: -20px -20px 20px -20px; border-radius: 20px 20px 0 0; font-size: 1.2rem; font-weight: 800; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid rgba(0,0,0,0.05);">
-                            <span>💰</span> حركة الخزينة
+                    <!-- 2. جدول حركة الخزينة مع لوحة جرد وتقفيل الدرج المدمجة بالأسفل -->
+                    <div style="flex: 1.35; min-width: 0; background: var(--card-bg, #ffffff); color: var(--text-primary, #0f172a); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow-medium, 0 4px 12px rgba(0,0,0,0.06)); border: 1.5px solid var(--border-color, #e2e8f0); display: flex; flex-direction: column;">
+                        <h3 style="color: #fff; background: linear-gradient(135deg, #1e3a8a, #2563eb); padding: 10px 14px; margin: -14px -14px 12px -14px; border-radius: 14px 14px 0 0; font-size: 1.05rem; font-weight: 800; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(0,0,0,0.05);">
+                            <span style="display: flex; align-items: center; gap: 8px;"><span>💰</span> حركة الخزينة والدرج</span>
+                            <div style="display: flex; gap: 6px;">
+                                <button type="button" onclick="showElectronicTreasuriesAuditModal()" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 6px; padding: 2px 7px; font-size: 0.75rem; font-weight: bold; cursor: pointer;" title="تصفية المحافظ الإلكترونية">📱 المحافظ</button>
+                                <button type="button" onclick="showDrawerClosuresHistoryModal()" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 6px; padding: 2px 7px; font-size: 0.75rem; font-weight: bold; cursor: pointer;" title="سجل التقفيلات السابقة">📜 السجل</button>
+                            </div>
                         </h3>
-                        <table class="report-table"
-                            style="width: 100%; border-collapse: separate; border-spacing: 0 5px;">
-                            <thead>
-                                <tr>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">البيان</th>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">القيمة</th>
-                                </tr>
-                            </thead>
+                        <div style="overflow-x: auto; flex: 1;">
+                            <table class="report-table" style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+                                <thead>
+                                    <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+                                        <th style="padding: 8px 6px; text-align: right; color: #334155;">البيان</th>
+                                        <th style="padding: 8px 6px; text-align: center; color: #334155; width: 95px;">القيمة</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="treasurySummaryBody"></tbody>
+                            </table>
+                        </div>
 
-                            <tbody id="treasurySummaryBody"></tbody>
-                        </table>
+                        <!-- 🔒 شريط تقفيل وجرد الدرج المدمج والسريع (بدون حشو مربعات زائدة) -->
+                        <div style="margin-top: 12px; padding-top: 10px; border-top: 2px dashed #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
+                            <div style="background: linear-gradient(135deg, #1e3a8a, #1d4ed8); color: white; padding: 9px 12px; border-radius: 10px; display: flex; flex-direction: column; gap: 4px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-weight: 800; font-size: 0.86rem;">💰 نقدية الدرج الورقي المطلوبة (كاش الخزينة فقط):</span>
+                                    <span style="font-weight: 900; font-size: 1.25rem;"><span id="auditCardExpectedCash">0.00</span> <small style="font-size: 0.75rem;">ج.م</small></span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #bfdbfe; border-top: 1px dashed rgba(255,255,255,0.25); padding-top: 3px;">
+                                    <span>(كاش ورقي فقط بالدرج: مبيعات كاش + قبض - صرف كاش - مرتجع كاش)</span>
+                                    <button type="button" id="btnTogglePrevBalance" onclick="window.toggleIncludePrevBalanceInAudit ? window.toggleIncludePrevBalanceInAudit() : null"
+                                        style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; border-radius: 5px; padding: 1px 7px; font-size: 0.7rem; font-weight: bold; cursor: pointer;"
+                                        title="تبديل لاحتساب الرصيد التراكمي السابق أو اليوم بيومه فقط">🔄 اليوم بيومه</button>
+                                </div>
+                            </div>
+
+                            <!-- 📱 إبراز حركة فودافون كاش والفيزا لليوم للتأكيد أنها لا تضيع ومفصولة عن الكاش الورقي -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem;">
+                                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 5px 8px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color: #166534; font-weight: 800;">📱 فودافون كاش اليوم:</span>
+                                    <span style="color: #15803d; font-weight: 900;"><span id="auditCardVodafoneCash">0.00</span> <small style="font-size:0.65rem;">ج.م (بالمحفظة)</small></span>
+                                </div>
+                                <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 5px 8px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color: #1e40af; font-weight: 800;">💳 فيزا وشبكة اليوم:</span>
+                                    <span style="color: #1d4ed8; font-weight: 900;"><span id="auditCardVisaSales">0.00</span> <small style="font-size:0.65rem;">ج.م (بالحساب)</small></span>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 6px; align-items: center;">
+                                <input type="number" id="drawerActualCashInput" step="any" min="0" placeholder="اكتب العد الفعلي..."
+                                    oninput="handleDrawerActualCashInput(this.value)"
+                                    style="flex: 1; height: 38px; border: 2px solid #f59e0b; border-radius: 8px; font-size: 1.05rem; font-weight: 900; color: #78350f; text-align: center; background: #fffbeb; outline: none; padding: 0 6px;"
+                                    onfocus="this.select()">
+                                <button type="button" onclick="openDrawerDenominationsCalculator()"
+                                    style="height: 38px; padding: 0 10px; background: #f59e0b; color: white; border: none; border-radius: 8px; font-weight: 900; font-size: 0.8rem; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 4px;"
+                                    title="حاسبة فئات النقدية (200، 100، 50...)">
+                                    <span>🧮</span> الفئات
+                                </button>
+                            </div>
+
+                            <!-- بطاقة الفارق الفوري (مطابق / عجز / زيادة) -->
+                            <div id="drawerAuditResultCard" style="background: #f1f5f9; border: 1.5px dashed #cbd5e1; border-radius: 8px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; transition: 0.2s;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span id="drawerAuditResultIcon">⏳</span>
+                                    <span id="drawerAuditResultTitle" style="font-weight: 800; color: #475569;">في انتظار عد النقدية...</span>
+                                </div>
+                                <span id="drawerAuditDiffAmount" style="font-weight: 900; color: #64748b;">0.00 ج.م</span>
+                            </div>
+
+                            <div style="display: flex; gap: 6px;">
+                                <button type="button" id="btnCommitDrawerClose" onclick="commitDrawerClosing()"
+                                    style="flex: 1.3; height: 36px; background: linear-gradient(135deg, #059669, #10b981); color: white; border: none; border-radius: 8px; font-weight: 900; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 2px 8px rgba(16,185,129,0.3);">
+                                    <span>🔒</span> تقفيل الوردية والدرج
+                                </button>
+                                <button type="button" id="btnEditDrawerClose" onclick="openEditDrawerClosingModal()"
+                                    style="flex: 1.1; height: 36px; background: linear-gradient(135deg, #d97706, #f59e0b); color: white; border: none; border-radius: 8px; font-weight: 900; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 2px 8px rgba(217,119,6,0.25);"
+                                    title="تعديل العد الفعلي أو تعديل محضر التقفيل">
+                                    <span>✏️</span> تعديل العد
+                                </button>
+                                <button type="button" onclick="printShiftCloseReport()"
+                                    style="flex: 0.9; height: 36px; background: #0284c7; color: white; border: none; border-radius: 8px; font-weight: 900; font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;"
+                                    title="طباعة محضر تقفيل الوردية Z-Report">
+                                    <span>🖨️</span> Z-Report
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- 4. جدول ملخص الأرباح -->
+                    <!-- 3. جدول ملخص الأرباح -->
                     <div id="dailyReportProfitSummaryCard" data-perm="general_profits"
-                        style="flex: 1; min-width: 300px; background: var(--card-bg); color: var(--text-primary); border-radius: 20px; padding: 20px; box-shadow: var(--shadow-medium); border: 1px solid var(--border-color); transition: 0.3s;"
-                        onmouseover="this.style.transform='translateY(-5px) scale(1.01)';"
-                        onmouseout="this.style.transform='translateY(0) scale(1)'">
-                        <h3
-                            style="color: #fff; background: linear-gradient(135deg, #8b5cf6, #7c3aed); padding: 12px 20px; margin: -20px -20px 20px -20px; border-radius: 20px 20px 0 0; font-size: 1.2rem; font-weight: 800; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid rgba(0,0,0,0.05);">
+                        style="flex: 1.05; min-width: 0; background: var(--card-bg, #ffffff); color: var(--text-primary, #0f172a); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow-medium, 0 4px 12px rgba(0,0,0,0.06)); border: 1.5px solid var(--border-color, #e2e8f0); display: flex; flex-direction: column;">
+                        <h3 style="color: #fff; background: linear-gradient(135deg, #8b5cf6, #7c3aed); padding: 10px 14px; margin: -14px -14px 12px -14px; border-radius: 14px 14px 0 0; font-size: 1.05rem; font-weight: 800; display: flex; align-items: center; gap: 8px; border-bottom: 2px solid rgba(0,0,0,0.05);">
                             <span>📈</span> ملخص الأرباح
                         </h3>
-                        <table class="report-table"
-                            style="width: 100%; border-collapse: separate; border-spacing: 0 5px;">
-                            <thead>
-                                <tr>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">البيان</th>
-                                    <th style="padding: 12px;" onclick="event.stopPropagation()">القيمة</th>
-                                </tr>
-                            </thead>
-                            <tbody id="profitSummaryBody"></tbody>
-                        </table>
+                        <div style="overflow-x: auto; flex: 1;">
+                            <table class="report-table" style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+                                <thead>
+                                    <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+                                        <th style="padding: 8px 6px; text-align: right; color: #334155;">البيان</th>
+                                        <th style="padding: 8px 6px; text-align: center; color: #334155; width: 95px;">القيمة</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="profitSummaryBody"></tbody>
+                            </table>
+                        </div>
                     </div>
+
                 </div>
             </div>
 
@@ -8557,7 +8671,7 @@
                                     <div>
                                         <span id="aboutAppVersionBadge" class="dynamic-app-version-badge"
                                             style="display: inline-block; background: #059669; color: #ffffff; padding: 6px 16px; border-radius: 10px; font-weight: 900; font-size: 0.95rem; border: 2px solid #047857;">
-                                            الإصدار الرسمي V3.1.2 ⚡
+                                            الإصدار الرسمي V3.2.2 ⚡
                                         </span>
                                     </div>
                                 </div>
@@ -8655,7 +8769,7 @@
                                             المثبت:</div>
                                         <div id="updateCurrentVerLabel"
                                             style="margin: 2px 0; color: #0f172a; font-size: 1.15rem; font-weight: 900; font-family: monospace;">
-                                            V3.1.2
+                                            V3.2.2
                                         </div>
                                         <div style="font-size: 0.7rem; color: #059669; font-weight: 800;">✅ نسخة مستقرة
                                             ومحدثة</div>
@@ -8688,7 +8802,7 @@
                                         🔄 المزامنة والفحص المباشر:
                                     </div>
                                     <button class="settings-save-btn"
-                                        onclick="if(typeof checkUpdates==='function'){checkUpdates(true);}else if(typeof checkGitHubReleases==='function'){checkGitHubReleases(true);}else{if(typeof showToast==='function')showToast('✅ نظام بيان POS يعمل بأحدث إصدار مستقر (V3.1.2)','success');else alert('✅ نظام بيان POS يعمل بأحدث إصدار مستقر (V3.1.2)');}"
+                                        onclick="if(typeof checkUpdates==='function'){checkUpdates(true);}else if(typeof checkGitHubReleases==='function'){checkGitHubReleases(true);}else{if(typeof showToast==='function')showToast('✅ نظام بيان POS يعمل بأحدث إصدار مستقر (V3.2.2)','success');else alert('✅ نظام بيان POS يعمل بأحدث إصدار مستقر (V3.2.2)');}"
                                         style="height: 36px; font-size: 0.82rem; width: 100%; justify-content: center;">
                                         <span>🔍</span> فحص التحديثات الآن
                                     </button>
@@ -8709,12 +8823,12 @@
                                             <span>إدارة وتجميد التحديثات التلقائية</span>
                                             <span id="updatePolicyBadge"
                                                 style="font-size: 0.74rem; padding: 3px 10px; border-radius: 8px; font-weight: 900; background: #ecfdf5; color: #059669; border: 1.5px solid #a7f3d0; transition: all 0.3s ease;">تلقائي
-                                                نشط ⚡ (V3.1.2)</span>
+                                                نشط ⚡ (V3.2.2)</span>
                                         </div>
                                         <div
                                             style="font-size: 0.82rem; color: #64748b; font-weight: 700; margin-top: 4px;">
                                             يمكنك إيقاف البحث التلقائي عن التحديثات وتثبيت نسختك الحالية (<span
-                                                style="color: #2563eb; font-weight: 900; font-family: monospace;">V3.1.2</span>)
+                                                style="color: #2563eb; font-weight: 900; font-family: monospace;">V3.2.2</span>)
                                             لمنع أي إشعارات أو ترقيات مستقبلاً.
                                         </div>
                                     </div>
@@ -8735,7 +8849,7 @@
                                     <span id="toggleAutoUpdatesText"
                                         onclick="document.getElementById('toggleAutoUpdatesSwitch').click()"
                                         style="font-weight: 900; font-size: 0.9rem; color: #059669; min-width: 145px; cursor: pointer; user-select: none; transition: color 0.3s ease;">التحديثات
-                                        مفعلة (V3.1.2)</span>
+                                        مفعلة (V3.2.2)</span>
                                 </div>
                             </div>
 
@@ -8747,19 +8861,19 @@
                                     </h3>
                                     <span
                                         style="font-size: 0.75rem; background: #ecfdf5; color: #047857; padding: 3px 10px; border-radius: 8px; font-weight: 800; border: 1px solid #a7f3d0;">
-                                        V3.1.2 👗 أحدث إصدار
+                                        V3.2.2 👗 أحدث إصدار
                                     </span>
                                 </div>
 
                                 <div id="updateReleaseNotesBox"
                                     style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; font-size: 0.85rem; color: #334155; line-height: 1.6; display: flex; flex-direction: column; gap: 10px;">
 
-                                    <!-- التحديث الأحدث V3.1.2 -->
+                                    <!-- التحديث الأحدث V3.2.2 -->
                                     <details open
                                         style="background: white; border: 1.5px solid #10b981; border-radius: 12px; padding: 12px 16px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);">
                                         <summary
                                             style="font-weight: 900; color: #065f46; font-size: 0.94rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
-                                            <span>✨ الإصدار الجديد المعتمد V3.1.2 (21/09/2026) - تحسينات شاملة في طباعة الباركود والبحث الفوري وتطوير مذكرة الحركة والسرعة الفائقة</span>
+                                            <span>✨ الإصدار الجديد المعتمد V3.2.2 (26/09/2026) - تحسينات شاملة في طباعة الباركود والبحث الفوري وتطوير مذكرة الحركة والسرعة الفائقة</span>
                                             <span
                                                 style="font-size: 0.72rem; background: #ecfdf5; color: #047857; padding: 3px 9px; border-radius: 6px; border: 1px solid #a7f3d0; font-weight: 900;">الإصدار
                                                 الحالي المثبت ⭐</span>
@@ -9510,109 +9624,113 @@
     <div id="loginModal" class="login-overlay">
         <!-- 👔 حاوية الطرف الأيسر العلوي: بادج النشاط + زر النسخ الاحتياطي الطارئ -->
         <div id="loginTopLeftContainer"
-            style="position: absolute; top: 25px; left: 35px; z-index: 100000; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; direction: rtl;">
+            style="position: absolute; top: 16px; left: 22px; z-index: 100000; display: flex; flex-direction: column; gap: 8px; width: 275px; direction: rtl; box-sizing: border-box;">
 
             <!-- 👔 بادج هوية نظام بيان فاشون -->
             <div id="loginBusinessTypeBadge"
-                style="display: flex; align-items: center; gap: 10px; background: rgba(15, 23, 42, 0.75); padding: 10px 16px; border-radius: 16px; border: 1.5px solid rgba(16, 185, 129, 0.5); box-shadow: 0 10px 25px rgba(0,0,0,0.4), 0 0 15px rgba(16, 185, 129, 0.2);">
-                <div id="loginBusinessIcon"
-                    style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #10b981, #059669); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; box-shadow: 0 3px 10px rgba(16, 185, 129, 0.35);">
-                    👕
-                </div>
-                <div style="text-align: right;">
-                    <div style="color: #94a3b8; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.5px;">نظام بيان
-                        المتخصص:</div>
-                    <div id="loginBusinessName"
-                        style="color: #ffffff; font-size: 0.95rem; font-weight: 900; letter-spacing: 0.5px; text-shadow: 0 1px 3px rgba(0,0,0,0.5);">
-                        الملابس والأحذية والموضة
+                style="display: flex; align-items: center; justify-content: space-between; width: 100%; height: 46px; box-sizing: border-box; background: linear-gradient(135deg, rgba(6, 78, 59, 0.45), rgba(15, 23, 42, 0.85)); padding: 0 10px; border-radius: 14px; border: 1.5px solid rgba(16, 185, 129, 0.7); box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 12px rgba(16, 185, 129, 0.2); backdrop-filter: blur(14px); cursor: default; transition: all 0.25s ease; user-select: none;"
+                onmouseover="this.style.transform='translateY(-2px) scale(1.02)'; this.style.borderColor='#10b981'; this.style.boxShadow='0 10px 24px rgba(0,0,0,0.5), 0 0 20px rgba(16, 185, 129, 0.35)';"
+                onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.borderColor='rgba(16, 185, 129, 0.7)'; this.style.boxShadow='0 6px 18px rgba(0,0,0,0.4), 0 0 12px rgba(16, 185, 129, 0.2)';">
+                <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                    <div id="loginBusinessIcon"
+                        style="width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #10b981, #059669); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; box-shadow: 0 3px 8px rgba(16, 185, 129, 0.35); flex-shrink: 0;">
+                        ☁️
+                    </div>
+                    <div style="text-align: right; line-height: 1.2;">
+                        <div style="color: #ffffff; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.3px;">نظام بيان المتخصص</div>
+                        <div id="loginBusinessName"
+                            style="color: #a7f3d0; font-size: 0.68rem; font-weight: 700; margin-top: 1px;">
+                            الملابس والأحذية والموضة
+                        </div>
                     </div>
                 </div>
+                <span style="color: #34d399; font-size: 1.1rem; font-weight: 900; margin-left: 2px;">‹</span>
             </div>
 
             <!-- 💾 كارت النسخ الاحتياطي الطارئ السريع المباشر -->
             <div id="loginEmergencyBackupCard" onclick="executeLoginEmergencyBackup()"
                 title="اضغط هنا لحفظ وتنزيل نسخة احتياطية فورية لبيانات النظام على جهازك بنقرة واحدة كصمام أمان"
-                style="display: flex; align-items: center; gap: 10px; background: rgba(15, 23, 42, 0.82); padding: 9px 14px; border-radius: 14px; border: 1.5px solid rgba(56, 189, 248, 0.45); box-shadow: 0 8px 22px rgba(0,0,0,0.4), 0 0 15px rgba(56, 189, 248, 0.15); cursor: pointer; transition: all 0.25s ease; user-select: none; width: 100%; box-sizing: border-box;"
-                onmouseover="this.style.transform='translateY(-2px) scale(1.02)'; this.style.borderColor='#38bdf8'; this.style.boxShadow='0 12px 28px rgba(0,0,0,0.5), 0 0 20px rgba(56, 189, 248, 0.35)';"
-                onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.borderColor='rgba(56, 189, 248, 0.45)'; this.style.boxShadow='0 8px 22px rgba(0,0,0,0.4), 0 0 15px rgba(56, 189, 248, 0.15)';">
-
-                <div id="loginBackupIconBox"
-                    style="width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; box-shadow: 0 3px 8px rgba(2, 132, 199, 0.4); flex-shrink: 0;">
-                    💾
-                </div>
-                <div style="text-align: right; line-height: 1.25; flex: 1;">
-                    <div id="loginBackupTitle"
-                        style="color: #ffffff; font-size: 0.88rem; font-weight: 900; letter-spacing: 0.3px; display: flex; align-items: center; gap: 6px;">
-                        <span>نسخة احتياطية سريعة</span>
-                        <span id="loginBackupArrow" class="login-backup-arrow">⬇️</span>
+                style="display: flex; align-items: center; justify-content: space-between; width: 100%; height: 46px; box-sizing: border-box; background: linear-gradient(135deg, rgba(12, 74, 110, 0.45), rgba(15, 23, 42, 0.85)); padding: 0 10px; border-radius: 14px; border: 1.5px solid rgba(56, 189, 248, 0.7); box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 12px rgba(56, 189, 248, 0.2); backdrop-filter: blur(14px); cursor: pointer; transition: all 0.25s ease; user-select: none;"
+                onmouseover="this.style.transform='translateY(-2px) scale(1.02)'; this.style.borderColor='#38bdf8'; this.style.boxShadow='0 10px 24px rgba(0,0,0,0.5), 0 0 20px rgba(56, 189, 248, 0.35)';"
+                onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.borderColor='rgba(56, 189, 248, 0.7)'; this.style.boxShadow='0 6px 18px rgba(0,0,0,0.4), 0 0 12px rgba(56, 189, 248, 0.2)';">
+                <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                    <div id="loginBackupIconBox"
+                        style="width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; box-shadow: 0 3px 8px rgba(2, 132, 199, 0.35); flex-shrink: 0;">
+                        💾
                     </div>
-                    <div id="loginBackupSubtitle"
-                        style="color: #94a3b8; font-size: 0.68rem; font-weight: 800; margin-top: 2px;">
-                        أمان وحفظ البيانات بنقرة واحدة
+                    <div style="text-align: right; line-height: 1.2;">
+                        <div id="loginBackupTitle"
+                            style="color: #ffffff; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.3px; display: flex; align-items: center; gap: 6px;">
+                            <span>نسخة احتياطية سريعة</span>
+                            <span id="loginBackupArrow" class="login-backup-arrow" style="display: none;">⬇️</span>
+                        </div>
+                        <div id="loginBackupSubtitle"
+                            style="color: #bae6fd; font-size: 0.68rem; font-weight: 700; margin-top: 1px;">
+                            أمان ومزامنة لبياناتك دائماً
+                        </div>
                     </div>
                 </div>
-                <div id="loginBackupTag"
-                    style="margin-right: auto; padding: 2px 7px; border-radius: 6px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 0.65rem; font-weight: 900; white-space: nowrap;">
-                    أمان 🛡️
-                </div>
+                <span style="color: #38bdf8; font-size: 1.1rem; font-weight: 900; margin-left: 2px;">‹</span>
             </div>
 
             <!-- 📥 كارت استرداد نسخة احتياطية مباشر من شاشة تسجيل الدخول -->
             <input type="file" id="loginEmergencyRestoreInput" accept=".json" style="display: none;" onchange="executeLoginEmergencyRestore(this)">
             <div id="loginEmergencyRestoreCard" onclick="triggerLoginEmergencyRestore()"
                 title="اضغط هنا لاسترجاع وتثبيت نسخة احتياطية من ملف JSON على هذا الجهاز فوراً"
-                style="display: flex; align-items: center; gap: 10px; background: rgba(15, 23, 42, 0.82); padding: 9px 14px; border-radius: 14px; border: 1.5px solid rgba(168, 85, 247, 0.45); box-shadow: 0 8px 22px rgba(0,0,0,0.4), 0 0 15px rgba(168, 85, 247, 0.15); cursor: pointer; transition: all 0.25s ease; user-select: none; width: 100%; box-sizing: border-box;"
-                onmouseover="this.style.transform='translateY(-2px) scale(1.02)'; this.style.borderColor='#c084fc'; this.style.boxShadow='0 12px 28px rgba(0,0,0,0.5), 0 0 20px rgba(168, 85, 247, 0.35)';"
-                onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.borderColor='rgba(168, 85, 247, 0.45)'; this.style.boxShadow='0 8px 22px rgba(0,0,0,0.4), 0 0 15px rgba(168, 85, 247, 0.15)';">
-
-                <div id="loginRestoreIconBox"
-                    style="width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, #9333ea, #7e22ce); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; box-shadow: 0 3px 8px rgba(147, 51, 234, 0.4); flex-shrink: 0;">
-                    📥
-                </div>
-                <div style="text-align: right; line-height: 1.25; flex: 1;">
-                    <div id="loginRestoreTitle"
-                        style="color: #ffffff; font-size: 0.88rem; font-weight: 900; letter-spacing: 0.3px; display: flex; align-items: center; gap: 6px;">
-                        <span>استرداد نسخة احتياطية</span>
-                        <span id="loginRestoreArrow" class="login-restore-arrow">🔄</span>
+                style="display: flex; align-items: center; justify-content: space-between; width: 100%; height: 46px; box-sizing: border-box; background: linear-gradient(135deg, rgba(88, 28, 135, 0.45), rgba(15, 23, 42, 0.85)); padding: 0 10px; border-radius: 14px; border: 1.5px solid rgba(168, 85, 247, 0.7); box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 12px rgba(168, 85, 247, 0.2); backdrop-filter: blur(14px); cursor: pointer; transition: all 0.25s ease; user-select: none;"
+                onmouseover="this.style.transform='translateY(-2px) scale(1.02)'; this.style.borderColor='#c084fc'; this.style.boxShadow='0 10px 24px rgba(0,0,0,0.5), 0 0 20px rgba(168, 85, 247, 0.35)';"
+                onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.borderColor='rgba(168, 85, 247, 0.7)'; this.style.boxShadow='0 6px 18px rgba(0,0,0,0.4), 0 0 12px rgba(168, 85, 247, 0.2)';">
+                <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                    <div id="loginRestoreIconBox"
+                        style="width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #9333ea, #7e22ce); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; box-shadow: 0 3px 8px rgba(147, 51, 234, 0.35); flex-shrink: 0;">
+                        📥
                     </div>
-                    <div id="loginRestoreSubtitle"
-                        style="color: #94a3b8; font-size: 0.68rem; font-weight: 800; margin-top: 2px;">
-                        استرجاع الحسابات والبيانات فوراً
+                    <div style="text-align: right; line-height: 1.2;">
+                        <div id="loginRestoreTitle"
+                            style="color: #ffffff; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.3px; display: flex; align-items: center; gap: 6px;">
+                            <span>استيراد نسخة احتياطية</span>
+                            <span id="loginRestoreArrow" class="login-restore-arrow" style="display: none;">🔄</span>
+                        </div>
+                        <div id="loginRestoreSubtitle"
+                            style="color: #e9d5ff; font-size: 0.68rem; font-weight: 700; margin-top: 1px;">
+                            استيراد البيانات والإعدادات من ملف
+                        </div>
                     </div>
                 </div>
-                <div id="loginRestoreTag"
-                    style="margin-right: auto; padding: 2px 7px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; font-size: 0.65rem; font-weight: 900; white-space: nowrap;">
-                    استعادة 🔄
-                </div>
+                <span style="color: #c084fc; font-size: 1.1rem; font-weight: 900; margin-left: 2px;">‹</span>
             </div>
 
         </div>
 
         <!-- أيقونة وهوية النظام في الجنب العلوي الفاخر (الطرف الأيمن) -->
         <div
-            style="position: absolute; top: 25px; right: 35px; z-index: 100000; display: flex; flex-direction: column; align-items: center; background: rgba(15, 23, 42, 0.75); padding: 12px 18px; border-radius: 18px; border: 1.5px solid rgba(212, 175, 55, 0.5); box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 20px rgba(212, 175, 55, 0.2);">
-            <img src="media/bayan_logo.png"
-                style="width: 105px; height: auto; border-radius: 12px; border: 1.5px solid #d4af37; box-shadow: 0 4px 12px rgba(0,0,0,0.4);"
-                alt="Bayan POS Logo">
+            style="position: absolute; top: 25px; right: 35px; z-index: 100000; display: flex; flex-direction: column; align-items: center; background: rgba(10, 22, 40, 0.85); padding: 12px 18px; border-radius: 18px; border: 1.5px solid rgba(212, 175, 55, 0.5); box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 20px rgba(212, 175, 55, 0.2); backdrop-filter: blur(14px);">
+            <div style="width: 76px; height: 76px; border-radius: 16px; border: 1.5px solid #d4af37; background: #060d19; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.4);">
+                <img src="media/bayan_logo.png"
+                    style="width: 58px; height: auto; border-radius: 8px;"
+                    alt="Bayan POS Logo">
+            </div>
             <div style="margin-top: 8px; text-align: center;">
                 <div
-                    style="color: #ffffff; font-size: 1.15rem; font-weight: 900; letter-spacing: 1px; text-shadow: 0 2px 6px rgba(0,0,0,0.8);">
+                    style="color: #ffffff; font-size: 1.12rem; font-weight: 900; letter-spacing: 0.5px; text-shadow: 0 2px 6px rgba(0,0,0,0.8);">
                     منظومة بَيَان</div>
                 <div
-                    style="color: #fde68a; font-size: 0.75rem; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin-top: 1px; text-shadow: 0 0 8px rgba(253, 230, 138, 0.5);">
+                    style="color: #fde68a; font-size: 0.72rem; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin-top: 1px; text-shadow: 0 0 8px rgba(253, 230, 138, 0.5);">
                     POS SYSTEM</div>
             </div>
         </div>
         <div class="login-container">
             <div class="login-glass-card">
-                <div class="login-header" style="text-align: center; margin-bottom: 16px;">
+                <div class="login-header" style="text-align: center; margin-bottom: 14px;">
                     <div
-                        style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;">
-                        <img src="media/bayan_logo.png"
-                            style="width: 100px; height: auto; border-radius: 12px; border: 2px solid #d4af37; box-shadow: 0 6px 15px rgba(0,0,0,0.4), 0 0 12px rgba(212, 175, 55, 0.25);"
-                            alt="Bayan POS Logo">
+                        style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+                        <div style="width: 72px; height: 72px; border-radius: 18px; border: 2px solid #d4af37; background: #070d19; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px rgba(212, 175, 55, 0.4), inset 0 0 12px rgba(212, 175, 55, 0.15); margin: 0 auto 4px;">
+                            <img src="media/bayan_logo.png"
+                                style="width: 54px; height: auto; border-radius: 8px;"
+                                alt="Bayan POS Logo">
+                        </div>
                         <h1
-                            style="color: #fff; font-size: 1.35rem; letter-spacing: 1px; margin-top: 2px; font-weight: 900; background: linear-gradient(to right, #fde68a, #d4af37); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">
+                            style="color: #fde68a; font-size: 1.3rem; letter-spacing: 0.5px; margin-top: 2px; font-weight: 900; text-shadow: 0 0 12px rgba(253, 230, 138, 0.35);">
                             تسجيل الدخول</h1>
                     </div>
                 </div>
@@ -9620,24 +9738,29 @@
                 <!-- نموذج تسجيل الدخول المعتاد (Clean Modern Minimalist) -->
                 <div class="login-form" id="standardLoginForm">
                     <!-- حقل اختيار المستخدم -->
-                    <div class="login-input-group">
-                        <select id="loginUsernameInput" class="login-select">
+                    <div class="login-input-group" style="position: relative; display: flex; align-items: center; margin-bottom: 12px;">
+                        <span style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 1.15rem; color: #94a3b8; pointer-events: none; z-index: 5;">👤</span>
+                        <select id="loginUsernameInput" class="login-select" style="padding-right: 44px; padding-left: 36px; text-align: right;">
                             <!-- يتم التعبئة بالأدمن والموظفين -->
                         </select>
+                        <span style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 0.95rem; color: #94a3b8; pointer-events: none; z-index: 5;">⌄</span>
                     </div>
 
                     <!-- حقل المخزن/الفرع -->
-                    <div class="login-input-group">
-                        <select id="loginWarehouseSelect" class="login-select">
+                    <div class="login-input-group" style="position: relative; display: flex; align-items: center; margin-bottom: 12px;">
+                        <span style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 1.15rem; color: #94a3b8; pointer-events: none; z-index: 5;">🏛️</span>
+                        <select id="loginWarehouseSelect" class="login-select" style="padding-right: 44px; padding-left: 36px; text-align: right;">
                             <!-- يتم التعبئة برمجياً -->
                         </select>
+                        <span style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 0.95rem; color: #94a3b8; pointer-events: none; z-index: 5;">⌄</span>
                     </div>
 
                     <!-- حقل رمز المرور -->
-                    <div class="login-input-group">
-                        <div class="login-password-wrapper" style="position: relative;">
-                            <input type="password" id="loginPinInput" placeholder="رمز المرور (PIN) ••••" maxlength="8">
-                            <span id="eyeIcon" class="login-eye-icon" onclick="toggleLoginPassword()">👁️</span>
+                    <div class="login-input-group" style="position: relative; display: flex; align-items: center; margin-bottom: 14px;">
+                        <div class="login-password-wrapper" style="position: relative; width: 100%;">
+                            <span style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 1.15rem; color: #94a3b8; pointer-events: none; z-index: 5;">🔒</span>
+                            <input type="password" id="loginPinInput" placeholder="رمز المرور (PIN)" maxlength="8" style="padding-right: 44px; padding-left: 42px; text-align: right;">
+                            <span id="eyeIcon" class="login-eye-icon" onclick="toggleLoginPassword()" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #94a3b8; font-size: 1.15rem; z-index: 10;">👁️</span>
                         </div>
                     </div>
                     <!-- رسالة خطأ تسجيل الدخول -->
@@ -9645,18 +9768,20 @@
                         style="color: #f87171; font-size: 0.85rem; font-weight: bold; margin-bottom: 15px; text-align: center; display: none; background: rgba(239, 68, 68, 0.15); padding: 8px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.25);">
                     </div>
 
-                    <button class="login-btn-glow" onclick="attemptLogin()">
-                        تسجيل الدخول 🔑
+                    <button class="login-btn-glow" onclick="attemptLogin()" style="height: 48px; border-radius: 13px; background: linear-gradient(135deg, #10b981, #059669); border: none; font-size: 1.1rem; font-weight: 900; box-shadow: 0 4px 18px rgba(16, 185, 129, 0.45); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+                        <span style="font-size: 1.25rem;">↪</span>
+                        <span>تسجيل الدخول</span>
                     </button>
 
                     <!-- شارة وزر الدخول السريع بكارت NFC (تفاعلي بالضغط والتمرير) -->
                     <div onclick="openQuickNfcLoginModal()"
-                        style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; padding: 9px 14px; background: rgba(56, 189, 248, 0.18); border: 1.5px dashed #38bdf8; border-radius: 12px; color: #ffffff; font-size: 0.9rem; font-weight: 900; cursor: pointer; transition: 0.3s; text-shadow: 0 1px 3px rgba(0,0,0,0.5);"
-                        onmouseover="this.style.background='rgba(56, 189, 248, 0.28)'; this.style.borderColor='#7dd3fc'; this.style.transform='scale(1.02)';"
-                        onmouseout="this.style.background='rgba(56, 189, 248, 0.18)'; this.style.borderColor='#38bdf8'; this.style.transform='scale(1)';"
+                        style="display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding: 10px 16px; background: rgba(56, 189, 248, 0.08); border: 1.5px dashed rgba(56, 189, 248, 0.7); border-radius: 12px; color: #ffffff; font-size: 0.88rem; font-weight: 800; cursor: pointer; transition: 0.3s;"
+                        onmouseover="this.style.background='rgba(56, 189, 248, 0.18)'; this.style.borderColor='#38bdf8'; this.style.boxShadow='0 0 15px rgba(56, 189, 248, 0.25)';"
+                        onmouseout="this.style.background='rgba(56, 189, 248, 0.08)'; this.style.borderColor='rgba(56, 189, 248, 0.7)'; this.style.boxShadow='none';"
                         title="اضغط هنا لتمرير الكارت أو إدخال رمز كارت الموظف">
-                        <span style="font-size: 1.2rem;">💳</span>
-                        <span>أو مرر كارت NFC / RFID للدخول الفوري</span>
+                        <span style="font-size: 1.15rem; color: #fde68a;">💳</span>
+                        <span style="letter-spacing: 0.3px;">أو عبر كارت NFC / RFID للدخول الفوري</span>
+                        <span style="font-size: 1.15rem; color: #38bdf8; font-weight: 900;">((•))</span>
                     </div>
                 </div>
 
@@ -11646,7 +11771,7 @@
                         <span>مركز طباعة الباركود وملصقات الملابس</span>
                         <span
                             style="font-size: 0.8rem; background: #0f172a; color: #fbbf24; border: 1.5px solid #d4af37; padding: 4px 10px; border-radius: 8px; font-weight: 900; letter-spacing: 0.5px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">إصدار
-                            V3.1.2 ⚡</span>
+                            V3.2.2 ⚡</span>
                     </h2>
                     <p>طباعة ليزرية احترافية لكافة أصناف ومقاسات وألوان المتجر مع المعاينة الحية</p>
                 </div>
@@ -11843,8 +11968,9 @@
                             <thead
                                 style="background: #f1f5f9; color: #0f172a; font-weight: 900; border-bottom: 2px solid #cbd5e1;">
                                 <tr>
-                                    <th style="width: 40px; padding: 10px 8px; text-align: center; color: #0f172a;">
-                                        تحديد</th>
+                                    <th style="width: 48px; padding: 10px 8px; text-align: center; color: #0f172a;" title="تحديد الكل / إلغاء تحديد الكل">
+                                        <input type="checkbox" id="bpModalSelectAllVariants" onchange="window.toggleBpModalSelectAll(this)" style="width: 19px; height: 19px; accent-color: #10b981; cursor: pointer; vertical-align: middle;">
+                                    </th>
                                     <th style="padding: 10px 8px; color: #0f172a;">المقاس واللون</th>
                                     <th style="padding: 10px 8px; color: #0f172a;">الباركود الخاص</th>
                                     <th style="padding: 10px 8px; color: #0f172a;">السعر</th>
@@ -14954,47 +15080,47 @@
         </div>
     </div>
 
-    <!-- شريط الخلفيات السريع (Bottom Left - رأسي عمودي متناسق مع شاشات اللابتوب) -->
+    <!-- شريط الخلفيات السريع (Bottom Left - رأسي عمودي متناسق كبسولة نيون فخمة) -->
     <div id="quickWpBar" class="quick-wp-bar hidden"
-        style="padding: 8px 5px; border-radius: 12px; display: flex; flex-direction: column; gap: 5px; background: #0f172a; border: 1.5px solid rgba(255,255,255,0.2); max-height: 72vh; overflow-y: auto; scrollbar-width: none;">
+        style="padding: 6px 3px; border-radius: 18px; display: flex; flex-direction: column; gap: 4px; background: rgba(8, 20, 38, 0.85); border: 1.5px solid #00f2fe; box-shadow: 0 0 16px rgba(0, 242, 254, 0.4), inset 0 0 8px rgba(0, 242, 254, 0.15); backdrop-filter: blur(16px); max-height: calc(100vh - 200px); overflow-y: auto; scrollbar-width: none;">
         <div class="wp-swatch swatch-default" onclick="changeWallpaper('none')" title="الوضع الأصلي"
-            style="width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 0.85rem; background: rgba(0,0,0,0.5);">
+            style="width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 0.72rem; background: rgba(0,0,0,0.6); box-shadow: 0 2px 6px rgba(0,0,0,0.5);">
             🪟</div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/fashion_boutique.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/fashion_boutique.jpg') center/cover; cursor: pointer; border: 1.5px solid #eab308; box-shadow: 0 2px 8px rgba(234,179,8,0.4); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/fashion_boutique.jpg') center/cover; cursor: pointer; border: 1.5px solid #eab308; box-shadow: 0 2px 8px rgba(234,179,8,0.45); transition: 0.25s;"
             title="بوتيك فاشون فاخر"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/royal_gold.png')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/royal_gold.png') center/cover; cursor: pointer; border: 1.5px solid #ca8a04; box-shadow: 0 2px 8px rgba(202,138,4,0.4); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/royal_gold.png') center/cover; cursor: pointer; border: 1.5px solid #ca8a04; box-shadow: 0 2px 8px rgba(202,138,4,0.45); transition: 0.25s;"
             title="ذهب ملكي"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/neon_abstract.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/neon_abstract.jpg') center/cover; cursor: pointer; border: 1.5px solid #06b6d4; box-shadow: 0 2px 8px rgba(6,182,212,0.4); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/neon_abstract.jpg') center/cover; cursor: pointer; border: 1.5px solid #06b6d4; box-shadow: 0 2px 8px rgba(6,182,212,0.45); transition: 0.25s;"
             title="نيون 3D بريميوم"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/emerald_3d.png')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/emerald_3d.png') center/cover; cursor: pointer; border: 1.5px solid #10b981; box-shadow: 0 2px 8px rgba(16,185,129,0.4); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/emerald_3d.png') center/cover; cursor: pointer; border: 1.5px solid #10b981; box-shadow: 0 2px 8px rgba(16,185,129,0.45); transition: 0.25s;"
             title="زمرد هندسي"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/deep_space.png')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/deep_space.png') center/cover; cursor: pointer; border: 1.5px solid #3b82f6; box-shadow: 0 2px 8px rgba(59,130,246,0.4); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/deep_space.png') center/cover; cursor: pointer; border: 1.5px solid #3b82f6; box-shadow: 0 2px 8px rgba(59,130,246,0.45); transition: 0.25s;"
             title="الفضاء السحيق"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/cyber_tech.png')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/cyber_tech.png') center/cover; cursor: pointer; border: 1.5px solid #8b5cf6; box-shadow: 0 2px 8px rgba(139,92,246,0.4); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/cyber_tech.png') center/cover; cursor: pointer; border: 1.5px solid #8b5cf6; box-shadow: 0 2px 8px rgba(139,92,246,0.45); transition: 0.25s;"
             title="تكنولوجيا المستقبل"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/mountains.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/mountains.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.6); box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/mountains.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.25s;"
             title="طبيعة جبلية"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/burj.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/burj.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.6); box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/burj.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.25s;"
             title="برج خليفة"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/night.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/night.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.6); box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/night.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.25s;"
             title="مدينة ليلية"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/office.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/office.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.6); box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/office.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.25s;"
             title="مكتب فاخر"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/relax.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/relax.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.6); box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/relax.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.25s;"
             title="استرخاء"></div>
         <div class="wp-swatch" onclick="changeWallpaper('media/wallpapers/beach.jpg')"
-            style="width: 24px; height: 24px; border-radius: 50%; background: url('media/wallpapers/beach.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.6); box-shadow: 0 2px 8px rgba(0,0,0,0.3); transition: 0.25s;"
+            style="width: 20px; height: 20px; border-radius: 50%; background: url('media/wallpapers/beach.jpg') center/cover; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.25s;"
             title="شاطئ البحر"></div>
     </div>
 
@@ -15067,28 +15193,33 @@
 
     <!-- ويدجت الوقت والتاريخ الفخم (Bottom Right) -->
     <div id="quickInfoWidget" class="quick-info-widget hidden">
-        <div class="widget-date" id="quickWpDate">الإثنين، 4 مايو 2026</div>
-        <div class="widget-time">
-            <span id="quickWpTime">00:00</span>
+        <div class="widget-date" id="quickWpDate" style="color: #cbd5e1; font-size: 0.82rem; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 6px;">
+            <span>📅</span>
+            <span>الإثنين، 4 مايو 2026</span>
+        </div>
+        <div class="widget-time" style="line-height: 1.1; margin-top: 3px;">
+            <span id="quickWpTime" style="color: #00f2fe; font-size: 1.85rem; font-weight: 900; letter-spacing: 1px; text-shadow: 0 0 16px rgba(0, 242, 254, 0.7); font-family: 'Segoe UI', 'Cairo', sans-serif;">00:00</span>
         </div>
     </div>
 
     <style>
         .quick-wp-bar {
             position: fixed;
-            bottom: 20px;
-            left: 18px;
+            bottom: 15px;
+            left: 15px;
             z-index: 100000;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 5px;
-            background: #0f172a;
-            padding: 8px 5px;
-            border-radius: 12px;
-            border: 1.5px solid rgba(255, 255, 255, 0.2);
-            transition: 0.15s ease;
-            max-height: 72vh;
+            gap: 4px;
+            background: rgba(8, 20, 38, 0.85);
+            padding: 6px 3px;
+            border-radius: 18px;
+            border: 1.5px solid #00f2fe;
+            box-shadow: 0 0 16px rgba(0, 242, 254, 0.4), inset 0 0 8px rgba(0, 242, 254, 0.15);
+            backdrop-filter: blur(16px);
+            transition: all 0.25s ease;
+            max-height: calc(100vh - 200px);
             overflow-y: auto;
             scrollbar-width: none;
         }
@@ -15099,50 +15230,55 @@
 
         .quick-info-widget {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
+            bottom: 25px;
+            right: 25px;
             z-index: 100000;
-            background: rgba(15, 23, 42, 0.6);
-            padding: 15px 25px;
-            border-radius: 24px;
-
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5);
+            background: rgba(8, 20, 38, 0.88);
+            padding: 12px 24px;
+            border-radius: 20px;
+            border: 1.5px solid rgba(56, 189, 248, 0.5);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.25);
+            backdrop-filter: blur(14px);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 5px;
-            transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            min-width: 180px;
+            gap: 4px;
+            transition: all 0.3s ease;
+            min-width: 170px;
             text-align: center;
+            user-select: none;
         }
 
-        .quick-wp-bar:hover,
+        .quick-wp-bar:hover {
+            box-shadow: 0 0 24px rgba(0, 242, 254, 0.65), inset 0 0 12px rgba(0, 242, 254, 0.25);
+            border-color: #38bdf8;
+        }
+
         .quick-info-widget:hover {
-            transform: translateY(-5px) scale(1.02);
-            background: rgba(15, 23, 42, 0.8);
-            border-color: rgba(255, 255, 255, 0.3);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            transform: translateY(-3px) scale(1.02);
+            border-color: #38bdf8;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7), 0 0 25px rgba(56, 189, 248, 0.4);
         }
 
         .wp-swatch {
-            width: 42px;
-            height: 42px;
-            border-radius: 12px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
             cursor: pointer;
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            border: 2.5px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            transition: all 0.25s ease;
+            border: 1.5px solid rgba(255, 255, 255, 0.75);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
             position: relative;
+            flex-shrink: 0;
             overflow: hidden;
         }
 
         .wp-swatch:hover {
-            transform: scale(1.25) translateY(-5px) rotate(5deg);
-            border-color: #fff;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-            z-index: 10;
+            transform: scale(1.28);
+            border-color: #00f2fe;
+            box-shadow: 0 0 16px #00f2fe;
+            z-index: 20;
         }
 
         /* توهج مخصص لكل لون لزيادة الوضوح */

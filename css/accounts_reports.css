@@ -248,6 +248,27 @@
             text-shadow: 0 0 10px rgba(254, 240, 138, 0.6) !important;
         }
 
+        /* 🌟 توزيع جداول تقرير الحركة اليومية جنباً إلى جنب في شاشة واحدة متناسقة */
+        .daily-tables-row {
+            display: flex;
+            gap: 14px;
+            width: 100%;
+            box-sizing: border-box;
+            align-items: stretch;
+            margin-top: 15px;
+            flex-wrap: nowrap;
+        }
+
+        @media (max-width: 992px) {
+            .daily-tables-row {
+                flex-wrap: wrap !important;
+            }
+            .daily-tables-row > div {
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+            }
+        }
+
         /* ❓ زر علامة الاستفهام التوضيحي للبنود */
         .daily-help-btn {
             display: inline-flex;

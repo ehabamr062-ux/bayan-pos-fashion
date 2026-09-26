@@ -256,13 +256,21 @@
                        str === 'vodafone_cash';
             };
 
+            const isDeferredMethod = (m) => {
+                if (!m) return false;
+                const str = String(m).toLowerCase().trim().replace(/[أإآ]/g, 'ا');
+                return str.includes('اجل') || str.includes('ذمم') || str.includes('ذمه') || 
+                       str.includes('تقسيط') || str.includes('حساب') || str.includes('credit') || 
+                       str.includes('deferred');
+            };
+
             // دالة مساعدة لحساب المدفوع نقداً والآجل بدقة بناءً على طريقة الدفع واسم الشريك
             function getTxPaymentDetails(t) {
                 const total = parseFloat(t.total) || parseFloat(t.price) || 0;
-                const method = String(t.method || t.paymentMethod || '').toLowerCase();
+                const method = String(t.method || t.paymentMethod || t.treasury || '').toLowerCase();
                 const partner = String(t.partner || '').trim();
 
-                const isDeferred = method.includes('آجل') || method.includes('deferred') || method.includes('ذمم') || method.includes('آجلة');
+                const isDeferred = isDeferredMethod(method);
                 const isNonCash = isNonCashMethod(method);
                 const isCash = !isNonCash && !isDeferred && (method.includes('نقد') || method.includes('كاش') || method.includes('cash') ||
                                (!isDeferred && (partner === 'عميل نقدي' || partner === 'مورد نقدي' || partner === 'نقدي' || partner === 'كاش' || !partner || partner === 'بدون')));
@@ -271,14 +279,14 @@
                 let credit = 0;
 
                 if (isCash) {
-                    paid = total;
-                    credit = 0;
+                    paid = (t.paidAmount != null && parseFloat(t.paidAmount) > 0) ? parseFloat(t.paidAmount) : total;
+                    credit = Math.max(0, total - paid);
                 } else if (isDeferred) {
                     paid = parseFloat(t.paidAmount != null ? t.paidAmount : (t.paid || 0));
                     if (paid > total) paid = total;
                     credit = Math.max(0, total - paid);
                 } else {
-                    if (t.paidAmount != null && parseFloat(t.paidAmount) > 0) {
+                    if (t.paidAmount != null && parseFloat(t.paidAmount) >= 0) {
                         paid = parseFloat(t.paidAmount);
                         credit = Math.max(0, total - paid);
                     } else {
@@ -286,7 +294,7 @@
                         credit = 0;
                     }
                 }
-                return { total, paid, credit };
+                return { total, paid, credit, isCash, isNonCash, isDeferred };
             }
 
             const selectedWarehouse = document.getElementById('dailyReportWarehouseSelect')?.value || 'all';
@@ -339,10 +347,10 @@
                 const sel = selectedTreasury.trim().toLowerCase();
 
                 // فحص هل المختار هو الدرج النقدي الفعلي (وليس محفظة إلكترونية أو وسيلة دفع أخرى كفودافون كاش)
-                const isSelCash = !isNonCashMethod(sel) && (sel.includes('نقد') || sel.includes('كاش') || sel.includes('cash') || sel.includes('الدرج') || sel.includes('خزينة'));
+                const isSelCash = !isNonCashMethod(sel) && (sel.includes('نقد') || sel.includes('كاش') || sel.includes('cash') || sel.includes('الدرج') || sel.includes('خزينة') || sel === 'نقدية');
                 if (isSelCash) {
                     if (!m) return true;
-                    return !isNonCashMethod(m) && !m.includes('آجل') && !m.includes('ذمم') && !m.includes('اجل');
+                    return !isNonCashMethod(m) && !isDeferredMethod(m);
                 }
 
                 // إذا كان المختار وسيلة بنكية أو محفظة محددة (فودافون كاش / إنستاباي / فيزا ...)
@@ -482,6 +490,7 @@
             let sales = { count: 0, total: 0, cash: 0, nonCash: 0, credit: 0 };
             let retailSales = { count: 0, total: 0, cash: 0, nonCash: 0, credit: 0 };
             let wholesaleSales = { count: 0, total: 0, cash: 0, nonCash: 0, credit: 0 };
+            let vodafoneSales = { count: 0, total: 0, cash: 0, nonCash: 0, credit: 0 };
 
             let salesReturn = { count: 0, total: 0, cash: 0, nonCash: 0, credit: 0 };
             let purchases = { count: 0, total: 0, cash: 0, nonCash: 0, credit: 0 };
@@ -622,6 +631,19 @@
                     sales.cash += paidCash;
                     sales.nonCash += paidNonCash;
                     sales.credit += credit;
+
+                    // 📱 فحص هل الفاتورة تمت بطريقة دفع فودافون كاش
+                    const rawMethod = g.method || g.paymentMethod || (g.items && g.items.find(it => it.method || it.paymentMethod)?.method) || '';
+                    const isVfSale = (typeof window.isVodafonePaymentMethod === 'function') 
+                        ? window.isVodafonePaymentMethod(rawMethod) 
+                        : (String(rawMethod).toLowerCase().includes('فودافون') || String(rawMethod).toLowerCase().includes('voda'));
+                    if (isVfSale) {
+                        vodafoneSales.count++;
+                        vodafoneSales.total += total;
+                        vodafoneSales.cash += paidCash;
+                        vodafoneSales.nonCash += paidNonCash;
+                        vodafoneSales.credit += credit;
+                    }
 
                     // فحص هل الفاتورة جملة أم قطاعي (تجزئة)
                     const isWholesale = (g.priceLevel === 'wholesale') || (g.items && g.items.some(it => it.priceLevel === 'wholesale'));
@@ -764,8 +786,18 @@
             const allOpsNonCash = sales.nonCash + salesReturn.nonCash + purchases.nonCash + purchasesReturn.nonCash + (receipts.nonCash || 0) + (disbursements.nonCash || 0);
             const allOpsCredit = sales.credit + salesReturn.credit + purchases.credit + purchasesReturn.credit;
 
-            // تعبئة جدول العمليات مع إبراز الجملة والتجزئة وإجمالي الخصومات والإضافات
+            // تعبئة جدول العمليات مع إبراز الجملة والتجزئة وإجمالي الخصومات والإضافات وفودافون كاش والمرتجعات
             const opsBody = document.getElementById('opsSummaryBody');
+            const netSalesTotal = sales.total - salesReturn.total;
+            const netSalesCash = sales.cash - salesReturn.cash;
+            const netSalesNonCash = sales.nonCash - salesReturn.nonCash;
+            const netSalesCredit = sales.credit - salesReturn.credit;
+
+            const netOpsRevenueTotal = netSalesTotal + receipts.total;
+            const netOpsRevenueCash = netSalesCash + (receipts.cash || 0);
+            const netOpsRevenueNonCash = netSalesNonCash + (receipts.nonCash || 0);
+            const netOpsRevenueCredit = netSalesCredit;
+
             opsBody.innerHTML = `
                 <tr style="background: rgba(16, 185, 129, 0.08); font-weight: 800;">
                     <td>🛍️ مبيعات التجزئة (قطاعي)</td>
@@ -788,6 +820,14 @@
                     <td style="color:#059669;">${sales.cash.toFixed(2)}${sales.nonCash > 0 ? ` <span style="font-size:0.8rem; color:#2563eb; font-weight:normal;" title="فيزا وبنكي">(+${sales.nonCash.toFixed(2)} 💳)</span>` : ''}</td>
                     <td style="color:#d97706;">${sales.credit.toFixed(2)}</td>
                 </tr>
+                <!-- 📱 الصف الرابع: إجمالي مبيعات فودافون كاش مباشرة بعد إجمالي المبيعات العامة -->
+                <tr style="background: rgba(220, 38, 38, 0.06); font-weight: 800; border-top: 1px dashed #fca5a5;">
+                    <td style="color:#b91c1c;">📱 مبيعات فودافون كاش</td>
+                    <td>${vodafoneSales.count}</td>
+                    <td style="color:#dc2626; font-weight:900;">${vodafoneSales.total.toFixed(2)}</td>
+                    <td style="color:#dc2626; font-weight:900;">${(vodafoneSales.nonCash + vodafoneSales.cash).toFixed(2)}${(vodafoneSales.nonCash + vodafoneSales.cash) > 0 ? ` <span style="font-size:0.8rem; color:#b91c1c; font-weight:normal;">(محصل 📱)</span>` : ''}</td>
+                    <td style="color:#d97706; font-weight:900;">${vodafoneSales.credit.toFixed(2)}</td>
+                </tr>
                 <tr style="background: rgba(239, 68, 68, 0.05); font-weight: 800; border-top: 1px dotted #fca5a5;">
                     <td style="color:#dc2626;">🏷️ إجمالي الخصومات الممنوحة</td>
                     <td>${discountedInvoicesCount}</td>
@@ -803,24 +843,36 @@
                     <td style="color:#64748b; font-size:0.85rem;">-</td>
                     <td style="color:#64748b; font-size:0.85rem;">-</td>
                 </tr>` : ''}
-                <tr><td>🔄 مرتجع مبيعات</td><td>${salesReturn.count}</td><td>${salesReturn.total.toFixed(2)}</td><td>${salesReturn.cash.toFixed(2)}${salesReturn.nonCash > 0 ? ` <span style="font-size:0.8rem; color:#7c3aed; font-weight:normal;">(+${salesReturn.nonCash.toFixed(2)} 💳)</span>` : ''}</td><td>${salesReturn.credit.toFixed(2)}</td></tr>
+                <tr style="background: rgba(239, 68, 68, 0.05); font-weight: 800;">
+                    <td style="color:#dc2626;">🔄 مرتجع مبيعات (يخصم من المبيعات)</td>
+                    <td>${salesReturn.count}</td>
+                    <td style="color:#dc2626; font-weight:900;">-${salesReturn.total.toFixed(2)}</td>
+                    <td style="color:#dc2626; font-weight:bold;">-${salesReturn.cash.toFixed(2)}${salesReturn.nonCash > 0 ? ` <span style="font-size:0.8rem; color:#7c3aed; font-weight:normal;">(-${salesReturn.nonCash.toFixed(2)} 💳)</span>` : ''}</td>
+                    <td style="color:#dc2626;">-${salesReturn.credit.toFixed(2)}</td>
+                </tr>
                 <tr><td>🧺 مشتريات</td><td>${purchases.count}</td><td>${purchases.total.toFixed(2)}</td><td>${purchases.cash.toFixed(2)}${purchases.nonCash > 0 ? ` <span style="font-size:0.8rem; color:#7c3aed; font-weight:normal;">(+${purchases.nonCash.toFixed(2)} 💳)</span>` : ''}</td><td>${purchases.credit.toFixed(2)}</td></tr>
-                <tr><td>🔙 مرتجع مشتريات</td><td>${purchasesReturn.count}</td><td>${purchasesReturn.total.toFixed(2)}</td><td>${purchasesReturn.cash.toFixed(2)}${purchasesReturn.nonCash > 0 ? ` <span style="font-size:0.8rem; color:#2563eb; font-weight:normal;">(+${purchasesReturn.nonCash.toFixed(2)} 💳)</span>` : ''}</td><td>${purchasesReturn.credit.toFixed(2)}</td></tr>
+                <tr style="background: rgba(16, 185, 129, 0.05); font-weight: 800;">
+                    <td style="color:#059669;">🔙 مرتجع مشتريات (استرداد نقدية للمحل)</td>
+                    <td>${purchasesReturn.count}</td>
+                    <td style="color:#059669; font-weight:900;">+${purchasesReturn.total.toFixed(2)}</td>
+                    <td style="color:#059669; font-weight:bold;">+${purchasesReturn.cash.toFixed(2)}${purchasesReturn.nonCash > 0 ? ` <span style="font-size:0.8rem; color:#2563eb; font-weight:normal;">(+${purchasesReturn.nonCash.toFixed(2)} 💳)</span>` : ''}</td>
+                    <td style="color:#059669;">+${purchasesReturn.credit.toFixed(2)}</td>
+                </tr>
                 <tr><td>💰 قبض (إيرادات)</td><td>${receipts.count}</td><td>${receipts.total.toFixed(2)}</td><td>${receipts.cash.toFixed(2)}</td><td>${receipts.nonCash.toFixed(2)}</td></tr>
                 <tr><td>💸 صرف (مصروفات)</td><td>${disbursements.count}</td><td>${disbursements.total.toFixed(2)}</td><td>${disbursements.cash.toFixed(2)}</td><td>${disbursements.nonCash.toFixed(2)}</td></tr>
                 <tr style="background: rgba(142, 68, 173, 0.05);"><td>⚖️ تسوية المخزن</td><td>${adjustments.count}</td><td>${adjustments.total.toFixed(2)}</td><td>-</td><td>-</td></tr>
                 <tr style="background: rgba(94, 51, 112, 0.1);"><td>🚚 تحويل مخزني</td><td>${transfers.count}</td><td>${transfers.total.toFixed(2)}</td><td>-</td><td>-</td></tr>
                 <tr style="font-weight:800; background:#f8fafc; border-top:2px solid #cbd5e1;">
-                    <td style="color:#0f172a;">💰 إجمالي الإيرادات والتحصيلات (المبيعات + القبض)</td>
-                    <td>${sales.count + receipts.count}</td>
-                    <td style="color:#059669; font-weight:900;">${(sales.total + receipts.total).toFixed(2)}</td>
-                    <td style="color:var(--main-green); font-weight:900;">${(sales.cash + receipts.cash).toFixed(2)}${(sales.nonCash + receipts.nonCash > 0) ? ` <span style="font-size:0.8rem; color:#2563eb; font-weight:normal;">(+${(sales.nonCash + receipts.nonCash).toFixed(2)} 💳)</span>` : ''}</td>
-                    <td style="color:#d97706; font-weight:900;">${sales.credit.toFixed(2)}</td>
+                    <td style="color:#0f172a;">💰 صافي الإيرادات والتحصيلات (المبيعات بعد المرتجع + القبض)</td>
+                    <td>${sales.count + salesReturn.count + receipts.count}</td>
+                    <td style="color:#059669; font-weight:900;">${netOpsRevenueTotal.toFixed(2)}</td>
+                    <td style="color:var(--main-green); font-weight:900;">${netOpsRevenueCash.toFixed(2)}${(netOpsRevenueNonCash > 0) ? ` <span style="font-size:0.8rem; color:#2563eb; font-weight:normal;">(+${netOpsRevenueNonCash.toFixed(2)} 💳)</span>` : ''}</td>
+                    <td style="color:#d97706; font-weight:900;">${netOpsRevenueCredit.toFixed(2)}</td>
                 </tr>
                 <tr class="all-ops-grand-total-row" onclick="copyAllOpsGrandTotal(${allOpsTotal})" title="انقر هنا لنسخ إجمالي كافة العمليات المالية (${allOpsTotal.toFixed(2)} ج.م)">
                     <td>
                         <span style="display:inline-flex; align-items:center; gap:8px;">
-                            <span>📊 إجمالي كافة العمليات المالية (بيع + شراء + قبض + صرف + مرتجعات)</span>
+                            <span>📊 إجمالي حركة التداول لكافة العمليات (حجم النشاط المالي)</span>
                             <span style="background:rgba(255,255,255,0.22); color:#ffffff; padding:2px 8px; border-radius:6px; font-size:0.75rem; font-weight:800; border:1px solid rgba(255,255,255,0.35); box-shadow:0 1px 3px rgba(0,0,0,0.2);">📋 انقر للنسخ</span>
                         </span>
                     </td>
@@ -861,26 +913,32 @@
             const dailyTotalEl = document.getElementById('dailyTotalVal');
             if (dailyTotalEl) {
                 dailyTotalEl.innerText = dailyTotal.toLocaleString('en-US', { minimumFractionDigits: 2 });
-                const parentBadge = document.getElementById('dailyTotalSalesReceipts');
-                if (parentBadge) {
-                    if (hideDrawerBalance) {
-                        parentBadge.style.setProperty('display', 'none', 'important');
-                    } else {
-                        parentBadge.style.setProperty('display', '', 'important');
-                        parentBadge.onclick = () => showDailyTotalBreakdown({
-                            cashSales: effectiveCashSales,
-                            cashReceipts: effectiveReceipts,
-                            cashDisbursements: effectiveDisbursements,
-                            cashPurchases: effectivePurchases,
-                            cashSalesReturns: effectiveSalesReturns,
-                            cashPurReturns: effectivePurReturns,
-                            netTotal: dailyTotal,
-                            visaSales: sales.nonCash || 0,
-                            isSpecificTreasury: selectedTreasury !== 'all',
-                            treasuryName: selectedTreasury,
-                            selectedUser: selectedUser
-                        });
-                    }
+            }
+            const dailyDrawerFinalEl = document.getElementById('dailyDrawerFinalVal');
+            if (dailyDrawerFinalEl) {
+                dailyDrawerFinalEl.innerText = dailyTotal.toLocaleString('en-US', { minimumFractionDigits: 2 });
+            }
+            const parentBadge = document.getElementById('dailyTotalSalesReceipts');
+            if (parentBadge) {
+                if (hideDrawerBalance) {
+                    parentBadge.style.setProperty('display', 'none', 'important');
+                } else {
+                    parentBadge.style.setProperty('display', '', 'important');
+                    parentBadge.onclick = () => showDailyTotalBreakdown({
+                        cashSales: effectiveCashSales,
+                        cashReceipts: effectiveReceipts,
+                        cashDisbursements: effectiveDisbursements,
+                        cashPurchases: effectivePurchases,
+                        cashSalesReturns: effectiveSalesReturns,
+                        cashPurReturns: effectivePurReturns,
+                        netTotal: dailyTotal,
+                        previousBalance: previousBalance,
+                        finalCashBalance: (previousBalance + dailyTotal),
+                        visaSales: sales.nonCash || 0,
+                        isSpecificTreasury: selectedTreasury !== 'all',
+                        treasuryName: selectedTreasury,
+                        selectedUser: selectedUser
+                    });
                 }
             }
 
@@ -1044,7 +1102,7 @@
             // تعبئة جدول الخزينة
             const treasuryBody = document.getElementById('treasurySummaryBody');
             treasuryBody.innerHTML = `
-                <tr><td>🛒 مبيعات نقدية (درج الكاش)</td><td style="color:var(--main-green); font-weight:bold;">${sales.cash.toFixed(2)}</td></tr>
+                <tr><td>🛒 مبيعات نقدية (درج الكاش)</td><td style="color:var(--main-green); font-weight:bold;">+${sales.cash.toFixed(2)}</td></tr>
                 ${(() => {
                     let nonCashRows = '';
                     const showVfRow = (selectedTreasury === 'all') || (typeof window.isVodafonePaymentMethod === 'function' ? window.isVodafonePaymentMethod(selectedTreasury) : (selectedTreasury.toLowerCase().includes('فودافون') || selectedTreasury.toLowerCase().includes('voda')));
@@ -1052,39 +1110,39 @@
                         const vfDetailsText = (vfEntry.receiptsTotal > 0 || vfEntry.disbursementsTotal > 0)
                             ? ` (صافي: مبيعات ${vfEntry.salesTotal.toFixed(2)}${vfEntry.receiptsTotal > 0 ? ` + قبض ${vfEntry.receiptsTotal.toFixed(2)}` : ''}${vfEntry.disbursementsTotal > 0 ? ` - صرف ${vfEntry.disbursementsTotal.toFixed(2)}` : ''})`
                             : '';
-                        nonCashRows += `<tr><td>📱 فودافون كاش${vfDetailsText}</td><td style="color:#dc2626; font-weight:bold;">${vfNet.toFixed(2)}</td></tr>`;
+                        nonCashRows += `<tr><td>📱 فودافون كاش${vfDetailsText}</td><td style="color:#dc2626; font-weight:bold;">${vfNet >= 0 ? '+' : ''}${vfNet.toFixed(2)}</td></tr>`;
                     }
                     if (selectedTreasury === 'all') {
                         nonCashMethodsList.forEach(pm => {
                             const pmNet = (pm.salesTotal + (pm.receiptsTotal || 0) + (pm.purchasesReturnTotal || 0)) - ((pm.returnsTotal || 0) + (pm.disbursementsTotal || 0) + (pm.purchasesTotal || 0));
-                            nonCashRows += `<tr><td>${pm.icon} صافي ${pm.name}</td><td style="color:#2563eb; font-weight:bold;">${pmNet.toFixed(2)}</td></tr>`;
+                            nonCashRows += `<tr><td>${pm.icon} صافي ${pm.name}</td><td style="color:#2563eb; font-weight:bold;">${pmNet >= 0 ? '+' : ''}${pmNet.toFixed(2)}</td></tr>`;
                         });
                         const accountedNonCash = vfEntry.salesTotal + nonCashMethodsList.reduce((s, p) => s + p.salesTotal, 0);
                         const remainderNonCash = sales.nonCash - accountedNonCash;
                         if (remainderNonCash > 0.01) {
-                            nonCashRows += `<tr><td>💳 مبيعات إلكترونية أخرى</td><td style="color:#2563eb; font-weight:bold;">${remainderNonCash.toFixed(2)}</td></tr>`;
+                            nonCashRows += `<tr><td>💳 مبيعات إلكترونية أخرى</td><td style="color:#2563eb; font-weight:bold;">+${remainderNonCash.toFixed(2)}</td></tr>`;
                         } else if (sales.nonCash > 0 && accountedNonCash === 0) {
-                            nonCashRows += `<tr><td>💳 مبيعات شبكة وفيزا / بنكي</td><td style="color:#2563eb; font-weight:bold;">${sales.nonCash.toFixed(2)}</td></tr>`;
+                            nonCashRows += `<tr><td>💳 مبيعات شبكة وفيزا / بنكي</td><td style="color:#2563eb; font-weight:bold;">+${sales.nonCash.toFixed(2)}</td></tr>`;
                         }
                     } else if (isTreasurySpecificNonCash && !showVfRow) {
                         const matchedPm = nonCashMethodsList.find(pm => pm.name === selectedTreasury || selectedTreasury.includes(pm.name));
                         if (matchedPm) {
                             const pmNet = (matchedPm.salesTotal + (matchedPm.receiptsTotal || 0) + (matchedPm.purchasesReturnTotal || 0)) - ((matchedPm.returnsTotal || 0) + (matchedPm.disbursementsTotal || 0) + (matchedPm.purchasesTotal || 0));
-                            nonCashRows += `<tr><td>${matchedPm.icon} صافي ${matchedPm.name}</td><td style="color:#2563eb; font-weight:bold;">${pmNet.toFixed(2)}</td></tr>`;
+                            nonCashRows += `<tr><td>${matchedPm.icon} صافي ${matchedPm.name}</td><td style="color:#2563eb; font-weight:bold;">${pmNet >= 0 ? '+' : ''}${pmNet.toFixed(2)}</td></tr>`;
                         }
                     }
                     return nonCashRows;
                 })()}
-                <tr><td>🔄 مرتجع مبيعات نقدي</td><td style="color:var(--box-red); font-weight:bold;">${salesReturn.cash.toFixed(2)}</td></tr>
-                ${salesReturn.nonCash > 0 ? `<tr><td>💳 مرتجع مبيعات بنكي / فيزا</td><td style="color:#7c3aed; font-weight:bold;">${salesReturn.nonCash.toFixed(2)}</td></tr>` : ''}
-                <tr><td>🧺 مشتريات نقدية</td><td style="color:var(--box-red); font-weight:bold;">${purchases.cash.toFixed(2)}</td></tr>
-                ${purchases.nonCash > 0 ? `<tr><td>🏦 مشتريات سداد بنكي / فيزا</td><td style="color:#7c3aed; font-weight:bold;">${purchases.nonCash.toFixed(2)}</td></tr>` : ''}
-                <tr><td>🔙 مرتجع مشتريات نقدي</td><td style="color:var(--main-green); font-weight:bold;">${purchasesReturn.cash.toFixed(2)}</td></tr>
-                ${purchasesReturn.nonCash > 0 ? `<tr><td>💳 مرتجع مشتريات بنكي / فيزا</td><td style="color:#2563eb; font-weight:bold;">${purchasesReturn.nonCash.toFixed(2)}</td></tr>` : ''}
-                <tr><td>💰 قبض نقدي (إيرادات الدرج)</td><td style="color:var(--main-green); font-weight:bold;">${cashReceipts.toFixed(2)}</td></tr>
-                ${(receipts.nonCash && receipts.nonCash > 0) ? `<tr><td>💳 قبض بنكي / إلكتروني</td><td style="color:#2563eb; font-weight:bold;">${receipts.nonCash.toFixed(2)}</td></tr>` : ''}
-                <tr><td>💸 صرف نقدي (مصروفات الدرج)</td><td style="color:var(--box-red); font-weight:bold;">${cashDisbursements.toFixed(2)}</td></tr>
-                ${(disbursements.nonCash && disbursements.nonCash > 0) ? `<tr><td>🏦 صرف بنكي / إلكتروني</td><td style="color:#7c3aed; font-weight:bold;">${disbursements.nonCash.toFixed(2)}</td></tr>` : ''}
+                <tr><td>🔄 مرتجع مبيعات نقدي (خارج من الدرج)</td><td style="color:var(--box-red); font-weight:bold;">-${salesReturn.cash.toFixed(2)}</td></tr>
+                ${salesReturn.nonCash > 0 ? `<tr><td>💳 مرتجع مبيعات بنكي / فيزا</td><td style="color:#7c3aed; font-weight:bold;">-${salesReturn.nonCash.toFixed(2)}</td></tr>` : ''}
+                <tr><td>🧺 مشتريات نقدية (مدفوعة من الدرج)</td><td style="color:var(--box-red); font-weight:bold;">-${purchases.cash.toFixed(2)}</td></tr>
+                ${purchases.nonCash > 0 ? `<tr><td>🏦 مشتريات سداد بنكي / فيزا</td><td style="color:#7c3aed; font-weight:bold;">-${purchases.nonCash.toFixed(2)}</td></tr>` : ''}
+                <tr><td>🔙 مرتجع مشتريات نقدي (داخل للدرج)</td><td style="color:var(--main-green); font-weight:bold;">+${purchasesReturn.cash.toFixed(2)}</td></tr>
+                ${purchasesReturn.nonCash > 0 ? `<tr><td>💳 مرتجع مشتريات بنكي / فيزا</td><td style="color:#2563eb; font-weight:bold;">+${purchasesReturn.nonCash.toFixed(2)}</td></tr>` : ''}
+                <tr><td>💰 قبض نقدي (إيرادات الدرج)</td><td style="color:var(--main-green); font-weight:bold;">+${cashReceipts.toFixed(2)}</td></tr>
+                ${(receipts.nonCash && receipts.nonCash > 0) ? `<tr><td>💳 قبض بنكي / إلكتروني</td><td style="color:#2563eb; font-weight:bold;">+${receipts.nonCash.toFixed(2)}</td></tr>` : ''}
+                <tr><td>💸 صرف نقدي (مصروفات الدرج)</td><td style="color:var(--box-red); font-weight:bold;">-${cashDisbursements.toFixed(2)}</td></tr>
+                ${(disbursements.nonCash && disbursements.nonCash > 0) ? `<tr><td>🏦 صرف بنكي / إلكتروني</td><td style="color:#7c3aed; font-weight:bold;">-${disbursements.nonCash.toFixed(2)}</td></tr>` : ''}
                 <tr style="background: rgba(142, 68, 173, 0.05);"><td>⚖️ تسوية المخزن (غير مؤثرة على الكاش)</td><td style="color:${adjustments.total >= 0 ? 'var(--main-green)' : 'var(--box-red)'}; font-weight:bold;">${adjustments.total.toFixed(2)}</td></tr>
                 <tr style="background: rgba(94, 51, 112, 0.1);"><td>🚚 تحويل مخزني (غير مؤثر على الكاش)</td><td style="color:#5e3370; font-weight:bold;">${transfers.total.toFixed(2)}</td></tr>
                 ${(!isTreasurySpecificNonCash && (sales.nonCash > 0 || (receipts.nonCash && receipts.nonCash > 0) || purchases.nonCash > 0 || salesReturn.nonCash > 0)) ? `
@@ -1093,32 +1151,32 @@
                     <td style="color:#1d4ed8; font-weight:900;">${totalNonCashNet.toFixed(2)}</td>
                 </tr>` : ''}
                 ${!hideDrawerBalance ? `
-                <tr style="font-weight:900; background:#f8fafc; border-top:2px dashed #cbd5e1;">
+                <tr style="background:rgba(16, 185, 129, 0.12); font-weight:900; border-top:2px solid var(--main-green);">
                     <td style="text-align:right; padding: 10px 14px;">
                         <span style="display:inline-flex; align-items:center; gap:6px;">
-                            <span>⏺️ رصيد سابق (افتتاحي ${isTreasurySpecificNonCash ? 'الخزينة' : 'نقدية'})</span>
-                            <button type="button" class="daily-help-btn" onclick="showDailyTermHelp('previousBalance', event)" title="انقر لمعرفة شرح الرصيد السابق الافتتاحي">❓</button>
-                        </span>
-                    </td>
-                    <td style="color:#0f172a; font-weight:900; font-size:1.05rem;">${previousBalance.toFixed(2)}</td>
-                </tr>
-                <tr style="background:rgba(211, 211, 211, 0.25); font-weight:900;">
-                    <td style="text-align:right; padding: 10px 14px;">
-                        <span style="display:inline-flex; align-items:center; gap:6px;">
-                            <span>🔄 صافي الحركة النقدية ${isTreasurySpecificNonCash ? 'للخزينة' : 'بالدرج'}</span>
+                            <span>🔄 صافي نقدية حركة اليوم ${isTreasurySpecificNonCash ? 'للخزينة' : 'بالدرج'}</span>
                             <button type="button" class="daily-help-btn" onclick="showDailyTermHelp('netCashMovement', event)" title="انقر لمعرفة شرح صافي الحركة النقدية">❓</button>
                         </span>
                     </td>
-                    <td style="color:${movementColor}; font-size:1.15rem; font-weight:900;">${netCashMovement.toFixed(2)}</td>
+                    <td style="color:${movementColor}; font-size:1.25rem; font-weight:900;">${netCashMovement.toFixed(2)}</td>
                 </tr>
-                <tr style="background:var(--main-blue); color:white; font-weight:bold; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-                    <td style="text-align:right; padding: 10px 14px;">
+                <tr style="font-weight:800; background:#f8fafc; border-top:1px dashed #cbd5e1; color:#64748b; font-size:0.84rem;">
+                    <td style="text-align:right; padding: 7px 14px;">
                         <span style="display:inline-flex; align-items:center; gap:6px;">
-                            <span style="color:white;">💰 الرصيد النهائي ${isTreasurySpecificNonCash ? `(${selectedTreasury})` : 'بالدرج'}</span>
+                            <span>⏺️ رصيد سابق تراكمي (تاريخي غير مصفى)</span>
+                            <button type="button" class="daily-help-btn" onclick="showDailyTermHelp('previousBalance', event)" title="انقر لمعرفة شرح الرصيد السابق الافتتاحي">❓</button>
+                        </span>
+                    </td>
+                    <td style="color:#64748b; font-weight:800; font-size:0.92rem;">${previousBalance.toFixed(2)}</td>
+                </tr>
+                <tr style="background:#334155; color:white; font-weight:bold; font-size:0.86rem;">
+                    <td style="text-align:right; padding: 7px 14px;">
+                        <span style="display:inline-flex; align-items:center; gap:6px;">
+                            <span style="color:white;">💰 الإجمالي الدفتري التراكمي (سابق + اليوم)</span>
                             <button type="button" class="daily-help-btn daily-help-btn-white" onclick="showDailyTermHelp('finalCashBalance', event)" title="انقر لمعرفة شرح الرصيد النهائي بالدرج">❓</button>
                         </span>
                     </td>
-                    <td style="color:white; font-size:1.35rem; font-weight:900; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">${finalCashBalance.toFixed(2)}</td>
+                    <td style="color:white; font-size:1.1rem; font-weight:900;">${finalCashBalance.toFixed(2)}</td>
                 </tr>` : ''}
             `;
 
@@ -1219,6 +1277,7 @@
                 vodafoneCashReturns: vfEntry.returnsTotal,
                 vodafoneCashCount: totalVfOps,
                 vodafoneCashEntry: vfEntry,
+                vodafoneSales: vodafoneSales,
                 paymentMethodsSummary: paymentMethodsSummary,
                 allOpsCount: allOpsCount,
                 allOpsTotal: allOpsTotal,
@@ -1226,6 +1285,11 @@
                 allOpsNonCash: allOpsNonCash,
                 allOpsCredit: allOpsCredit
             };
+
+            // 🔒 تحديث لوحة جرد وتقفيل الدرج والخزينة واحتساب العجز والزيادة
+            if (typeof updateDrawerAuditPanelUI === 'function') {
+                updateDrawerAuditPanelUI(previousBalance, netCashMovement, finalCashBalance, selectedUser);
+            }
 
             showToast(canViewProfits ? "✅ تم تحديث وتفصيل تقارير الحركة والأرباح بنجاح" : "✅ تم تحديث وتفصيل تقرير الحركة اليومية بنجاح");
         }
@@ -1378,6 +1442,9 @@
             const net = (config.netTotal !== undefined) ? config.netTotal : ((cSales + cReceipts + cPurRet) - (cSalesRet + cPurchases + cDisbursements));
             const visa = config.visaSales || 0;
 
+            const prevBal = (config.previousBalance !== undefined) ? config.previousBalance : (window.dailyReportData?.previousBalance || 0);
+            const finalBal = (config.finalCashBalance !== undefined) ? config.finalCashBalance : (prevBal + net);
+
             let existingModal = document.getElementById('dailyTotalBreakdownModal');
             if (existingModal) existingModal.remove();
 
@@ -1388,7 +1455,7 @@
             modal.innerHTML = `
                 <div style="background: var(--surface-color, #fff); color: var(--text-color, #0f172a); border-radius: 16px; padding: 25px; width: 90%; max-width: 440px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); position: relative; animation: slideUp 0.3s ease; direction: rtl;">
                     <h3 style="margin-top: 0; color: var(--main-purple); border-bottom: 2px solid var(--border-color, #f1f5f9); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-                        <span>📋 تفاصيل احتساب صافي اليومية</span>
+                        <span>📋 تفاصيل احتساب صافي اليومية والدرج</span>
                         <button onclick="copyDailyTotalFromModal('${net}')" title="نسخ الصافي" style="background: none; border: none; font-size: 1.2rem; cursor: pointer;">📋</button>
                     </h3>
 
@@ -1430,18 +1497,28 @@
                         <span style="color: var(--box-red); font-weight: bold;">-${cDisbursements.toLocaleString('en-US', {minimumFractionDigits:2})} ج.م</span>
                     </div>
 
-                    <div style="display: flex; justify-content: space-between; font-size: 1.25rem; font-weight: bold; align-items: center; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: bold; align-items: center; margin-bottom: 10px;">
                         <span>الصافي الفعلي لليومية:</span>
                         <span style="color: ${net >= 0 ? 'var(--main-green)' : 'var(--box-red)'}; background: ${net >= 0 ? 'rgba(46, 204, 113, 0.12)' : 'rgba(231, 76, 60, 0.12)'}; padding: 6px 14px; border-radius: 8px;">${net.toLocaleString('en-US', {minimumFractionDigits:2})} ج.م</span>
                     </div>
 
+                    <div style="display: flex; justify-content: space-between; font-size: 1.02rem; padding: 8px 0; border-top: 1px dashed var(--border-color, #e2e8f0);">
+                        <span>⏺️ رصيد افتتاحي سابق بالدرج:</span>
+                        <span style="font-weight: bold; color: #334155;">${prevBal.toLocaleString('en-US', {minimumFractionDigits:2})} ج.م</span>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; font-size: 1.22rem; font-weight: 900; background: linear-gradient(135deg, #1e3a8a, #2563eb); color: white; padding: 10px 14px; border-radius: 10px; margin-top: 6px; box-shadow: 0 4px 12px rgba(37,99,235,0.25);">
+                        <span>💰 الرصيد المطلوب بالدرج:</span>
+                        <span>${finalBal.toLocaleString('en-US', {minimumFractionDigits:2})} ج.م</span>
+                    </div>
+
                     ${visa > 0 ? `
-                    <div style="background: rgba(37, 99, 235, 0.08); border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 0.92rem; color: #1d4ed8; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="background: rgba(37, 99, 235, 0.08); border-radius: 8px; padding: 8px 12px; margin-top: 10px; font-size: 0.92rem; color: #1d4ed8; display: flex; justify-content: space-between; align-items: center;">
                         <span>💳 مبيعات شبكة وفيزا (خارج الدرج):</span>
                         <b>${visa.toLocaleString('en-US', {minimumFractionDigits:2})} ج.م</b>
                     </div>` : ''}
 
-                    <button onclick="this.closest('#dailyTotalBreakdownModal').remove()" style="width: 100%; margin-top: 20px; background: var(--main-purple); color: white; border: none; padding: 12px; border-radius: 10px; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">إغلاق</button>
+                    <button onclick="this.closest('#dailyTotalBreakdownModal').remove()" style="width: 100%; margin-top: 18px; background: var(--main-purple); color: white; border: none; padding: 12px; border-radius: 10px; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">إغلاق</button>
                 </div>
             `;
 
@@ -1522,6 +1599,1258 @@
                 }).catch(() => {
                     if (typeof showToast === 'function') showToast("📋 " + text, "info");
                 });
+            }
+        };
+
+        // ================= 🔒 لوحة تقفيل وجرد الدرج والخزينة واحتساب العجز والزيادة =================
+
+        window.currentDrawerClosingState = {
+            previousBalance: 0,
+            netCashMovement: 0,
+            finalCashBalance: 0,
+            includePrevBalance: false, // 🌟 الافتراضي حركة اليوم بيومه فقط بدون تراكمات تاريخية
+            expectedCash: 0,
+            actualCash: null,
+            difference: 0,
+            status: 'pending',
+            selectedUser: 'all',
+            notes: '',
+            denominations: null
+        };
+
+        window.updateDrawerAuditPanelUI = function(previousBalance, netCashMovement, finalCashBalance, selectedUser) {
+            window.currentDrawerClosingState.previousBalance = parseFloat(previousBalance) || 0;
+            window.currentDrawerClosingState.netCashMovement = parseFloat(netCashMovement) || 0;
+            window.currentDrawerClosingState.finalCashBalance = parseFloat(finalCashBalance) || 0;
+            window.currentDrawerClosingState.selectedUser = selectedUser || 'all';
+
+            // 🌟 احتساب المطلوب بالدرج: حركة اليوم بيومه فقط (المفروض يكون معاك من حركة اليوم)
+            const expected = window.currentDrawerClosingState.includePrevBalance 
+                ? window.currentDrawerClosingState.finalCashBalance 
+                : window.currentDrawerClosingState.netCashMovement;
+            window.currentDrawerClosingState.expectedCash = expected;
+
+            const shiftLabel = document.getElementById('drawerAuditShiftLabel');
+            if (shiftLabel) {
+                if (selectedUser && selectedUser !== 'all') {
+                    shiftLabel.innerHTML = `👤 وردية: ${selectedUser}`;
+                    shiftLabel.style.background = '#fef3c7';
+                    shiftLabel.style.color = '#b45309';
+                    shiftLabel.style.borderColor = '#fde68a';
+                } else {
+                    shiftLabel.innerHTML = `👥 كافة المستخدمين (شامل)`;
+                    shiftLabel.style.background = '#eff6ff';
+                    shiftLabel.style.color = '#2563eb';
+                    shiftLabel.style.borderColor = '#bfdbfe';
+                }
+            }
+
+            const prevEl = document.getElementById('auditCardPrevBalance');
+            if (prevEl) {
+                prevEl.innerText = (window.currentDrawerClosingState.previousBalance).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
+
+            const netEl = document.getElementById('auditCardNetMovement');
+            if (netEl) {
+                const net = window.currentDrawerClosingState.netCashMovement;
+                netEl.innerText = (net >= 0 ? '+' : '') + net.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                netEl.style.color = net >= 0 ? '#059669' : '#dc2626';
+            }
+
+            const expEl = document.getElementById('auditCardExpectedCash');
+            if (expEl) {
+                expEl.innerText = expected.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
+
+            const vfEl = document.getElementById('auditCardVodafoneCash');
+            if (vfEl) {
+                const vfNet = window.dailyReportData?.vodafoneCashTotal !== undefined
+                    ? window.dailyReportData.vodafoneCashTotal
+                    : (window.dailyReportData?.vodafoneSales ? (window.dailyReportData.vodafoneSales.cash + window.dailyReportData.vodafoneSales.nonCash) : 0);
+                vfEl.innerText = Number(vfNet || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
+
+            const visaEl = document.getElementById('auditCardVisaSales');
+            if (visaEl) {
+                let visaNet = 0;
+                if (window.dailyReportData?.paymentMethodsSummary) {
+                    for (const [mName, mData] of Object.entries(window.dailyReportData.paymentMethodsSummary)) {
+                        if (String(mName).includes('فيزا') || String(mName).includes('شبك')) {
+                            visaNet += (mData.net || 0);
+                        }
+                    }
+                }
+                visaEl.innerText = Number(visaNet || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
+
+            const toggleBtn = document.getElementById('btnTogglePrevBalance');
+            if (toggleBtn) {
+                toggleBtn.innerText = window.currentDrawerClosingState.includePrevBalance ? '🏛️ شامل التراكمي السابق' : '🔄 اليوم بيومه';
+                toggleBtn.title = window.currentDrawerClosingState.includePrevBalance ? 'معروض شامل الرصيد التاريخي السابق - انقر للتحويل إلى حركة اليوم بيومه فقط' : 'معروض صافي حركة اليوم بيومه فقط - انقر لاحتساب الرصيد التاريخي السابق';
+            }
+
+            const inputEl = document.getElementById('drawerActualCashInput');
+            if (inputEl) {
+                if (inputEl.value !== '') {
+                    window.handleDrawerActualCashInput(inputEl.value);
+                } else {
+                    // إذا كانت الخانة فارغة، نفحص إذا كان هناك محضر تقفيل لليوم لعرض العد المحفوظ فوراً
+                    try {
+                        const rawClosures = localStorage.getItem('bayan_drawer_closures');
+                        if (rawClosures) {
+                            const cls = JSON.parse(rawClosures);
+                            const todayISO = new Date().toLocaleDateString('en-CA');
+                            const todayStr = new Date().toLocaleDateString('ar-EG');
+                            const foundToday = cls.find(c => (c.dateISO === todayISO || c.dateStr === todayStr) && (c.userShift === window.currentDrawerClosingState.selectedUser || window.currentDrawerClosingState.selectedUser === 'all'));
+                            if (foundToday && foundToday.actualCash !== undefined && foundToday.actualCash !== null) {
+                                inputEl.value = Number(foundToday.actualCash).toFixed(2);
+                                window.handleDrawerActualCashInput(inputEl.value);
+                            }
+                        }
+                    } catch (e) {}
+                }
+            }
+        };
+
+        window.toggleIncludePrevBalanceInAudit = function() {
+            window.currentDrawerClosingState.includePrevBalance = !window.currentDrawerClosingState.includePrevBalance;
+            window.updateDrawerAuditPanelUI(
+                window.currentDrawerClosingState.previousBalance,
+                window.currentDrawerClosingState.netCashMovement,
+                window.currentDrawerClosingState.finalCashBalance,
+                window.currentDrawerClosingState.selectedUser
+            );
+            if (typeof showToast === 'function') {
+                showToast(window.currentDrawerClosingState.includePrevBalance 
+                    ? "🏛️ تم احتساب الرصيد التراكمي السابق مع نقدية اليوم" 
+                    : "🔄 تم ضبط المطلوب على حركة اليوم بيومه فقط", "info");
+            }
+        };
+
+        window.handleDrawerActualCashInput = function(val) {
+            const card = document.getElementById('drawerAuditResultCard');
+            const icon = document.getElementById('drawerAuditResultIcon');
+            const title = document.getElementById('drawerAuditResultTitle');
+            const sub = document.getElementById('drawerAuditResultSub');
+            const diffEl = document.getElementById('drawerAuditDiffAmount');
+            const labelEl = document.getElementById('drawerAuditDiffLabel');
+
+            if (!card || !icon || !title || !diffEl) return;
+
+            if (val === '' || val === null || val === undefined || isNaN(parseFloat(val))) {
+                window.currentDrawerClosingState.actualCash = null;
+                window.currentDrawerClosingState.difference = 0;
+                window.currentDrawerClosingState.status = 'pending';
+
+                card.style.background = '#f1f5f9';
+                card.style.borderColor = '#cbd5e1';
+                icon.innerText = '⏳';
+                title.innerText = 'في انتظار عد النقدية بالدرج...';
+                title.style.color = '#334155';
+                if (sub) sub.innerText = 'اكتب المبلغ الفعلي الموجود في الدرج داخل المربع الأصفر بالأعلى لمعرفة العجز أو الزيادة فوراً.';
+                diffEl.innerText = '0.00 ج.م';
+                diffEl.style.color = '#64748b';
+                if (labelEl) labelEl.innerText = 'الفارق (الفعلي - المطلوب)';
+                return;
+            }
+
+            const actual = parseFloat(val) || 0;
+            const expected = window.currentDrawerClosingState.expectedCash !== undefined ? window.currentDrawerClosingState.expectedCash : window.currentDrawerClosingState.netCashMovement;
+            const diff = actual - expected;
+            const absDiff = Math.abs(diff);
+
+            window.currentDrawerClosingState.actualCash = actual;
+            window.currentDrawerClosingState.difference = diff;
+
+            if (absDiff < 0.01) {
+                window.currentDrawerClosingState.status = 'balanced';
+                card.style.background = '#ecfdf5';
+                card.style.borderColor = '#10b981';
+                icon.innerText = '✅';
+                title.innerText = 'الدرج مطابق تماماً بالقرش!';
+                title.style.color = '#065f46';
+                if (sub) sub.innerText = 'النقدية الفعلية بالدرج تتطابق 100% مع صافي حركة اليوم المطلوب. لا يوجد أي عجز أو زيادة.';
+                diffEl.innerText = '0.00 ج.م';
+                diffEl.style.color = '#059669';
+                if (labelEl) {
+                    labelEl.innerText = '✅ مطابق بدون عجز أو زيادة';
+                    labelEl.style.color = '#059669';
+                }
+            } else if (diff < 0) {
+                window.currentDrawerClosingState.status = 'deficit';
+                card.style.background = '#fef2f2';
+                card.style.borderColor = '#ef4444';
+                icon.innerText = '⚠️';
+                title.innerText = `فارق بالدرج (مصروفات/شنط لم تُسجل): -${absDiff.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
+                title.style.color = '#991b1b';
+                if (sub) sub.innerText = 'المبلغ الفعلي أقل من صافي مبيعات اليوم (قد يكون هناك مصاريف نثرية، شنط، شاي، بريل، أو صدقات خرجت من الدرج ولم تُسجل بالسندات).';
+                diffEl.innerText = `-${absDiff.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
+                diffEl.style.color = '#dc2626';
+                if (labelEl) {
+                    labelEl.innerText = '🔴 فارق عجز / مصاريف غير مسجلة';
+                    labelEl.style.color = '#dc2626';
+                }
+            } else {
+                window.currentDrawerClosingState.status = 'surplus';
+                card.style.background = '#eff6ff';
+                card.style.borderColor = '#3b82f6';
+                icon.innerText = '📈';
+                title.innerText = `توجد زيادة نقدية في الدرج بمقدار: +${absDiff.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
+                title.style.color = '#1e40af';
+                if (sub) sub.innerText = 'المبلغ الفعلي بالدرج أكبر من صافي مبيعات اليوم (قد تكون فكة بداية أو إيراد لم يُسجل).';
+                diffEl.innerText = `+${absDiff.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
+                diffEl.style.color = '#2563eb';
+                if (labelEl) {
+                    labelEl.innerText = '🟢 زيادة نقدية بالدرج';
+                    labelEl.style.color = '#2563eb';
+                }
+            }
+        };
+
+        // --- حاسبة فئات النقدية المصرية (200، 100، 50...) ---
+        window.openDrawerDenominationsCalculator = function(customDenoms, targetInputId) {
+            let existing = document.getElementById('drawerDenominationsModal');
+            if (existing) existing.remove();
+
+            window.currentDrawerClosingState.targetDenomInputId = targetInputId || null;
+
+            const denoms = [
+                { val: 200, label: 'فئة 200 جنيه', color: '#1e3a8a' },
+                { val: 100, label: 'فئة 100 جنيه', color: '#0369a1' },
+                { val: 50,  label: 'فئة 50 جنيه',  color: '#0f766e' },
+                { val: 20,  label: 'فئة 20 جنيه (جديدة/قديمة)', color: '#b45309' },
+                { val: 10,  label: 'فئة 10 جنيه (بلاستيكية/ورقية)', color: '#c2410c' },
+                { val: 5,   label: 'فئة 5 جنيه',   color: '#4338ca' },
+                { val: 1,   label: 'فئة 1 جنيه (عملات معدنية/ورقية)', color: '#475569' },
+                { val: 0.5, label: 'فئة 0.50 نصف جنيه', color: '#64748b' }
+            ];
+
+            const currentDenoms = customDenoms || window.currentDrawerClosingState.denominations || {};
+
+            const rowsHtml = denoms.map(d => {
+                const count = currentDenoms[d.val] || '';
+                const subtotal = (parseFloat(count) || 0) * d.val;
+                return `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #f8fafc; border-radius: 10px; margin-bottom: 8px; border: 1px solid #e2e8f0;">
+                        <div style="flex: 1.5; font-weight: 800; font-size: 0.92rem; color: ${d.color}; display: flex; align-items: center; gap: 6px;">
+                            <span>💵</span> ${d.label}
+                        </div>
+                        <div style="flex: 1; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                            <span style="font-size: 0.8rem; color: #64748b; font-weight: 700;">العدد:</span>
+                            <input type="number" min="0" step="1" class="denom-input" data-denom="${d.val}" value="${count}"
+                                oninput="calculateDenominationsTotal()" placeholder="0"
+                                style="width: 75px; height: 36px; text-align: center; font-size: 1rem; font-weight: 900; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none;"
+                                onfocus="this.select()">
+                        </div>
+                        <div style="flex: 1; text-align: left; font-weight: 900; font-size: 0.95rem; color: #0f172a;">
+                            <span id="denomSubtotal_${d.val.toString().replace('.', '_')}">${subtotal.toFixed(2)}</span> ج.م
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            const modal = document.createElement('div');
+            modal.id = 'drawerDenominationsModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; direction: rtl; font-family: inherit;';
+
+            modal.innerHTML = `
+                <div style="background: #ffffff; color: #0f172a; width: 100%; max-width: 520px; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; border: 1.5px solid #cbd5e1; display: flex; flex-direction: column; max-height: 90vh;">
+                    <div style="background: linear-gradient(135deg, #d97706, #b45309); padding: 16px 20px; color: white; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.5rem;">🧮</span>
+                            <div>
+                                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 900;">حاسبة فئات النقدية بالدرج</h3>
+                                <p style="margin: 2px 0 0 0; font-size: 0.78rem; opacity: 0.9;">اكتب عدد كل فئة ورقية أو معدنية ليتم احتساب الإجمالي تلقائياً</p>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('drawerDenominationsModal').remove()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer;">✕</button>
+                    </div>
+
+                    <div style="padding: 16px; overflow-y: auto; flex: 1;">
+                        ${rowsHtml}
+                    </div>
+
+                    <div style="padding: 16px 20px; background: #f8fafc; border-top: 1.5px solid #e2e8f0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                            <span style="font-weight: 900; font-size: 1.05rem; color: #1e293b;">إجمالي النقدية المحصية:</span>
+                            <span id="denomGrandTotal" style="font-size: 1.45rem; font-weight: 900; color: #b45309; background: #fef3c7; padding: 4px 14px; border-radius: 10px; border: 1px solid #fde68a;">0.00 ج.م</span>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button type="button" onclick="applyDenominationsToDrawerInput()"
+                                style="flex: 2; height: 44px; background: linear-gradient(135deg, #059669, #10b981); color: white; border: none; border-radius: 12px; font-weight: 900; font-size: 0.98rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 12px rgba(16,185,129,0.3);">
+                                <span>✅</span> اعتماد ونقل إلى خانة الدرج
+                            </button>
+                            <button type="button" onclick="resetDenominationsCalculator()"
+                                style="flex: 1; height: 44px; background: #ffffff; color: #dc2626; border: 1.5px solid #fca5a5; border-radius: 12px; font-weight: 800; font-size: 0.88rem; cursor: pointer;">
+                                إعادة تعيين
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+            window.calculateDenominationsTotal();
+        };
+
+        window.calculateDenominationsTotal = function() {
+            const inputs = document.querySelectorAll('.denom-input');
+            let total = 0;
+            const denomsRecord = {};
+
+            inputs.forEach(inp => {
+                const denomVal = parseFloat(inp.getAttribute('data-denom')) || 0;
+                const count = parseFloat(inp.value) || 0;
+                const sub = count * denomVal;
+                total += sub;
+                denomsRecord[denomVal] = count;
+
+                const subEl = document.getElementById(`denomSubtotal_${denomVal.toString().replace('.', '_')}`);
+                if (subEl) {
+                    subEl.innerText = sub.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                }
+            });
+
+            const grandEl = document.getElementById('denomGrandTotal');
+            if (grandEl) {
+                grandEl.innerText = total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ج.م';
+            }
+
+            window.currentDrawerClosingState.tempDenomTotal = total;
+            window.currentDrawerClosingState.tempDenomsRecord = denomsRecord;
+        };
+
+        window.resetDenominationsCalculator = function() {
+            document.querySelectorAll('.denom-input').forEach(inp => inp.value = '');
+            window.calculateDenominationsTotal();
+        };
+
+        window.applyDenominationsToDrawerInput = function() {
+            const total = window.currentDrawerClosingState.tempDenomTotal || 0;
+            const denomsRec = window.currentDrawerClosingState.tempDenomsRecord || {};
+            window.currentDrawerClosingState.denominations = denomsRec;
+
+            const targetId = window.currentDrawerClosingState.targetDenomInputId;
+            if (targetId && document.getElementById(targetId)) {
+                const inp = document.getElementById(targetId);
+                inp.value = total.toFixed(2);
+                if (targetId === 'editActualCashAmount') {
+                    window.currentDrawerClosingState.tempEditDenominations = denomsRec;
+                    if (typeof window.recalcEditDrawerDiff === 'function') {
+                        window.recalcEditDrawerDiff();
+                    }
+                } else if (targetId === 'drawerActualCashInput') {
+                    window.handleDrawerActualCashInput(inp.value);
+                }
+            } else {
+                const editInp = document.getElementById('editActualCashAmount');
+                if (editInp) {
+                    editInp.value = total.toFixed(2);
+                    window.currentDrawerClosingState.tempEditDenominations = denomsRec;
+                    if (typeof window.recalcEditDrawerDiff === 'function') {
+                        window.recalcEditDrawerDiff();
+                    }
+                }
+                const input = document.getElementById('drawerActualCashInput');
+                if (input) {
+                    input.value = total.toFixed(2);
+                    window.handleDrawerActualCashInput(input.value);
+                }
+            }
+
+            const modal = document.getElementById('drawerDenominationsModal');
+            if (modal) modal.remove();
+
+            if (typeof showToast === 'function') {
+                showToast(`✅ تم نقل وتطبيق إجمالي الفئات: ${total.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م`, 'success');
+            }
+        };
+
+        // --- نافذة الملاحظات على التقفيل ---
+        window.openDrawerClosingNotesModal = function() {
+            let existing = document.getElementById('drawerClosingNotesModal');
+            if (existing) existing.remove();
+
+            const currentNotes = window.currentDrawerClosingState.notes || '';
+
+            const modal = document.createElement('div');
+            modal.id = 'drawerClosingNotesModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; direction: rtl; font-family: inherit;';
+
+            modal.innerHTML = `
+                <div style="background: #ffffff; color: #0f172a; width: 100%; max-width: 480px; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; border: 1.5px solid #cbd5e1;">
+                    <div style="background: linear-gradient(135deg, #1e293b, #334155); padding: 16px 20px; color: white; display: flex; align-items: center; justify-content: space-between;">
+                        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 900; display: flex; align-items: center; gap: 8px;">
+                            <span>📝</span> ملاحظات تقفيل الدرج والوردية
+                        </h3>
+                        <button onclick="document.getElementById('drawerClosingNotesModal').remove()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer;">✕</button>
+                    </div>
+                    <div style="padding: 20px;">
+                        <p style="margin: 0 0 10px 0; font-size: 0.88rem; color: #64748b; font-weight: 700;">
+                            اكتب أي تفاصيل هامة تخص العجز أو الزيادة، أو تسليم النقدية للإدارة، أو توجيهات للوردية التالية:
+                        </p>
+                        <textarea id="drawerClosingNotesText" rows="4" placeholder="اكتب الملاحظات هنا..."
+                            style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 12px; font-family: inherit; font-size: 0.95rem; box-sizing: border-box; outline: none;">${currentNotes}</textarea>
+                        
+                        <div style="margin-top: 16px; display: flex; gap: 10px;">
+                            <button type="button" onclick="saveDrawerClosingNotes()"
+                                style="flex: 1; height: 42px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; border: none; border-radius: 10px; font-weight: 900; font-size: 0.95rem; cursor: pointer;">
+                                حفظ الملاحظات ✅
+                            </button>
+                            <button type="button" onclick="document.getElementById('drawerClosingNotesModal').remove()"
+                                style="height: 42px; padding: 0 16px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 10px; font-weight: 800; font-size: 0.9rem; cursor: pointer;">
+                                إلغاء
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+        };
+
+        window.saveDrawerClosingNotes = function() {
+            const ta = document.getElementById('drawerClosingNotesText');
+            if (ta) {
+                window.currentDrawerClosingState.notes = ta.value.trim();
+            }
+            const modal = document.getElementById('drawerClosingNotesModal');
+            if (modal) modal.remove();
+            if (typeof showToast === 'function') {
+                showToast("✅ تم حفظ ملاحظات التقفيل بنجاح", "info");
+            }
+        };
+
+        // --- اعتماد وتقفيل الوردية والدرج ---
+        window.commitDrawerClosing = async function() {
+            const actualInput = document.getElementById('drawerActualCashInput');
+            if (!actualInput || actualInput.value.trim() === '') {
+                if (typeof showToast === 'function') {
+                    showToast("⚠️ يرجى أولاً عد النقدية وكتابة المبلغ الفعلي الموجود بالدرج في المربع الأصفر!", "warning");
+                } else {
+                    alert("يرجى أولاً عد النقدية وكتابة المبلغ الفعلي الموجود بالدرج!");
+                }
+                if (actualInput) actualInput.focus();
+                return;
+            }
+
+            const state = window.currentDrawerClosingState;
+            const expected = state.expectedCash !== undefined ? state.expectedCash : (state.netCashMovement || 0);
+            const actual = parseFloat(actualInput.value) || 0;
+            const diff = actual - expected;
+            const absDiff = Math.abs(diff);
+
+            let statusText = 'مطابق تماماً ✅';
+            let statusColor = '#059669';
+            if (absDiff >= 0.01) {
+                if (diff < 0) {
+                    statusText = `فارق/عجز نقدية (-${absDiff.toFixed(2)} ج.م) 🔴`;
+                    statusColor = '#dc2626';
+                } else {
+                    statusText = `زيادة نقدية (+${absDiff.toFixed(2)} ج.م) 🟢`;
+                    statusColor = '#2563eb';
+                }
+            }
+
+            const userShift = (state.selectedUser && state.selectedUser !== 'all') ? state.selectedUser : (currentUser ? currentUser.name : 'كافة المستخدمين');
+
+            let confirmMsg = `هل أنت متأكد من اعتماد وتقفيل الوردية والدرج بهذه البيانات؟\n\n`;
+            confirmMsg += `• الوردية/المستخدم: ${userShift}\n`;
+            confirmMsg += `• صافي حركة اليومية (المطلوب دفترياً): ${expected.toFixed(2)} ج.م\n`;
+            confirmMsg += `• النقدية الفعلية بالدرج (العد): ${actual.toFixed(2)} ج.م\n`;
+            confirmMsg += `• نتيجة الجرد: ${statusText}\n\n`;
+            if (state.notes) confirmMsg += `• الملاحظات: ${state.notes}\n\n`;
+            confirmMsg += `سيتم حفظ المحضر رسمياً وإتاحته للطباعة والمراجعة.`;
+
+            if (!confirm(confirmMsg)) return;
+
+            // فحص ما إذا كان هناك محضر تقفيل سابق مسجل لنفس اليوم والوردية
+            let closures = [];
+            try {
+                const raw = localStorage.getItem('bayan_drawer_closures');
+                if (raw) {
+                    try { closures = JSON.parse(raw); } catch (e) { closures = []; }
+                }
+            } catch (err) {
+                closures = [];
+            }
+
+            const todayISO = new Date().toLocaleDateString('en-CA');
+            const todayStr = new Date().toLocaleDateString('ar-EG');
+            const existingToday = closures.find(c => (c.dateISO === todayISO || c.dateStr === todayStr) && (c.userShift === userShift || userShift === 'كافة المستخدمين'));
+
+            if (existingToday) {
+                const confirmUpdate = confirm(`💡 تنبيه: يوجد محضر تقفيل مسجل بالفعل لهذا اليوم (${existingToday.id}).\n\n• العد السابق المسجل: ${(existingToday.actualCash || 0).toFixed(2)} ج.م\n• العد الفعلي الجديد الحالي: ${actual.toFixed(2)} ج.م\n\nهل ترغب في تحديث وتعديل المحضر المسجل بالفعل بالعد الجديد؟\n\n- اضغط "موافق" لتحديث وتعديل المحضر القائم مباشرة.\n- اضغط "إلغاء" لإصدار محضر تقفيل إضافي جديد.`);
+                if (confirmUpdate) {
+                    existingToday.actualCash = actual;
+                    existingToday.expectedCash = expected;
+                    existingToday.difference = diff;
+                    existingToday.status = absDiff < 0.01 ? 'balanced' : (diff < 0 ? 'deficit' : 'surplus');
+                    existingToday.notes = state.notes || existingToday.notes || '';
+                    if (state.denominations) existingToday.denominations = state.denominations;
+                    existingToday.isEdited = true;
+                    existingToday.editedAt = new Date().toISOString();
+                    existingToday.editedBy = currentUser ? currentUser.name : 'المدير';
+
+                    try {
+                        localStorage.setItem('bayan_drawer_closures', JSON.stringify(closures));
+                    } catch (e) {
+                        console.error("Error updating closure:", e);
+                    }
+
+                    if (typeof showToast === 'function') {
+                        showToast("🎉 تم تعديل وتحديث محضر تقفيل الوردية القائم بنجاح!", "success");
+                    }
+
+                    setTimeout(() => {
+                        if (confirm("هل ترغب في طباعة محضر تقفيل الوردية المحدث (Z-Report) الآن؟")) {
+                            window.printShiftCloseReport(existingToday);
+                        }
+                    }, 300);
+                    return;
+                }
+            }
+
+            const closureRecord = {
+                id: 'CLOSE_' + Date.now(),
+                timestamp: new Date().toISOString(),
+                dateStr: new Date().toLocaleDateString('ar-EG'),
+                timeStr: new Date().toLocaleTimeString('ar-EG'),
+                dateISO: new Date().toLocaleDateString('en-CA'),
+                closedBy: currentUser ? currentUser.name : 'المدير',
+                userShift: userShift,
+                dateFrom: document.getElementById('reportDateFrom')?.value || new Date().toLocaleDateString('en-CA'),
+                dateTo: document.getElementById('reportDateTo')?.value || new Date().toLocaleDateString('en-CA'),
+                previousBalance: state.previousBalance,
+                netCashMovement: state.netCashMovement,
+                expectedCash: expected,
+                actualCash: actual,
+                difference: diff,
+                status: absDiff < 0.01 ? 'balanced' : (diff < 0 ? 'deficit' : 'surplus'),
+                notes: state.notes || '',
+                denominations: state.denominations || null,
+                paymentMethodsSummary: window.dailyReportData?.paymentMethodsSummary || {}
+            };
+
+            // حفظ في السجل المحلي
+            try {
+                closures.unshift(closureRecord);
+                localStorage.setItem('bayan_drawer_closures', JSON.stringify(closures));
+            } catch (err) {
+                console.error("Error saving drawer closure record:", err);
+            }
+
+            if (typeof showToast === 'function') {
+                showToast("🎉 تم اعتماد وتقفيل الوردية والدرج وحفظ المحضر بنجاح!", "success");
+            }
+
+            // عرض سؤال طباعة المحضر
+            setTimeout(() => {
+                if (confirm("هل ترغب في طباعة محضر تقفيل الوردية والدرج (Z-Report) الآن؟")) {
+                    window.printShiftCloseReport(closureRecord);
+                }
+            }, 300);
+        };
+
+        // --- طباعة محضر تقفيل الوردية والدرج (Z-Report) ---
+        window.printShiftCloseReport = function(customRecord) {
+            const rec = customRecord || {
+                id: 'CLOSE_' + Date.now(),
+                dateStr: new Date().toLocaleDateString('ar-EG'),
+                timeStr: new Date().toLocaleTimeString('ar-EG'),
+                closedBy: currentUser ? currentUser.name : 'المدير',
+                userShift: (window.currentDrawerClosingState.selectedUser && window.currentDrawerClosingState.selectedUser !== 'all') ? window.currentDrawerClosingState.selectedUser : (currentUser ? currentUser.name : 'كافة المستخدمين'),
+                dateFrom: document.getElementById('reportDateFrom')?.value || new Date().toLocaleDateString('en-CA'),
+                dateTo: document.getElementById('reportDateTo')?.value || new Date().toLocaleDateString('en-CA'),
+                previousBalance: window.currentDrawerClosingState.previousBalance || 0,
+                netCashMovement: window.currentDrawerClosingState.netCashMovement || 0,
+                expectedCash: window.currentDrawerClosingState.finalCashBalance || 0,
+                actualCash: window.currentDrawerClosingState.actualCash !== null ? window.currentDrawerClosingState.actualCash : window.currentDrawerClosingState.finalCashBalance,
+                difference: window.currentDrawerClosingState.difference || 0,
+                status: window.currentDrawerClosingState.status || 'balanced',
+                notes: window.currentDrawerClosingState.notes || '',
+                denominations: window.currentDrawerClosingState.denominations || null,
+                paymentMethodsSummary: window.dailyReportData?.paymentMethodsSummary || {}
+            };
+
+            const shopName = (typeof getStore === 'function' ? getStore('bayan_business_name') : null) || document.getElementById('shopName')?.value || 'بيان POS للملابس والأحذية';
+            const shopPhone = document.getElementById('shopPhone1')?.value || '';
+
+            const absDiff = Math.abs(rec.difference || 0);
+            let statusBadge = '';
+            if (absDiff < 0.01) {
+                statusBadge = `<div style="background: #ecfdf5; border: 2px solid #10b981; color: #065f46; padding: 8px; border-radius: 8px; font-size: 15px; font-weight: 900; text-align: center; margin: 10px 0;">✅ الدرج مطابق تماماً (لا يوجد عجز أو زيادة)</div>`;
+            } else if (rec.difference < 0) {
+                statusBadge = `<div style="background: #fef2f2; border: 2px solid #ef4444; color: #991b1b; padding: 8px; border-radius: 8px; font-size: 15px; font-weight: 900; text-align: center; margin: 10px 0;">⚠️ عجز نقدي بالدرج: -${absDiff.toFixed(2)} ج.م</div>`;
+            } else {
+                statusBadge = `<div style="background: #eff6ff; border: 2px solid #3b82f6; color: #1e40af; padding: 8px; border-radius: 8px; font-size: 15px; font-weight: 900; text-align: center; margin: 10px 0;">📈 زيادة نقدية بالدرج: +${absDiff.toFixed(2)} ج.م</div>`;
+            }
+
+            // فئات النقدية إن وجدت
+            let denomsSection = '';
+            if (rec.denominations && Object.keys(rec.denominations).length > 0) {
+                const dRows = Object.entries(rec.denominations).filter(([val, cnt]) => parseFloat(cnt) > 0).map(([val, cnt]) => {
+                    const sub = parseFloat(val) * parseFloat(cnt);
+                    return `<tr><td style="padding: 3px; border: 1px solid #000; text-align: right;">فئة ${val} ج.م</td><td style="padding: 3px; border: 1px solid #000; text-align: center;">${cnt}</td><td style="padding: 3px; border: 1px solid #000; text-align: left;">${sub.toFixed(2)}</td></tr>`;
+                }).join('');
+
+                if (dRows) {
+                    denomsSection = `
+                        <div style="margin-top: 10px;">
+                            <div style="font-weight: 900; font-size: 12px; margin-bottom: 4px; border-bottom: 1px solid #000;">تفاصيل الفئات النقدية المحصية:</div>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                                <thead><tr style="border-bottom: 1px solid #000;"><th style="text-align: right;">الفئة</th><th style="text-align: center;">العدد</th><th style="text-align: left;">القيمة</th></tr></thead>
+                                <tbody>${dRows}</tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+            }
+
+            // ملخص الخزائن الإلكترونية إن وجدت
+            let elecWalletsSection = '';
+            const repData = window.dailyReportData;
+            if (repData && repData.paymentMethodsSummary) {
+                const wRows = Object.entries(repData.paymentMethodsSummary).filter(([k, v]) => !k.includes('نقد') && !k.includes('كاش')).map(([name, data]) => {
+                    const net = (data.salesTotal || 0) + (data.receiptsTotal || 0) - (data.disbursementsTotal || 0) - (data.purchasesTotal || 0);
+                    return `<tr><td style="padding: 3px; border: 1px solid #000; text-align: right;">${name}</td><td style="padding: 3px; border: 1px solid #000; text-align: left; font-weight: bold;">${net.toFixed(2)} ج.م</td></tr>`;
+                }).join('');
+
+                if (wRows) {
+                    elecWalletsSection = `
+                        <div style="margin-top: 10px;">
+                            <div style="font-weight: 900; font-size: 12px; margin-bottom: 4px; border-bottom: 1px solid #000;">صافي المحافظ والخزائن الإلكترونية:</div>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                                <tbody>${wRows}</tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+            }
+
+            const printHtml = `
+                <html dir="rtl" lang="ar">
+                <head>
+                    <title>محضر تقفيل وردية وجرد الدرج</title>
+                    <style>
+                        @page { margin: 0; }
+                        body { margin: 0 auto; padding: 6px; width: 80mm; font-family: 'Arial', sans-serif; direction: rtl; color: #000; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { padding: 4px 2px; }
+                        .line { border-bottom: 1px dashed #000; margin: 6px 0; }
+                        .double-line { border-bottom: 2px solid #000; margin: 8px 0; }
+                    </style>
+                </head>
+                <body>
+                    <div style="text-align: center;">
+                        <h2 style="margin: 0; font-size: 18px; font-weight: 900;">${shopName}</h2>
+                        ${shopPhone ? `<div style="font-size: 11px; margin-top: 2px;">هاتف: ${shopPhone}</div>` : ''}
+                        <div style="margin: 6px 0; background: #000; color: #fff; padding: 4px 0; font-size: 14px; font-weight: 900; border-radius: 4px;">
+                            محضر تقفيل وردية وجرد خزينة (Z-Report)
+                        </div>
+                        <div style="font-size: 11px; font-weight: bold;">
+                            رقم المحضر: ${rec.id || '---'}
+                        </div>
+                        ${rec.isEdited ? `
+                        <div style="display: inline-block; background: #fef3c7; color: #b45309; border: 1px dashed #d97706; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 900; margin-top: 3px;">
+                            ✏️ محضر مُعدل (آخر تحديث: ${rec.editedAt ? new Date(rec.editedAt).toLocaleTimeString('ar-EG') : ''})
+                        </div>` : ''}
+                    </div>
+
+                    <div class="line"></div>
+
+                    <div style="font-size: 12px; line-height: 1.6;">
+                        <div><b>التاريخ:</b> ${rec.dateStr} - ${rec.timeStr}</div>
+                        <div><b>فترة التقرير:</b> من ${rec.dateFrom} إلى ${rec.dateTo}</div>
+                        <div><b>المستخدم / الوردية:</b> ${rec.userShift}</div>
+                        <div><b>المسؤول المعتمد:</b> ${rec.closedBy}</div>
+                    </div>
+
+                    <div class="line"></div>
+
+                    <table style="font-size: 12px;">
+                        <tr>
+                            <td style="text-align: right;">⏺️ رصيد بداية الدرج (الافتتاحي):</td>
+                            <td style="text-align: left; font-weight: bold;">${(rec.previousBalance || 0).toFixed(2)}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: right;">🔄 صافي حركة النقدية اليومية:</td>
+                            <td style="text-align: left; font-weight: bold;">${(rec.netCashMovement >= 0 ? '+' : '')}${(rec.netCashMovement || 0).toFixed(2)}</td>
+                        </tr>
+                        <tr style="border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; font-size: 13px; font-weight: 900;">
+                            <td style="text-align: right; padding: 5px 0;">💰 الرصيد المطلوب بالدرج (دفترياً):</td>
+                            <td style="text-align: left; padding: 5px 0;">${(rec.expectedCash || 0).toFixed(2)} ج.م</td>
+                        </tr>
+                        <tr style="border-bottom: 1.5px solid #000; font-size: 13px; font-weight: 900; background: #f0f0f0;">
+                            <td style="text-align: right; padding: 5px 0;">💵 النقدية الفعلية بالدرج (العد):</td>
+                            <td style="text-align: left; padding: 5px 0;">${(rec.actualCash || 0).toFixed(2)} ج.م</td>
+                        </tr>
+                    </table>
+
+                    ${statusBadge}
+
+                    ${denomsSection}
+                    ${elecWalletsSection}
+
+                    ${rec.notes ? `
+                    <div style="margin-top: 8px; border: 1px dashed #000; padding: 5px; font-size: 11px;">
+                        <b>ملاحظات التقفيل:</b> ${rec.notes}
+                    </div>` : ''}
+
+                    <div class="double-line"></div>
+
+                    <div style="display: flex; justify-content: space-between; margin-top: 25px; font-size: 12px; font-weight: bold; text-align: center;">
+                        <div>
+                            توقيع الكاشير<br><br>
+                            .........................
+                        </div>
+                        <div>
+                            توقيع المدير المسؤول<br><br>
+                            .........................
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 20px; font-size: 10px; border-top: 1px solid #000; padding-top: 4px;">
+                        نظام بيان POS لإدارة الأنشطة والمبيعات
+                    </div>
+
+                    <script>
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.focus();
+                                window.print();
+                                setTimeout(function() { window.close(); }, 500);
+                            }, 300);
+                        };
+                    <\/script>
+                </body>
+                </html>
+            `;
+
+            const pw = window.open('', '_blank');
+            if (pw) {
+                pw.document.write(printHtml);
+                pw.document.close();
+            }
+        };
+
+        // --- سجل التقفيلات السابقة ---
+        window.showDrawerClosuresHistoryModal = function() {
+            let existing = document.getElementById('drawerClosuresHistoryModal');
+            if (existing) existing.remove();
+
+            let closures = [];
+            try {
+                const raw = localStorage.getItem('bayan_drawer_closures');
+                if (raw) closures = JSON.parse(raw);
+            } catch (e) {
+                closures = [];
+            }
+
+            let rows = '';
+            if (closures.length === 0) {
+                rows = `<tr><td colspan="7" style="text-align: center; padding: 25px; color: #64748b; font-weight: 700;">لا توجد أي تقفيلات سابقة مسجلة حتى الآن</td></tr>`;
+            } else {
+                rows = closures.map((c, idx) => {
+                    const absDiff = Math.abs(c.difference || 0);
+                    let badge = '<span style="color:#059669; font-weight:800;">مطابق ✅</span>';
+                    if (absDiff >= 0.01) {
+                        badge = c.difference < 0 ? `<span style="color:#dc2626; font-weight:800;">عجز (-${absDiff.toFixed(2)})</span>` : `<span style="color:#2563eb; font-weight:800;">زيادة (+${absDiff.toFixed(2)})</span>`;
+                    }
+                    return `
+                        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 0.88rem;">
+                            <td style="padding: 10px 8px; font-weight: 800;">${c.dateStr} <small style="display:block; color:#94a3b8;">${c.timeStr || ''}${c.isEdited ? ' <span style="color:#d97706; font-weight:900;">(مُعدل ✏️)</span>' : ''}</small></td>
+                            <td style="padding: 10px 8px; font-weight: 800; color: #1e3a8a;">${c.userShift || 'الكل'}</td>
+                            <td style="padding: 10px 8px; font-weight: 800;">${(c.expectedCash || 0).toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م</td>
+                            <td style="padding: 10px 8px; font-weight: 900; background: #fffbeb; color: #92400e;">${(c.actualCash || 0).toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م</td>
+                            <td style="padding: 10px 8px;">${badge}</td>
+                            <td style="padding: 10px 8px; font-size: 0.8rem; color: #64748b; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c.notes || ''}">${c.notes || '-'}</td>
+                            <td style="padding: 10px 8px; text-align: center; white-space: nowrap;">
+                                <button type="button" onclick="openEditDrawerClosingModal('${c.id}')"
+                                    style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer; margin-left: 4px;" title="تعديل العد الفعلي والمحضر">✏️</button>
+                                <button type="button" onclick="printShiftCloseReport(JSON.parse(decodeURIComponent('${encodeURIComponent(JSON.stringify(c))}')))"
+                                    style="background: #0284c7; color: white; border: none; border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer; margin-left: 4px;" title="طباعة">🖨️</button>
+                                <button type="button" onclick="deleteDrawerClosureRecord('${c.id}')"
+                                    style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; font-weight: 800; cursor: pointer;" title="حذف">🗑️</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            const modal = document.createElement('div');
+            modal.id = 'drawerClosuresHistoryModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; direction: rtl; font-family: inherit;';
+
+            modal.innerHTML = `
+                <div style="background: #ffffff; color: #0f172a; width: 100%; max-width: 820px; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; border: 1.5px solid #cbd5e1; display: flex; flex-direction: column; max-height: 88vh;">
+                    <div style="background: linear-gradient(135deg, #1e293b, #0f172a); padding: 16px 22px; color: white; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.4rem;">📜</span>
+                            <div>
+                                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 900;">سجل تقفيلات الوردية والدرج المعتمدة</h3>
+                                <p style="margin: 2px 0 0 0; font-size: 0.78rem; opacity: 0.85;">كافة عمليات الجرد والتقفيل السابقة مع احتساب العجز والزيادة</p>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('drawerClosuresHistoryModal').remove()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer;">✕</button>
+                    </div>
+
+                    <div style="padding: 16px; overflow-y: auto; flex: 1;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: right;">
+                            <thead>
+                                <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1; font-size: 0.85rem; color: #475569;">
+                                    <th style="padding: 10px 8px;">التاريخ والوقت</th>
+                                    <th style="padding: 10px 8px;">الوردية</th>
+                                    <th style="padding: 10px 8px;">المطلوب دفترياً</th>
+                                    <th style="padding: 10px 8px;">الفعلي (العد)</th>
+                                    <th style="padding: 10px 8px;">النتيجة</th>
+                                    <th style="padding: 10px 8px;">ملاحظات</th>
+                                    <th style="padding: 10px 8px; text-align: center;">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+
+                    <div style="padding: 12px 20px; background: #f8fafc; border-top: 1.5px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.85rem; color: #64748b; font-weight: 700;">إجمالي التقفيلات المحفوظة: ${closures.length}</span>
+                        <button onclick="document.getElementById('drawerClosuresHistoryModal').remove()"
+                            style="padding: 8px 20px; background: #334155; color: white; border: none; border-radius: 10px; font-weight: 800; cursor: pointer;">إغلاق</button>
+                    </div>
+                </div>
+            `;
+
+            modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+        };
+
+        window.deleteDrawerClosureRecord = async function(id) {
+            if (typeof window.verifyAdminPinAuthorization === 'function') {
+                const ok = await window.verifyAdminPinAuthorization('🗑️ حذف محضر تقفيل', 'يتطلب حذف محضر التقفيل إدخال رمز PIN المدير.');
+                if (!ok) return;
+            } else {
+                if (!confirm("هل أنت متأكد من رغبتك في حذف هذا المحضر من السجل؟")) return;
+            }
+
+            try {
+                let closures = [];
+                const raw = localStorage.getItem('bayan_drawer_closures');
+                if (raw) closures = JSON.parse(raw);
+                closures = closures.filter(c => c.id !== id);
+                localStorage.setItem('bayan_drawer_closures', JSON.stringify(closures));
+                if (typeof showToast === 'function') showToast("🗑️ تم حذف المحضر بنجاح", "info");
+                window.showDrawerClosuresHistoryModal();
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        // --- ✏️ تعديل العد الفعلي ومحضر تقفيل الوردية ---
+        window.openEditDrawerClosingModal = function(closureId) {
+            let existing = document.getElementById('editDrawerClosingModal');
+            if (existing) existing.remove();
+
+            let closures = [];
+            try {
+                const raw = localStorage.getItem('bayan_drawer_closures');
+                if (raw) closures = JSON.parse(raw);
+            } catch (e) {
+                closures = [];
+            }
+
+            let targetRecord = null;
+            if (closureId) {
+                targetRecord = closures.find(c => c.id === closureId);
+            } else {
+                const todayISO = new Date().toLocaleDateString('en-CA');
+                const todayStr = new Date().toLocaleDateString('ar-EG');
+                // البحث أولاً عن محضر تقفيل لليوم
+                targetRecord = closures.find(c => c.dateISO === todayISO || c.dateStr === todayStr);
+                // إذا لم يوجد لليوم، نأخذ أحدث محضر مسجل
+                if (!targetRecord && closures.length > 0) {
+                    targetRecord = closures[0];
+                }
+            }
+
+            if (!targetRecord) {
+                const mainInp = document.getElementById('drawerActualCashInput');
+                if (mainInp) {
+                    mainInp.focus();
+                    if (typeof showToast === 'function') {
+                        showToast("💡 لا يوجد محضر تقفيل محفوظ لتعديله. يمكنك كتابة وتعديل العد الفعلي مباشرة في المربع الأصفر بالأسفل ثم الضغط على تقفيل الوردية.", "info");
+                    }
+                }
+                return;
+            }
+
+            const rec = targetRecord;
+            const expected = Number(rec.expectedCash !== undefined ? rec.expectedCash : (rec.netCashMovement || 0));
+            const initialActual = Number(rec.actualCash !== undefined ? rec.actualCash : expected);
+            const initialDiff = initialActual - expected;
+            const initialAbsDiff = Math.abs(initialDiff);
+
+            window.currentDrawerClosingState.editingClosureId = rec.id;
+            window.currentDrawerClosingState.editingExpectedCash = expected;
+            window.currentDrawerClosingState.tempEditDenominations = rec.denominations || null;
+
+            let initialBadge = '';
+            if (initialAbsDiff < 0.01) {
+                initialBadge = `
+                    <div style="background: #ecfdf5; border: 1.5px solid #10b981; color: #065f46; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span>✅ النتيجة: الدرج مطابق تماماً بالقرش</span>
+                        <span style="font-weight: 900; font-size: 1.05rem;">0.00 ج.م</span>
+                    </div>`;
+            } else if (initialDiff < 0) {
+                initialBadge = `
+                    <div style="background: #fef2f2; border: 1.5px solid #ef4444; color: #991b1b; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span>⚠️ النتيجة: يوجد عجز نقدي بالدرج</span>
+                        <span style="font-weight: 900; font-size: 1.05rem; color: #dc2626;">-${initialAbsDiff.toFixed(2)} ج.م</span>
+                    </div>`;
+            } else {
+                initialBadge = `
+                    <div style="background: #eff6ff; border: 1.5px solid #3b82f6; color: #1e40af; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span>📈 النتيجة: توجد زيادة نقدية بالدرج</span>
+                        <span style="font-weight: 900; font-size: 1.05rem; color: #2563eb;">+${initialAbsDiff.toFixed(2)} ج.م</span>
+                    </div>`;
+            }
+
+            const modal = document.createElement('div');
+            modal.id = 'editDrawerClosingModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); z-index: 9999999; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; direction: rtl; font-family: inherit;';
+
+            modal.innerHTML = `
+                <div style="background: #ffffff; color: #0f172a; width: 100%; max-width: 520px; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; border: 1.5px solid #cbd5e1; display: flex; flex-direction: column; max-height: 92vh;">
+                    <div style="background: linear-gradient(135deg, #d97706, #b45309); padding: 16px 20px; color: white; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.5rem;">✏️</span>
+                            <div>
+                                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 900;">تعديل العد الفعلي ومحضر تقفيل الدرج</h3>
+                                <p style="margin: 2px 0 0 0; font-size: 0.78rem; opacity: 0.9;">تعديل المبلغ الفعلي المحصي وإعادة احتساب العجز والزيادة فوراً</p>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('editDrawerClosingModal').remove()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer;">✕</button>
+                    </div>
+
+                    <div style="padding: 18px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 14px;">
+                        <!-- بطاقة تفاصيل المحضر -->
+                        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 0.88rem; display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: #64748b; font-weight: 700;">رقم المحضر / التاريخ:</span>
+                                <span style="font-weight: 800; color: #1e293b;">${rec.id || '---'} (${rec.dateStr} - ${rec.timeStr || ''})</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: #64748b; font-weight: 700;">الوردية / المسؤول:</span>
+                                <span style="font-weight: 800; color: #1e3a8a;">${rec.userShift || 'كافة المستخدمين'} (${rec.closedBy || 'المدير'})</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed #cbd5e1; padding-top: 6px; margin-top: 2px;">
+                                <span style="color: #1e293b; font-weight: 900;">💰 المطلوب دفترياً من حركة الدرج:</span>
+                                <span style="font-weight: 900; font-size: 1.15rem; color: #1d4ed8;">${expected.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م</span>
+                            </div>
+                        </div>
+
+                        <!-- إدخال العد الفعلي الجديد -->
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <label for="editActualCashAmount" style="font-weight: 900; font-size: 0.95rem; color: #78350f;">💵 النقدية الفعلية بعد التعديل (العد الصحيح بالدرج):</label>
+                                <button type="button" onclick="openDrawerDenominationsCalculator(window.currentDrawerClosingState.tempEditDenominations, 'editActualCashAmount')"
+                                    style="background: #fef3c7; border: 1px solid #fde68a; color: #b45309; border-radius: 6px; padding: 2px 8px; font-size: 0.78rem; font-weight: 900; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                                    <span>🧮</span> حاسبة الفئات
+                                </button>
+                            </div>
+                            <input type="number" id="editActualCashAmount" step="any" min="0" value="${initialActual}"
+                                oninput="recalcEditDrawerDiff(${expected})"
+                                style="height: 44px; border: 2.5px solid #d97706; border-radius: 10px; font-size: 1.25rem; font-weight: 900; color: #78350f; text-align: center; background: #fffbeb; outline: none; padding: 0 10px;"
+                                onfocus="this.select()">
+                        </div>
+
+                        <!-- بطاقة نتيجة الفارق الفوري المحدثة -->
+                        <div id="editDrawerDiffContainer">
+                            ${initialBadge}
+                        </div>
+
+                        <!-- سبب التعديل والملاحظات -->
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="editDrawerNotes" style="font-weight: 800; font-size: 0.88rem; color: #334155;">📝 سبب التعديل أو ملاحظات إضافية:</label>
+                            <textarea id="editDrawerNotes" rows="3" placeholder="اكتب سبب تعديل العد الفعلي هنا (مثال: تم العثور على مبالغ منسية بالدرج، تصحيح خطأ عد، إضافة فكة)..."
+                                style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 10px; padding: 10px; font-family: inherit; font-size: 0.9rem; box-sizing: border-box; outline: none;">${rec.notes || ''}</textarea>
+                        </div>
+                    </div>
+
+                    <div style="padding: 14px 20px; background: #f8fafc; border-top: 1.5px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" onclick="saveEditedDrawerClosure('${rec.id}', false)"
+                                style="flex: 1.3; height: 42px; background: linear-gradient(135deg, #059669, #10b981); color: white; border: none; border-radius: 10px; font-weight: 900; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 8px rgba(16,185,129,0.3);">
+                                <span>💾</span> حفظ التعديل وتحديث المحضر
+                            </button>
+                            <button type="button" onclick="saveEditedDrawerClosure('${rec.id}', true)"
+                                style="flex: 1.1; height: 42px; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; border: none; border-radius: 10px; font-weight: 900; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                <span>🖨️</span> حفظ وطباعة Z-Report
+                            </button>
+                        </div>
+                        <button type="button" onclick="document.getElementById('editDrawerClosingModal').remove()"
+                            style="height: 36px; background: #ffffff; color: #64748b; border: 1px solid #cbd5e1; border-radius: 10px; font-weight: 800; font-size: 0.85rem; cursor: pointer;">
+                            إلغاء التعديل
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+            const editInp = document.getElementById('editActualCashAmount');
+            if (editInp) editInp.focus();
+        };
+
+        window.recalcEditDrawerDiff = function(expectedVal) {
+            const inp = document.getElementById('editActualCashAmount');
+            const container = document.getElementById('editDrawerDiffContainer');
+            if (!container) return;
+
+            const expected = (expectedVal !== undefined) ? Number(expectedVal) : Number(window.currentDrawerClosingState.editingExpectedCash || 0);
+            const val = inp ? inp.value.trim() : '';
+            if (val === '' || isNaN(parseFloat(val))) {
+                container.innerHTML = `<div style="background: #f1f5f9; border: 1.5px dashed #cbd5e1; color: #475569; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; text-align: center;">يرجى كتابة المبلغ الفعلي لاحتساب الفارق...</div>`;
+                return;
+            }
+
+            const actual = parseFloat(val) || 0;
+            const diff = actual - expected;
+            const absDiff = Math.abs(diff);
+
+            if (absDiff < 0.01) {
+                container.innerHTML = `
+                    <div style="background: #ecfdf5; border: 1.5px solid #10b981; color: #065f46; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span>✅ النتيجة: الدرج مطابق تماماً بالقرش</span>
+                        <span style="font-weight: 900; font-size: 1.05rem;">0.00 ج.م</span>
+                    </div>
+                `;
+            } else if (diff < 0) {
+                container.innerHTML = `
+                    <div style="background: #fef2f2; border: 1.5px solid #ef4444; color: #991b1b; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span>⚠️ النتيجة: يوجد عجز نقدي بالدرج</span>
+                        <span style="font-weight: 900; font-size: 1.05rem; color: #dc2626;">-${absDiff.toFixed(2)} ج.م</span>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <div style="background: #eff6ff; border: 1.5px solid #3b82f6; color: #1e40af; padding: 10px 14px; border-radius: 10px; font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span>📈 النتيجة: توجد زيادة نقدية بالدرج</span>
+                        <span style="font-weight: 900; font-size: 1.05rem; color: #2563eb;">+${absDiff.toFixed(2)} ج.م</span>
+                    </div>
+                `;
+            }
+        };
+
+        window.saveEditedDrawerClosure = function(closureId, andPrint) {
+            const inp = document.getElementById('editActualCashAmount');
+            if (!inp || inp.value.trim() === '' || isNaN(parseFloat(inp.value))) {
+                if (typeof showToast === 'function') {
+                    showToast("⚠️ يرجى كتابة المبلغ الفعلي المحصي بشكل صحيح!", "warning");
+                } else {
+                    alert("يرجى كتابة المبلغ الفعلي المحصي!");
+                }
+                if (inp) inp.focus();
+                return;
+            }
+
+            const newActual = parseFloat(inp.value) || 0;
+            const notesEl = document.getElementById('editDrawerNotes');
+            const newNotes = notesEl ? notesEl.value.trim() : '';
+
+            let closures = [];
+            try {
+                const raw = localStorage.getItem('bayan_drawer_closures');
+                if (raw) closures = JSON.parse(raw);
+            } catch (e) {
+                closures = [];
+            }
+
+            const idx = closures.findIndex(c => c.id === closureId);
+            if (idx === -1) {
+                if (typeof showToast === 'function') showToast("❌ تعذر العثور على محضر التقفيل في السجل", "error");
+                return;
+            }
+
+            const rec = closures[idx];
+            const expected = Number(rec.expectedCash !== undefined ? rec.expectedCash : (rec.netCashMovement || 0));
+            const diff = newActual - expected;
+            const absDiff = Math.abs(diff);
+
+            rec.actualCash = newActual;
+            rec.expectedCash = expected;
+            rec.difference = diff;
+            rec.status = absDiff < 0.01 ? 'balanced' : (diff < 0 ? 'deficit' : 'surplus');
+            rec.notes = newNotes;
+            if (window.currentDrawerClosingState.tempEditDenominations !== undefined && window.currentDrawerClosingState.tempEditDenominations !== null) {
+                rec.denominations = window.currentDrawerClosingState.tempEditDenominations;
+            }
+            rec.isEdited = true;
+            rec.editedAt = new Date().toISOString();
+            rec.editedBy = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'المدير';
+
+            closures[idx] = rec;
+            try {
+                localStorage.setItem('bayan_drawer_closures', JSON.stringify(closures));
+            } catch (e) {
+                console.error("Error saving updated closures:", e);
+            }
+
+            // تحديث الحالة النشطة للشاشة الحالية
+            window.currentDrawerClosingState.actualCash = newActual;
+            window.currentDrawerClosingState.difference = diff;
+            window.currentDrawerClosingState.status = rec.status;
+            window.currentDrawerClosingState.notes = newNotes;
+            if (rec.denominations) {
+                window.currentDrawerClosingState.denominations = rec.denominations;
+            }
+
+            // تحديث خانة العد الفعلي في الشاشة الرئيسية والبطاقة الفورية
+            const mainInp = document.getElementById('drawerActualCashInput');
+            if (mainInp) {
+                mainInp.value = newActual.toFixed(2);
+                window.handleDrawerActualCashInput(mainInp.value);
+            }
+
+            // إغلاق نافذة التعديل
+            const editModal = document.getElementById('editDrawerClosingModal');
+            if (editModal) editModal.remove();
+
+            // تحديث جدول السجل إن كان مفتوحاً في الخلفية
+            if (document.getElementById('drawerClosuresHistoryModal')) {
+                window.showDrawerClosuresHistoryModal();
+            }
+
+            if (typeof showToast === 'function') {
+                showToast("✅ تم حفظ التعديل وتحديث محضر تقفيل الوردية بنجاح!", "success");
+            }
+
+            if (andPrint) {
+                setTimeout(() => {
+                    window.printShiftCloseReport(rec);
+                }, 300);
+            }
+        };
+
+        // --- تصفية وجرد المحافظ والخزائن الإلكترونية ---
+        window.showElectronicTreasuriesAuditModal = function() {
+            let existing = document.getElementById('electronicTreasuriesAuditModal');
+            if (existing) existing.remove();
+
+            const repData = window.dailyReportData;
+            const pmSummary = (repData && repData.paymentMethodsSummary) ? repData.paymentMethodsSummary : {};
+
+            const electronicEntries = Object.entries(pmSummary).filter(([methodName]) => {
+                const m = methodName.toLowerCase();
+                return !m.includes('نقد') && !m.includes('كاش') && !m.includes('درج');
+            });
+
+            let cardsHtml = '';
+            if (electronicEntries.length === 0) {
+                cardsHtml = `
+                    <div style="text-align: center; padding: 30px; color: #64748b; font-weight: 700; background: #f8fafc; border-radius: 14px; border: 1.5px dashed #cbd5e1;">
+                        <span style="font-size: 2rem; display: block; margin-bottom: 8px;">📱</span>
+                        لا توجد أي حركات أو مبيعات على المحافظ الإلكترونية أو الفيزا خلال الفترة المحددة بالتقرير.
+                    </div>
+                `;
+            } else {
+                cardsHtml = electronicEntries.map(([name, data], idx) => {
+                    const sales = data.salesTotal || 0;
+                    const receipts = data.receiptsTotal || 0;
+                    const purchases = data.purchasesTotal || 0;
+                    const disbursements = data.disbursementsTotal || 0;
+                    const returns = data.returnsTotal || 0;
+                    const netExpected = sales + receipts - purchases - disbursements - returns;
+
+                    return `
+                        <div style="background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.04);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 10px;">
+                                <div style="font-weight: 900; font-size: 1.05rem; color: #1e3a8a; display: flex; align-items: center; gap: 8px;">
+                                    <span>📱</span> ${name}
+                                </div>
+                                <span style="font-size: 0.8rem; background: #eff6ff; color: #2563eb; padding: 2px 8px; border-radius: 8px; font-weight: 800;">
+                                    عدد العمليات: ${data.count || 0}
+                                </span>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; font-size: 0.82rem; margin-bottom: 10px;">
+                                <div><b>الوارد (مبيعات + قبض):</b> <span style="color:#059669; font-weight:800;">+${(sales + receipts).toFixed(2)}</span></div>
+                                <div><b>المنصرف (شراء + صرف):</b> <span style="color:#dc2626; font-weight:800;">-${(purchases + disbursements).toFixed(2)}</span></div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 10px 14px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 10px;">
+                                <span style="font-weight: 800; font-size: 0.95rem; color: #334155;">الصافي المطلوب بالمحفظة (دفتري):</span>
+                                <span style="font-weight: 900; font-size: 1.15rem; color: #1e293b;">${netExpected.toFixed(2)} ج.م</span>
+                            </div>
+
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <label style="font-size: 0.85rem; font-weight: 800; color: #475569;">الرصيد الفعلي بتطبيق المحفظة:</label>
+                                <input type="number" step="any" placeholder="اكتب الرصيد..." class="elec-actual-input" data-expected="${netExpected}" data-index="${idx}"
+                                    oninput="calcElecDiff(${idx}, ${netExpected})"
+                                    style="width: 140px; height: 36px; border: 1.5px solid #cbd5e1; border-radius: 8px; text-align: center; font-weight: 900; font-size: 1rem; outline: none;">
+                                <div id="elecDiffResult_${idx}" style="font-weight: 900; font-size: 0.92rem; color: #64748b;">
+                                    (لم يتم العد)
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            const modal = document.createElement('div');
+            modal.id = 'electronicTreasuriesAuditModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; direction: rtl; font-family: inherit;';
+
+            modal.innerHTML = `
+                <div style="background: #ffffff; color: #0f172a; width: 100%; max-width: 620px; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; border: 1.5px solid #cbd5e1; display: flex; flex-direction: column; max-height: 88vh;">
+                    <div style="background: linear-gradient(135deg, #4338ca, #312e81); padding: 16px 20px; color: white; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.4rem;">📱</span>
+                            <div>
+                                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 900;">جرد وتصفية المحافظ والخزائن الإلكترونية</h3>
+                                <p style="margin: 2px 0 0 0; font-size: 0.78rem; opacity: 0.85;">فودافون كاش، إنستاباي، والفيزا البنكية</p>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('electronicTreasuriesAuditModal').remove()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer;">✕</button>
+                    </div>
+
+                    <div style="padding: 16px; overflow-y: auto; flex: 1;">
+                        ${cardsHtml}
+                    </div>
+
+                    <div style="padding: 12px 20px; background: #f8fafc; border-top: 1.5px solid #e2e8f0; display: flex; justify-content: flex-end;">
+                        <button onclick="document.getElementById('electronicTreasuriesAuditModal').remove()"
+                            style="padding: 8px 24px; background: #334155; color: white; border: none; border-radius: 10px; font-weight: 800; cursor: pointer;">إغلاق</button>
+                    </div>
+                </div>
+            `;
+
+            modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+        };
+
+        window.calcElecDiff = function(idx, expected) {
+            const input = document.querySelector(`.elec-actual-input[data-index="${idx}"]`);
+            const resEl = document.getElementById(`elecDiffResult_${idx}`);
+            if (!input || !resEl) return;
+
+            const val = input.value.trim();
+            if (val === '' || isNaN(parseFloat(val))) {
+                resEl.innerHTML = `<span style="color:#64748b;">(لم يتم العد)</span>`;
+                return;
+            }
+
+            const actual = parseFloat(val) || 0;
+            const diff = actual - expected;
+            const absDiff = Math.abs(diff);
+
+            if (absDiff < 0.01) {
+                resEl.innerHTML = `<span style="color:#059669; font-weight:900;">✅ مطابق بالقرش (0.00)</span>`;
+            } else if (diff < 0) {
+                resEl.innerHTML = `<span style="color:#dc2626; font-weight:900;">🔴 عجز: -${absDiff.toFixed(2)} ج.م</span>`;
+            } else {
+                resEl.innerHTML = `<span style="color:#2563eb; font-weight:900;">🟢 زيادة: +${absDiff.toFixed(2)} ج.م</span>`;
             }
         };
 
@@ -1735,7 +3064,7 @@
                 }
             }
 
-            const opsSummary = document.getElementById('opsSummaryBody').innerHTML.replace(/📤|📥|🔄|🔙|💵|💸|⚖️|🚚|🛒|🧺|📦|💰|🌗|✅|⏳|🏷️|🏷|➕/g, '');
+            const opsSummary = document.getElementById('opsSummaryBody').innerHTML.replace(/📤|📥|🔄|🔙|💵|💸|⚖️|🚚|🛒|🧺|📦|💰|🌗|✅|⏳|🏷️|🏷|➕|📱|⚡|💳|🏦|🍊|🟢|🟣/g, '');
 
             const treasurySummary = document.getElementById('treasurySummaryBody').innerHTML.replace(/<button[^>]*>[\s\S]*?<\/button>/gi, '').replace(/📤|📥|🔄|🔙|💵|💸|⚖️|🚚|🛒|🧺|📦|💰|🌗|✅|⏳|⏺️|❓|📱|⚡|💳|🏦|🍊|🟢|🟣/g, '');
 

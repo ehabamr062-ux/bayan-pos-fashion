@@ -699,7 +699,13 @@ async function saveSalesReturn(force = false, accountChecked = false) {
         const ratio = subTotal > 0 ? (finalTotal / subTotal) : 1;
 
         // isCash محدد من خيار المستخدم في الواجهة
-        const isCash = !isCredit;
+        const isNonCashReturn = (typeof window.isNonCashPaymentMethod === 'function')
+            ? window.isNonCashPaymentMethod(selectedMethod)
+            : (function(m) {
+                const s = String(m || '').toLowerCase().replace(/[أإآ]/g, 'ا');
+                return s.includes('فيزا') || (s.includes('كاش') && !s.includes('نقدي')) || s.includes('فودافون') || s.includes('محفظ') || s.includes('بنك') || s.includes('انستاباي') || s.includes('شيك') || s.includes('تحويل');
+            })(selectedMethod);
+        const isCash = !isCredit && !isNonCashReturn;
 
         // 🛑 فحص الفواتير الآجلة: تنبيه الكاشير إذا كانت الفاتورة الأصلية آجلة وعليها دين
         if (isCash && originalInvoiceId && !force) {
@@ -739,14 +745,15 @@ async function saveSalesReturn(force = false, accountChecked = false) {
             }
         }
 
-        // 🛑 فحص رصيد الدرج / الخزينة قبل صرف المرتجع النقدي
+        // 🛑 فحص رصيد الدرج / الخزينة قبل صرف المرتجع النقدي الورقي فقط
         if (isCash && !force) {
             const currentCash = (function() {
                 let c = 0;
                 const isNonCash = (m) => {
+                    if (typeof window.isNonCashPaymentMethod === 'function') return window.isNonCashPaymentMethod(m);
                     if (!m) return false;
-                    const s = String(m).toLowerCase();
-                    return s.includes('فيزا') || s.includes('بنك') || s.includes('شيك') || s.includes('تحويل') || s.includes('آجل') || s.includes('حساب');
+                    const s = String(m).toLowerCase().replace(/[أإآ]/g, 'ا');
+                    return s.includes('فيزا') || s.includes('فودافون') || (s.includes('كاش') && !s.includes('نقدي')) || s.includes('محفظ') || s.includes('بنك') || s.includes('شيك') || s.includes('تحويل') || s.includes('اجل') || s.includes('حساب');
                 };
                 (window.transactions || []).forEach(t => {
                     if (isNonCash(t.method)) return;
@@ -955,7 +962,7 @@ async function saveSalesReturn(force = false, accountChecked = false) {
 
                 user: currentUser ? currentUser.name : '-',
 
-                paidAmount: (idx === 0) ? (isCash ? finalTotal : 0) : 0,
+                paidAmount: (idx === 0) ? (isCredit ? 0 : finalTotal) : 0,
 
                 isInvoiceHead: (idx === 0),
 
@@ -1145,6 +1152,8 @@ function resetReturn() {
     const invDisp = document.getElementById('salesReturnInvoiceDisplay');
 
     if (invDisp) invDisp.innerText = '---';
+
+    if (typeof updateReturnInvoiceCard === 'function') updateReturnInvoiceCard(null, 'sales');
 
     const now = new Date();
 
@@ -1359,6 +1368,13 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
             : (document.getElementById('purchase-return-sectionPaymentMethodSelect')?.value || 'نقدي (إلى الخزنة)');
         const method = selectedMethod;
         const isCredit = (typeof window.isTransactionCredit === 'function') ? window.isTransactionCredit(method, 1, 0, 1) : false;
+        const isNonCashReturn = (typeof window.isNonCashPaymentMethod === 'function')
+            ? window.isNonCashPaymentMethod(selectedMethod)
+            : (function(m) {
+                const s = String(m || '').toLowerCase().replace(/[أإآ]/g, 'ا');
+                return s.includes('فيزا') || (s.includes('كاش') && !s.includes('نقدي')) || s.includes('فودافون') || s.includes('محفظ') || s.includes('بنك') || s.includes('انستاباي') || s.includes('شيك') || s.includes('تحويل');
+            })(selectedMethod);
+        const isCash = !isCredit && !isNonCashReturn;
 
         if (!accountChecked) {
             const ok = await window.ensurePartnerAccountExists(partner, 'مورد', isCredit, () => {
@@ -1375,8 +1391,6 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
                 return false;
             }
         }
-
-        const isCash = !isCredit;
 
         const subTotal = purReturnCart.reduce((a, b) => a + (b.price * b.qty), 0);
 
@@ -1628,7 +1642,7 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
                 type: 'مرتجع شراء 📤',
 
-                method: isCash ? (selectedMethod || 'نقدي (استرداد للخزنة)') : (selectedMethod || 'خصم من حساب المورد'),
+                method: selectedMethod || 'نقدي (إلى الخزنة)',
 
                 invoiceId: returnInvoiceId,
 
@@ -1668,7 +1682,7 @@ async function savePurchaseReturn(force = false, accountChecked = false) {
 
                 user: currentUser ? currentUser.name : '-',
 
-                paidAmount: (idx === 0) ? (isCash ? finalTotal : 0) : 0,
+                paidAmount: (idx === 0) ? (isCredit ? 0 : finalTotal) : 0,
 
                 isInvoiceHead: (idx === 0),
 
@@ -1794,6 +1808,8 @@ function resetPurReturn() {
     const invDisp = document.getElementById('purReturnInvoiceDisplay');
 
     if (invDisp) invDisp.innerText = '---';
+
+    if (typeof updateReturnInvoiceCard === 'function') updateReturnInvoiceCard(null, 'purchase');
 
     const now = new Date();
 
@@ -3617,41 +3633,29 @@ function updateReturnAccountBalance(accountName, type) {
 }
 
 function updateReturnInvoiceCard(invoiceId, type) {
-
     const isSales = type === 'sales';
-
     const cardId = isSales ? 'srReturnInvoiceCard' : 'prReturnInvoiceCard';
-
     const totalId = isSales ? 'srInvTotal' : 'prInvTotal';
-
     const returnedId = isSales ? 'srInvReturned' : 'prInvReturned';
-
     const remainingId = isSales ? 'srInvRemaining' : 'prInvRemaining';
+    const badgeId = isSales ? 'srInvIdBadge' : 'prInvIdBadge';
+    const methodId = isSales ? 'srInvMethod' : 'prInvMethod';
+    const noticeId = isSales ? 'srMethodMatchNotice' : 'prMethodMatchNotice';
 
     const card = document.getElementById(cardId);
-
     if (!invoiceId || invoiceId === '---' || !card) {
-
         if (card) card.style.display = 'none';
-
         return;
-
     }
 
     const invoiceType = isSales ? 'بيع' : 'شراء';
-
-    const origItems = transactions.filter(t =>
-
-        t.invoiceId == invoiceId && t.type.includes(invoiceType) && !t.type.includes('مرتجع')
-
+    const origItems = (window.transactions || []).filter(t =>
+        String(t.invoiceId) === String(invoiceId) && t.type && t.type.includes(invoiceType) && !t.type.includes('مرتجع')
     );
 
     const origTotal = origItems.reduce((sum, t) => sum + (parseFloat(t.total) || 0), 0);
-
-    const returnedVal = transactions
-
-        .filter(t => t.originalInvoiceId == invoiceId && t.type.includes('مرتجع'))
-
+    const returnedVal = (window.transactions || [])
+        .filter(t => String(t.originalInvoiceId) === String(invoiceId) && t.type && t.type.includes('مرتجع'))
         .reduce((sum, t) => sum + Math.abs(parseFloat(t.total) || 0), 0);
 
     const remaining = origTotal - returnedVal;
@@ -3666,6 +3670,72 @@ function updateReturnInvoiceCard(invoiceId, type) {
     if (remEl) {
         remEl.innerText = remaining.toFixed(2);
         remEl.style.color = remaining <= 0 ? '#dc2626' : '#16a34a';
+    }
+
+    const badgeEl = document.getElementById(badgeId);
+    if (badgeEl) badgeEl.innerText = '#' + invoiceId;
+
+    // 🌟 جلب طريقة الدفع في الفاتورة الأصلية المستدعاة
+    const firstOrig = origItems.find(t => t.isInvoiceHead) || origItems[0];
+    const rawMethod = (firstOrig ? (firstOrig.method || '') : '').trim();
+
+    const isVodafone = (m) => {
+        if (!m) return false;
+        const s = String(m).toLowerCase().replace(/[أإآ]/g, 'ا');
+        return s.includes('فودافون') || (s.includes('كاش') && !s.includes('نقدي')) || s.includes('محفظ') || s.includes('اورانج') || s.includes('اتصالات') || s.includes('we pay');
+    };
+    const isVisa = (m) => {
+        if (!m) return false;
+        const s = String(m).toLowerCase();
+        return s.includes('فيزا') || s.includes('شبك') || s.includes('card') || s.includes('مدى') || s.includes('pos');
+    };
+    const isBank = (m) => {
+        if (!m) return false;
+        const s = String(m).toLowerCase().replace(/[أإآ]/g, 'ا');
+        return s.includes('بنك') || s.includes('انستاباي') || s.includes('تحويل') || s.includes('شيك');
+    };
+    const isCreditMethod = (m) => {
+        if (!m) return false;
+        const s = String(m).toLowerCase().replace(/[أإآ]/g, 'ا');
+        return s.includes('اجل') || s.includes('حساب');
+    };
+
+    let methodDisplay = '💵 نقدي (كاش)';
+    let targetSelectVal = isSales ? 'نقدي (من الخزنة)' : 'نقدي (إلى الخزنة)';
+
+    if (isVodafone(rawMethod)) {
+        methodDisplay = '📱 فودافون كاش (محفظة إلكترونية)';
+        targetSelectVal = 'فودافون كاش';
+    } else if (isVisa(rawMethod)) {
+        methodDisplay = '💳 فيزا / شبكة';
+        targetSelectVal = 'فيزا';
+    } else if (isBank(rawMethod)) {
+        methodDisplay = '🏦 تحويل بنكي / إنستاباي';
+        targetSelectVal = 'تحويل بنكي';
+    } else if (isCreditMethod(rawMethod)) {
+        methodDisplay = isSales ? '⏳ آجل (على حساب العميل)' : '⏳ آجل (على حساب المورد)';
+        targetSelectVal = isSales ? 'خصم من حساب العميل' : 'إضافة إلى حساب المورد';
+    } else if (rawMethod) {
+        methodDisplay = '💵 ' + rawMethod;
+    }
+
+    const methodEl = document.getElementById(methodId);
+    if (methodEl) methodEl.innerText = methodDisplay;
+
+    // 🎯 الضبط التلقائي لطريقة رد المبلغ لتطابق الفاتورة الأصلية
+    const selectId = isSales ? 'sales-return-sectionPaymentMethodSelect' : 'purchase-return-sectionPaymentMethodSelect';
+    const selectEl = document.getElementById(selectId);
+    if (selectEl) {
+        selectEl.value = targetSelectVal;
+        if (typeof selectMethod === 'function') {
+            try { selectMethod(selectEl); } catch(e){}
+        }
+    }
+
+    const noticeEl = document.getElementById(noticeId);
+    if (noticeEl) {
+        noticeEl.style.display = 'block';
+        setTimeout(() => { if (noticeEl) noticeEl.style.display = 'none'; }, 6000);
     }
 
     card.style.display = 'block';

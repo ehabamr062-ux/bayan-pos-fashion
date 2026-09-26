@@ -2,7 +2,7 @@
  * ============================================================
  *  مركز طباعة الباركود المخصص لقطاع الملابس والأحذية والأصناف العامة
  *  Bayan POS - Barcode & Fashion Label Printing Engine
- *  Version: 3.1.2
+ *  Version: 3.2.2
  * ============================================================
  */
 
@@ -735,6 +735,10 @@
         document.getElementById('bpModalProdTitle').innerText = product.name;
         document.getElementById('bpModalProdMeta').innerText = `الموديل العام: ${product.code || 'بدون كود'} | الباركود العام: ${product.barcode || 'غير محدد'} | المخزن: [${activeWH}] | إجمالي المقاسات: ${product.variants.length}`;
 
+        // إعادة ضبط مربع تحديد الكل ليكون غير محدد عند الفتح
+        const masterCb = document.getElementById('bpModalSelectAllVariants');
+        if (masterCb) masterCb.checked = false;
+
         const tbody = document.getElementById('bpModalVariantsTableBody');
         if (!tbody) return;
 
@@ -747,7 +751,7 @@
             html += `
                 <tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 10px 8px; text-align: center;">
-                        <input type="checkbox" class="bp-variant-modal-checkbox" data-idx="${idx}" checked style="width: 19px; height: 19px; accent-color: #10b981; cursor: pointer;">
+                        <input type="checkbox" class="bp-variant-modal-checkbox" data-idx="${idx}" onchange="window.onBpVariantModalRowCheckboxChange()" style="width: 19px; height: 19px; accent-color: #10b981; cursor: pointer;">
                     </td>
                     <td style="padding: 10px 8px; font-weight: 900; color: #0f172a;">
                         <span style="background: #f1f5f9; color: #0f172a; padding: 4px 10px; border-radius: 8px; border: 1.5px solid #cbd5e1; font-weight: 900; font-size: 0.92rem;">
@@ -780,7 +784,35 @@
     function closeBpVariantModal() {
         const modal = document.getElementById('bpVariantModal');
         if (modal) modal.classList.add('hidden');
+        const masterCb = document.getElementById('bpModalSelectAllVariants');
+        if (masterCb) masterCb.checked = false;
         bpActiveModalProduct = null;
+    }
+
+    /**
+     * تحديد الكل أو إلغاء تحديد الكل في نافذة المقاسات المنبثقة
+     */
+    function toggleBpModalSelectAll(masterEl) {
+        const isChecked = masterEl ? !!masterEl.checked : false;
+        const checkboxes = document.querySelectorAll('.bp-variant-modal-checkbox');
+        checkboxes.forEach(cb => {
+            cb.checked = isChecked;
+        });
+    }
+
+    /**
+     * تحديث حالة مربع تحديد الكل عند تغيير أي سطر فردي
+     */
+    function onBpVariantModalRowCheckboxChange() {
+        const masterCb = document.getElementById('bpModalSelectAllVariants');
+        if (!masterCb) return;
+        const allCbs = document.querySelectorAll('.bp-variant-modal-checkbox');
+        const checkedCbs = document.querySelectorAll('.bp-variant-modal-checkbox:checked');
+        if (allCbs.length > 0 && checkedCbs.length === allCbs.length) {
+            masterCb.checked = true;
+        } else {
+            masterCb.checked = false;
+        }
     }
 
     /**
@@ -830,10 +862,17 @@
     function addAllVariantsOfCurrentModal() {
         if (!bpActiveModalProduct || !bpActiveModalProduct.variants) return;
         const itemsToAdd = [];
+        let skippedZero = 0;
         bpActiveModalProduct.variants.forEach((v, idx) => {
             const vPrice = (v.price !== undefined && v.price !== null && v.price !== '') ? parseFloat(v.price) : (parseFloat(bpActiveModalProduct.price) || 0);
             const vStock = getBpVariantStock(v);
             const vBarcode = String(v.barcode || `${bpActiveModalProduct.barcode || '1000'}-${idx + 1}`).trim();
+
+            // فحص الرصيد: تخطي ما رصيده صفر أو أقل لتجنب هدر الورق والتكلفة
+            if (vStock <= 0) {
+                skippedZero++;
+                return;
+            }
 
             itemsToAdd.push({
                 productId: bpActiveModalProduct.id,
@@ -844,13 +883,22 @@
                 barcode: vBarcode,
                 price: vPrice,
                 stock: vStock,
-                copies: 1,
+                copies: vStock > 0 ? vStock : 1,
                 isMaster: false
             });
         });
 
+        if (itemsToAdd.length === 0) {
+            if (typeof showToast === 'function') showToast("⚠️ كافة مقاسات هذا الموديل رصيدها صفر في المخزن!", "warning");
+            return;
+        }
+
         addBulkItemsToQueue(itemsToAdd);
         closeBpVariantModal();
+        if (typeof showToast === 'function') {
+            const skipMsg = skippedZero > 0 ? ` (تم تخطي ${skippedZero} مقاس بدون رصيد)` : '';
+            showToast(`✅ تمت إضافة (${itemsToAdd.length}) مقاس متاح للقائمة طبقاً للرصيد${skipMsg}`, "success");
+        }
     }
 
     /**
@@ -954,15 +1002,25 @@
     function setCopiesFromCurrentStock() {
         if (bpQueue.length === 0) return;
         let appliedCount = 0;
+        let zeroRemoved = 0;
+
+        const validQueue = [];
         bpQueue.forEach(item => {
-            const st = parseInt(item.stock, 10);
-            item.copies = (st > 0) ? st : 1;
-            appliedCount++;
+            const st = parseInt(item.stock, 10) || 0;
+            if (st > 0) {
+                item.copies = st;
+                validQueue.push(item);
+                appliedCount++;
+            } else {
+                zeroRemoved++;
+            }
         });
 
+        bpQueue = validQueue;
         updateBpQueueUI();
         if (typeof showToast === 'function') {
-            showToast(`📦 تم ضبط عدد الملصقات طبقاً لرصيد المخزن المتاح (${appliedCount} صنف)`, "success");
+            const remMsg = zeroRemoved > 0 ? ` (تم استبعاد ${zeroRemoved} عناصر برصيد صفر)` : '';
+            showToast(`📦 تم ضبط عدد الملصقات طبقاً لرصيد المخزن (${appliedCount} صنف)${remMsg}`, "success");
         }
     }
 
@@ -1229,13 +1287,13 @@
                 <div class="bp-live-sticker" style="width: ${previewW}px; height: ${previewH}px; min-height: ${previewH}px; padding: 4px 6px;">
                     ${(bpCurrentSettings.showShopName && currentShopName) ? `<div class="bp-stk-shop" style="font-weight:900; font-size: 11px;">${currentShopName}</div>` : ''}
                     <div style="width: 100%; border-bottom: 1px solid #000000; margin: 1px 0;"></div>
-                    ${bpCurrentSettings.showItemName ? `<div class="bp-stk-item" style="font-weight:900; font-size: 11px;" title="${item.name}">${item.name}</div>` : ''}
+                    ${bpCurrentSettings.showItemName ? `<div class="bp-stk-item" style="font-weight:900; font-size: 13px; margin: 1px 0 2px 0;" title="${item.name}">${item.name}</div>` : ''}
                     <div style="flex: 1; display: flex; align-items: center; justify-content: center; width: 100%;">
                         <svg id="bp-preview-svg-${sIdx}" class="bp-stk-barcode-svg"></svg>
                     </div>
                     <div class="bp-stk-bottom-row" style="font-weight:900;">
-                        ${bpCurrentSettings.showVariant && variantText ? `<div class="bp-stk-variant" style="font-weight:900; font-size: 11px;"><bdi>${variantText}</bdi></div>` : '<div></div>'}
-                        ${bpCurrentSettings.showPrice ? `<div class="bp-stk-price" style="font-weight:900; font-size: 12px;">${priceFormatted}</div>` : ''}
+                        ${bpCurrentSettings.showVariant && variantText ? `<div class="bp-stk-variant" style="font-weight:900; font-size: 11.5px;"><bdi>${variantText}</bdi></div>` : '<div></div>'}
+                        ${bpCurrentSettings.showPrice ? `<div class="bp-stk-price" style="font-weight:900; font-size: 14px;">${priceFormatted}</div>` : ''}
                     </div>
                 </div>
             `;
@@ -1322,16 +1380,21 @@
             return;
         }
 
-        if (!confirm(`هل تريد إضافة كافة أصناف المخزن (${prods.length} صنف بمقاساتهم) إلى قائمة طباعة الباركود؟`)) {
+        if (!confirm(`هل تريد إضافة كافة أصناف المخزن المتوفرة برصيد متاح (${prods.length} صنف بمقاساتهم) إلى قائمة طباعة الباركود؟`)) {
             return;
         }
 
         const itemsToAdd = [];
+        let zeroSkipped = 0;
         prods.forEach(p => {
             if (p.variants && Array.isArray(p.variants) && p.variants.length > 0) {
                 p.variants.forEach((v, idx) => {
                     const vPrice = (v.price !== undefined && v.price !== null && v.price !== '') ? parseFloat(v.price) : (parseFloat(p.price) || 0);
                     const vStock = getBpVariantStock(v);
+                    if (vStock <= 0) {
+                        zeroSkipped++;
+                        return;
+                    }
                     const vBarcode = String(v.barcode || `${p.barcode || '1000'}-${idx + 1}`).trim();
                     itemsToAdd.push({
                         productId: p.id,
@@ -1342,11 +1405,16 @@
                         barcode: vBarcode,
                         price: vPrice,
                         stock: vStock,
-                        copies: 1,
+                        copies: vStock,
                         isMaster: false
                     });
                 });
             } else {
+                const pStock = getBpProductStock(p);
+                if (pStock <= 0) {
+                    zeroSkipped++;
+                    return;
+                }
                 itemsToAdd.push({
                     productId: p.id,
                     name: p.name,
@@ -1355,14 +1423,23 @@
                     color: p.color || '',
                     barcode: String(p.barcode || p.code || generateFallbackBarcode()).trim(),
                     price: parseFloat(p.price) || 0,
-                    stock: getBpProductStock(p),
-                    copies: 1,
+                    stock: pStock,
+                    copies: pStock,
                     isMaster: true
                 });
             }
         });
 
+        if (itemsToAdd.length === 0) {
+            if (typeof showToast === 'function') showToast("⚠️ لا توجد أي أصناف أو مقاسات برصيد أكبر من صفر في المخزن!", "warning");
+            return;
+        }
+
         addBulkItemsToQueue(itemsToAdd);
+        if (typeof showToast === 'function') {
+            const skipNote = zeroSkipped > 0 ? ` (تم تخطي ${zeroSkipped} عنصر بدون رصيد)` : '';
+            showToast(`✅ تمت إضافة (${itemsToAdd.length}) ملصق للأصناف المتوفرة برصيد${skipNote}`, "success");
+        }
     }
 
     /**
@@ -1457,5 +1534,7 @@
     window.confirmBpModalSelectedVariants = confirmBpModalSelectedVariants;
     window.addAllVariantsOfCurrentModal = addAllVariantsOfCurrentModal;
     window.addMasterBarcodeOfCurrentModal = addMasterBarcodeOfCurrentModal;
+    window.toggleBpModalSelectAll = toggleBpModalSelectAll;
+    window.onBpVariantModalRowCheckboxChange = onBpVariantModalRowCheckboxChange;
 
 })(window);

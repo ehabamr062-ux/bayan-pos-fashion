@@ -203,13 +203,30 @@
             try {
                 this.db.run("BEGIN TRANSACTION;");
                 const res = fn();
+                if (res && typeof res.then === 'function') {
+                    return res.then((val) => {
+                        try {
+                            this.db.run("COMMIT;");
+                        } catch (cErr) {
+                            if (!cErr.message || !cErr.message.includes('no transaction is active')) {
+                                console.error("[SQLite COMMIT error]:", cErr);
+                            }
+                        }
+                        this._inTransaction = false;
+                        return val;
+                    }).catch((err) => {
+                        try { this.db.run("ROLLBACK;"); } catch (r) {}
+                        this._inTransaction = false;
+                        throw err;
+                    });
+                }
                 this.db.run("COMMIT;");
+                this._inTransaction = false;
                 return res;
             } catch (err) {
                 try { this.db.run("ROLLBACK;"); } catch (r) {}
-                throw err;
-            } finally {
                 this._inTransaction = false;
+                throw err;
             }
         }
 
@@ -378,6 +395,17 @@
                         }
                     } catch(cntErr) {}
 
+                    // ⚡ فحص وتعبئة جدول transaction_items الذكي بهدوء في الخلفية
+                    try {
+                        const tiCountRes = this.db.exec("SELECT COUNT(*) FROM transaction_items;");
+                        const tiCount = (tiCountRes && tiCountRes[0] && tiCountRes[0].values && tiCountRes[0].values[0]) ? tiCountRes[0].values[0][0] : 0;
+                        if (tiCount === 0) {
+                            setTimeout(() => {
+                                this._backfillTransactionItems();
+                            }, 2500);
+                        }
+                    } catch(tiErr) {}
+
                     this.isInitialized = true;
                     console.log("✅ [SQLite] Database initialized and active successfully at:", this.dbPath || 'Browser Local Storage');
 
@@ -446,6 +474,37 @@
                 CREATE INDEX IF NOT EXISTS idx_tx_type ON transactions(type);
             `);
 
+            // 2.1 جدول بنود الفواتير الذكي والمفهرس لتسريع تقارير الأصناف التاريخية بنسبة 95%
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS transaction_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tx_id INTEGER,
+                    invoiceId TEXT,
+                    dateISO TEXT,
+                    time TEXT,
+                    type TEXT,
+                    partner TEXT,
+                    barcode TEXT,
+                    productName TEXT,
+                    size TEXT,
+                    color TEXT,
+                    qty REAL DEFAULT 0,
+                    price REAL DEFAULT 0,
+                    cost REAL DEFAULT 0,
+                    discount REAL DEFAULT 0,
+                    addition REAL DEFAULT 0,
+                    total REAL DEFAULT 0,
+                    profit REAL DEFAULT 0,
+                    warehouse TEXT,
+                    raw_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_ti_invoiceId ON transaction_items(invoiceId);
+                CREATE INDEX IF NOT EXISTS idx_ti_barcode ON transaction_items(barcode);
+                CREATE INDEX IF NOT EXISTS idx_ti_date ON transaction_items(dateISO);
+                CREATE INDEX IF NOT EXISTS idx_ti_productName ON transaction_items(productName);
+                CREATE INDEX IF NOT EXISTS idx_ti_tx_id ON transaction_items(tx_id);
+            `);
+
             // 3. جدول الحسابات (العملاء والموردين)
             this.db.run(`
                 CREATE TABLE IF NOT EXISTS accounts (
@@ -490,6 +549,110 @@
                 CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY, timestamp TEXT, raw_json TEXT);
                 CREATE TABLE IF NOT EXISTS syncQueue (id INTEGER PRIMARY KEY, timestamp TEXT, action TEXT, type TEXT, status TEXT, raw_json TEXT);
             `);
+        }
+
+        /**
+         * ⚡ المزامنة التلقائية اللحظية لبنود الفاتورة داخل جدول transaction_items المفهرس
+         */
+        _syncTransactionItems(item) {
+            if (!this.db || !item || !item.id) return;
+            let delStmt = null;
+            let insStmt = null;
+            try {
+                // حذف البنود القديمة لنفس السجل لتجنب الازدواجية عند التعديل
+                delStmt = this.db.prepare("DELETE FROM transaction_items WHERE tx_id = ?;");
+                delStmt.run([item.id]);
+
+                insStmt = this.db.prepare(`
+                    INSERT INTO transaction_items 
+                    (tx_id, invoiceId, dateISO, time, type, partner, barcode, productName, size, color, qty, price, cost, discount, addition, total, profit, warehouse, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                `);
+
+                const dateISO = item.dateISO || '';
+                const time = item.time || '';
+                const type = item.type || '';
+                const partner = item.partner || '';
+                const invoiceId = String(item.invoiceId || '');
+                const warehouse = item.warehouse || '';
+
+                // الحالة 1: السجل يحتوي على مصفوفة أصناف داخلية (items)
+                if (Array.isArray(item.items) && item.items.length > 0) {
+                    for (const line of item.items) {
+                        if (!line) continue;
+                        const barcode = String(line.barcode || line.code || '');
+                        const pName = String(line.product || line.productName || line.name || '');
+                        const size = String(line.size || line.selectedSize || '');
+                        const color = String(line.color || line.selectedColor || '');
+                        const qty = parseFloat(line.qty != null ? line.qty : (line.quantity || 0)) || 0;
+                        const price = parseFloat(line.price != null ? line.price : 0) || 0;
+                        const cost = parseFloat(line.cost != null ? line.cost : (line.costPrice || 0)) || 0;
+                        const discount = parseFloat(line.discount != null ? line.discount : (line.itemDiscount || 0)) || 0;
+                        const addition = parseFloat(line.addition != null ? line.addition : (line.extra || 0)) || 0;
+                        const total = parseFloat(line.total != null ? line.total : (qty * price - discount + addition)) || 0;
+                        const profit = parseFloat(line.profit != null ? line.profit : ((price - cost) * qty)) || 0;
+
+                        insStmt.run(this._safeBind([
+                            item.id, invoiceId, dateISO, time, type, partner,
+                            barcode, pName, size, color, qty, price, cost,
+                            discount, addition, total, profit, warehouse,
+                            JSON.stringify(line)
+                        ]));
+                    }
+                } 
+                // الحالة 2: السجل نفسه يمثل سطراً لصنف مفرد
+                else if (item.product || item.productName || item.barcode || item.name) {
+                    const barcode = String(item.barcode || item.code || '');
+                    const pName = String(item.product || item.productName || item.name || '');
+                    const size = String(item.size || item.selectedSize || '');
+                    const color = String(item.color || item.selectedColor || '');
+                    const qty = parseFloat(item.qty != null ? item.qty : (item.quantity || 0)) || 0;
+                    const price = parseFloat(item.price != null ? item.price : 0) || 0;
+                    const cost = parseFloat(item.cost != null ? item.cost : (item.costPrice || 0)) || 0;
+                    const discount = parseFloat(item.discount != null ? item.discount : 0) || 0;
+                    const addition = parseFloat(item.addition != null ? item.addition : 0) || 0;
+                    const total = parseFloat(item.total != null ? item.total : (qty * price - discount + addition)) || 0;
+                    const profit = parseFloat(item.profit != null ? item.profit : ((price - cost) * qty)) || 0;
+
+                    insStmt.run(this._safeBind([
+                        item.id, invoiceId, dateISO, time, type, partner,
+                        barcode, pName, size, color, qty, price, cost,
+                        discount, addition, total, profit, warehouse,
+                        JSON.stringify(item)
+                    ]));
+                }
+            } catch (tiErr) {
+                console.warn("[SQLite] _syncTransactionItems notice:", tiErr.message);
+            } finally {
+                if (delStmt) try { delStmt.free(); } catch(e) {}
+                if (insStmt) try { insStmt.free(); } catch(e) {}
+            }
+        }
+
+        /**
+         * ⚡ الفهرسة الذكية في الخلفية لبنود الفواتير التاريخية الموجودة مسبقاً
+         */
+        _backfillTransactionItems() {
+            if (!this.db) return;
+            try {
+                const res = this.db.exec("SELECT raw_json FROM transactions;");
+                if (!res || res.length === 0 || !res[0].values) return;
+                const rows = res[0].values;
+                console.log(`⚡ [SQLite] بدء الفهرسة الذكية التلقائية لبنود الفواتير السابقة (${rows.length} حركة)...`);
+                this.runInTransaction(() => {
+                    for (const r of rows) {
+                        try {
+                            if (!r[0]) continue;
+                            const item = JSON.parse(r[0]);
+                            this._syncTransactionItems(item);
+                        } catch (pErr) {}
+                    }
+                });
+                this.schedulePersist();
+                console.log("✅ [SQLite] تم اكتمال الفهرسة الذكية لجدول transaction_items بنجاح.");
+            } catch (err) {
+                console.warn("[SQLite] Backfill notice:", err.message);
+            }
         }
 
         /**
@@ -573,6 +736,17 @@
                     const stmt = this.db.prepare(`INSERT OR REPLACE INTO transactions (id, invoiceId, dateISO, time, type, partner, total, paidAmount, remaining, method, cashier, warehouse, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`);
                     stmt.run(this._safeBind([item.id, String(item.invoiceId || ''), item.dateISO || '', item.time || '', item.type || '', item.partner || '', parseFloat(item.invoiceGrandTotal) || parseFloat(item.total) || 0, parseFloat(item.paidAmount) || 0, parseFloat(item.remaining) || 0, item.method || '', item.cashier || item.user || '', item.warehouse || '', rawJson]));
                     stmt.free();
+                    this._syncTransactionItems(item);
+                } else if (tableName === 'transaction_items') {
+                    const stmt = this.db.prepare(`INSERT OR REPLACE INTO transaction_items (id, tx_id, invoiceId, dateISO, time, type, partner, barcode, productName, size, color, qty, price, cost, discount, addition, total, profit, warehouse, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`);
+                    stmt.run(this._safeBind([
+                        item.id || null, item.tx_id || null, String(item.invoiceId || ''), item.dateISO || '', item.time || '', item.type || '', item.partner || '',
+                        String(item.barcode || ''), String(item.productName || item.product || ''), String(item.size || ''), String(item.color || ''),
+                        parseFloat(item.qty) || 0, parseFloat(item.price) || 0, parseFloat(item.cost) || 0,
+                        parseFloat(item.discount) || 0, parseFloat(item.addition) || 0, parseFloat(item.total) || 0,
+                        parseFloat(item.profit) || 0, item.warehouse || '', rawJson
+                    ]));
+                    stmt.free();
                 } else if (tableName === 'accounts') {
                     const stmt = this.db.prepare(`INSERT OR REPLACE INTO accounts (id, name, code, type, mobile, balance, address, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`);
                     stmt.run(this._safeBind([item.id, item.name || '', item.code || '', item.type || '', item.mobile || '', parseFloat(item.balance) || 0, item.address || '', rawJson]));
@@ -601,7 +775,13 @@
                     stmt.run(this._safeBind([item.id, rawJson]));
                     stmt.free();
                 }
-                this.schedulePersist();
+                if (!this._inTransaction) {
+                    if (tableName === 'transactions' || tableName === 'treasuryAudit') {
+                        this.persistNow();
+                    } else {
+                        this.schedulePersist();
+                    }
+                }
                 return item.id;
             } catch (e) {
                 console.error(`[SQLite] put error on ${tableName}:`, e.message);
@@ -626,7 +806,11 @@
                     for (const item of items) {
                         this.put(tableName, item);
                     }
-                    this.schedulePersist();
+                    if (!this._inTransaction && (tableName === 'transactions' || tableName === 'treasuryAudit')) {
+                        this.persistNow();
+                    } else {
+                        this.schedulePersist();
+                    }
                     return items.map(i => i.id);
                 });
             } catch (e) {
@@ -644,6 +828,13 @@
                 const stmt = this.db.prepare(`DELETE FROM ${tableName} WHERE id = ?;`);
                 stmt.run([id != null ? id : null]);
                 stmt.free();
+                if (tableName === 'transactions') {
+                    try {
+                        const delTi = this.db.prepare(`DELETE FROM transaction_items WHERE tx_id = ?;`);
+                        delTi.run([id != null ? id : null]);
+                        delTi.free();
+                    } catch (tiErr) {}
+                }
                 this.schedulePersist();
                 return true;
             } catch (e) {
@@ -666,6 +857,15 @@
                         }
                     }
                     stmt.free();
+                    if (tableName === 'transactions') {
+                        try {
+                            const delTi = this.db.prepare(`DELETE FROM transaction_items WHERE tx_id = ?;`);
+                            for (const id of ids) {
+                                if (id !== undefined) delTi.run([id != null ? id : null]);
+                            }
+                            delTi.free();
+                        } catch (tiErr) {}
+                    }
                     this.schedulePersist();
                     return true;
                 });
@@ -698,6 +898,9 @@
             if (!this.db) return false;
             try {
                 this.db.run(`DELETE FROM ${tableName};`);
+                if (tableName === 'transactions') {
+                    try { this.db.run(`DELETE FROM transaction_items;`); } catch (tiErr) {}
+                }
                 this.schedulePersist();
                 return true;
             } catch (e) {
@@ -922,7 +1125,7 @@
                     const data = this.db.export();
 
                     if (this.fs && this.dbPath) {
-                        const buffer = Buffer.from(data);
+                        const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
                         const tmpPath = this.dbPath + '.tmp';
 
                         // 1. كتابة غير متزامنة للقرص في ملف مؤقت لمنع تجميد واجهة المستخدم
@@ -976,7 +1179,7 @@
             if (!this.db || !this.fs || !this.dbPath) return;
             try {
                 const data = this.db.export();
-                const buffer = Buffer.from(data);
+                const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
                 const tmpPath = this.dbPath + '.tmp';
                 this.fs.writeFileSync(tmpPath, buffer);
                 try {

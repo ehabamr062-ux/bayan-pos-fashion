@@ -973,7 +973,7 @@ ipcMain.handle('quit-and-install-update', () => {
 
 try { ipcMain.removeHandler('get-app-version'); } catch(e) {}
 ipcMain.handle('get-app-version', () => {
-    return app.getVersion() || '3.1.2';
+    return app.getVersion() || '3.2.2';
 });
 
 // =========================================================================

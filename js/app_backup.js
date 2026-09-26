@@ -375,6 +375,12 @@ window.restoreDataFromContent = async function (jsonContent, fileName = '', isEm
                 if (data.taxReasons) setStore('pos_tax_reasons', JSON.stringify(data.taxReasons));
                 if (data.purchaseDiscountReasons) setStore('pos_p_discount_reasons', JSON.stringify(data.purchaseDiscountReasons));
                 if (data.purchaseTaxReasons) setStore('pos_p_tax_reasons', JSON.stringify(data.purchaseTaxReasons));
+                if (data.drawerClosures && Array.isArray(data.drawerClosures) && data.drawerClosures.length > 0) {
+                    try {
+                        localStorage.setItem('bayan_drawer_closures', JSON.stringify(data.drawerClosures));
+                        setStore('bayan_drawer_closures', JSON.stringify(data.drawerClosures));
+                    } catch (e) {}
+                }
 
                 if (titleEl) {
                     titleEl.innerHTML = `<span style="color: #10b981; font-weight: bold;">✅ اكتملت الاستعادة بنجاح!</span>`;
@@ -913,7 +919,7 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
     };
 
     const data = {
-        version: window.appVersion || "3.2.0",
+        version: window.appVersion || "3.2.2",
         backupDate: new Date().toISOString(),
         products: productsData,
         transactions: transactionsData,
@@ -974,7 +980,8 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         discountReasons: (typeof discountReasons !== 'undefined') ? discountReasons : _safeParse(getStore('pos_discount_reasons'), []),
         taxReasons: (typeof taxReasons !== 'undefined') ? taxReasons : _safeParse(getStore('pos_tax_reasons'), []),
         purchaseDiscountReasons: (typeof purchaseDiscountReasons !== 'undefined') ? purchaseDiscountReasons : _safeParse(getStore('pos_p_discount_reasons'), []),
-        purchaseTaxReasons: (typeof purchaseTaxReasons !== 'undefined') ? purchaseTaxReasons : _safeParse(getStore('pos_p_tax_reasons'), [])
+        purchaseTaxReasons: (typeof purchaseTaxReasons !== 'undefined') ? purchaseTaxReasons : _safeParse(getStore('pos_p_tax_reasons'), []),
+        drawerClosures: _safeParse(localStorage.getItem('bayan_drawer_closures') || getStore('bayan_drawer_closures'), [])
     };
     
     setStore('pos_last_backup_time', Date.now());

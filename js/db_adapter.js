@@ -16,6 +16,7 @@
     const TABLE_COLUMNS = {
         products: new Set(['id', 'name', 'barcode', 'category', 'unit', 'cost', 'price', 'wholesale', 'stock']),
         transactions: new Set(['id', 'invoiceId', 'dateISO', 'time', 'type', 'partner', 'total', 'paidAmount', 'remaining', 'method', 'cashier', 'warehouse']),
+        transaction_items: new Set(['id', 'tx_id', 'invoiceId', 'dateISO', 'time', 'type', 'partner', 'barcode', 'productName', 'size', 'color', 'qty', 'price', 'cost', 'discount', 'addition', 'total', 'profit', 'warehouse']),
         accounts: new Set(['id', 'name', 'code', 'type', 'mobile', 'balance', 'address']),
         warehouses: new Set(['id', 'name', 'address']),
         users: new Set(['id', 'name', 'pin', 'role']),
@@ -476,6 +477,7 @@
             this._tableNames = [
                 'products',
                 'transactions',
+                'transaction_items',
                 'accounts',
                 'settings',
                 'trash',
@@ -550,11 +552,11 @@
             await this._ensureReady();
 
             if (window.BayanSQLite && window.BayanSQLite.db) {
-                return window.BayanSQLite.runInTransaction(async () => {
-                    const res = await callback();
-                    window.BayanSQLite.persistNow();
-                    return res;
+                const res = await window.BayanSQLite.runInTransaction(async () => {
+                    return await callback();
                 });
+                await window.BayanSQLite.persistNow();
+                return res;
             }
 
             return await callback();
@@ -712,7 +714,7 @@
         async exportFullDatabaseJSON() {
             await this._ensureReady();
             const exportData = {
-                version: '3.2.0',
+                version: window.appVersion || '3.2.2',
                 engine: 'SQLite',
                 exportedAt: new Date().toISOString(),
                 tables: {}
