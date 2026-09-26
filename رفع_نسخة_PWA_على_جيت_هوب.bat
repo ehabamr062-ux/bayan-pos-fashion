@@ -17,7 +17,7 @@ git status --short
 
 echo.
 echo [2/3] جاري محاولة الرفع المباشر إلى GitHub...
-git push -u origin main
+git push -u origin main --force
 
 if %errorlevel% equ 0 (
     echo.
