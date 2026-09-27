@@ -371,8 +371,8 @@ async function executePrinting(modeOrTargets, copies = 1) {
     const isSmall = labelWidth <= 42 || labelHeight <= 28;
     
     // سُمك خطوط الباركود عريض وسريع القراءة مع مسافة أمان لمنع الخروج عن الحواف
-    const barcodeW = isSmall ? 1.32 : 1.45;
-    const barcodeH = parseInt(bSettings.barcodeHeight || (isSmall ? 21 : 25), 10);
+    const barcodeW = isSmall ? 1.38 : 1.54;
+    const barcodeH = parseInt(bSettings.barcodeHeight || (isSmall ? 19 : 22), 10);
 
     // 1. إنشاء عناصر الباركود ورسم الـ SVG محلياً عبر JsBarcode الموجود في النافذة
     let labelsHtml = '';
@@ -406,7 +406,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                         width: barcodeW,
                         height: barcodeH,
                         displayValue: true,
-                        fontSize: isSmall ? 8.2 : 9.5,
+                        fontSize: isSmall ? 9 : 10.5,
                         font: "Segoe UI, Arial, sans-serif",
                         fontOptions: "bold",
                         textMargin: 1,
@@ -475,7 +475,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     width: ${bSettings.width}mm;
                     height: ${bSettings.height}mm;
                     max-height: ${bSettings.height}mm;
-                    padding: 0.8mm 2mm;
+                    padding: 0.5mm 1.5mm;
                     margin: 0 auto !important;
                     display: flex;
                     flex-direction: column;
@@ -490,7 +490,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     text-align: center;
                 }
                 .shop-title { 
-                    font-size: ${isSmall ? '6.8pt' : '7.8pt'}; 
+                    font-size: ${isSmall ? '7.5pt' : '8.8pt'}; 
                     font-weight: 900; 
                     color: #000000; 
                     line-height: 1.1; 
@@ -501,38 +501,40 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     max-width: 100%;
                     text-align: center;
                     letter-spacing: 0.2px;
-                    padding: 0 1.5mm;
+                    padding: 0 1mm;
                 }
                 .divider-line {
                     width: 100%;
-                    border-bottom: 1px solid #000000;
-                    margin: 0.2mm 0;
+                    border-bottom: 1.2px solid #000000;
+                    margin: 0.2mm 0 0.4mm 0;
                 }
                 .item-name { 
-                    font-size: ${isSmall ? '8.8pt' : '10.2pt'}; 
+                    font-size: ${isSmall ? '11.5pt' : '13.2pt'}; 
                     font-weight: 900; 
-                    margin: 0 0 0.4mm 0; 
+                    margin: 0 0 0.3mm 0; 
                     white-space: nowrap; 
                     overflow: hidden; 
                     text-overflow: ellipsis; 
                     max-width: 100%; 
                     color: #000000; 
-                    line-height: 1.15; 
+                    line-height: 1.12; 
                     text-align: center;
-                    padding: 0 1.5mm;
+                    padding: 0 1mm;
+                    letter-spacing: -0.2px;
                 }
                 .svg-wrap {
                     width: 100%;
-                    max-width: 96%;
+                    max-width: 98%;
                     display: flex;
                     justify-content: center;
                     align-items: center;
                     margin: 0 auto;
                     text-align: center;
                     overflow: hidden;
+                    flex: 1;
                 }
                 svg { 
-                    max-width: 96% !important; 
+                    max-width: 98% !important; 
                     width: auto !important;
                     height: auto !important;
                     margin: 0 auto !important; 
@@ -541,15 +543,15 @@ async function executePrinting(modeOrTargets, copies = 1) {
                 .bottom-row {
                     display: flex;
                     justify-content: space-between;
-                    align-items: center;
+                    align-items: baseline;
                     width: 100%;
-                    padding: 0 1.2mm;
+                    padding: 0 0.8mm;
                     margin: 0;
-                    line-height: 1.15;
+                    line-height: 1.1;
                     box-sizing: border-box;
                 }
                 .variant-text {
-                    font-size: ${isSmall ? '8pt' : '9.5pt'};
+                    font-size: ${isSmall ? '10.5pt' : '12.2pt'};
                     font-weight: 900;
                     color: #000000;
                     text-align: right;
@@ -567,10 +569,10 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     max-width: 100%;
                     overflow: hidden;
                     text-overflow: ellipsis;
-                    vertical-align: bottom;
+                    vertical-align: baseline;
                 }
                 .price-val {
-                    font-size: ${isSmall ? '9.8pt' : '11.8pt'};
+                    font-size: ${isSmall ? '12.8pt' : '14.8pt'};
                     font-weight: 900;
                     color: #000000;
                     text-align: left;
@@ -578,6 +580,7 @@ async function executePrinting(modeOrTargets, copies = 1) {
                     font-family: 'Segoe UI', Arial, sans-serif;
                     white-space: nowrap;
                     flex-shrink: 0;
+                    letter-spacing: 0.3px;
                 }
                 @media print {
                     .no-print { display: none !important; }

@@ -2364,16 +2364,151 @@
             if (modal) {
                 modal.style.display = 'flex';
                 modal.classList.remove('hidden');
+                if (typeof renderAnyDeskHistory === 'function') renderAnyDeskHistory();
             } else {
                 window.open('https://wa.me/201006825905', '_blank');
             }
         }
         window.contactDeveloper = contactDeveloper;
 
+        function getAnyDeskHistory() {
+            try {
+                const raw = (typeof getStore === 'function')
+                    ? getStore('bayan_anydesk_history')
+                    : localStorage.getItem('bayan_anydesk_history');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed)) return parsed;
+                }
+            } catch (e) {}
+            return [];
+        }
+
+        function saveAnyDeskHistory(code) {
+            const clean = String(code || '').replace(/[^a-zA-Z0-9@._-]/g, '').trim();
+            if (!clean || clean.length < 5) return;
+
+            let history = getAnyDeskHistory();
+            history = history.filter(item => item && item.code !== clean);
+
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('ar-EG', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+            history.unshift({
+                id: Date.now(),
+                code: clean,
+                date: dateStr,
+                time: timeStr
+            });
+
+            if (history.length > 10) {
+                history = history.slice(0, 10);
+            }
+
+            const str = JSON.stringify(history);
+            if (typeof setStore === 'function') {
+                setStore('bayan_anydesk_history', str);
+            }
+            try { localStorage.setItem('bayan_anydesk_history', str); } catch (_) {}
+
+            renderAnyDeskHistory();
+        }
+
+        function renderAnyDeskHistory() {
+            const tbody = document.getElementById('bayanAnyDeskHistoryBody');
+            if (!tbody) return;
+
+            const history = getAnyDeskHistory();
+            if (!history || history.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" style="padding:12px; color:#94a3b8; font-weight:700;">
+                            لا توجد جلسات مسجلة بعد
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = '';
+            history.forEach((item, index) => {
+                html += `
+                    <tr style="border-bottom:1px solid #f1f5f9; transition:0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+                        <td style="padding:6px 4px; font-weight:800; color:#64748b;">${index + 1}</td>
+                        <td style="padding:6px 8px; text-align:right;">
+                            <strong style="font-family:'Segoe UI', Tahoma, monospace; font-size:0.92rem; color:#1d4ed8; cursor:pointer;" onclick="useAnyDeskHistoryCode('${item.code}')" title="اضغط لاختيار هذا الكود">
+                                ${item.code}
+                            </strong>
+                        </td>
+                        <td style="padding:6px 8px; color:#475569; font-weight:700; font-size:0.75rem;">
+                            ${item.date} <span style="color:#94a3b8;">${item.time}</span>
+                        </td>
+                        <td style="padding:6px 6px;">
+                            <button type="button" onclick="useAnyDeskHistoryCode('${item.code}', true)"
+                                style="background:#2563eb; color:white; border:none; border-radius:6px; padding:3px 7px; font-size:0.75rem; font-weight:800; cursor:pointer; transition:0.15s;"
+                                onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'"
+                                title="🚀 فتح والاتصال فوراً بهذا الكود">
+                                🚀
+                            </button>
+                            <button type="button" onclick="deleteAnyDeskHistoryItem(${item.id})"
+                                style="background:#fee2e2; color:#ef4444; border:none; border-radius:6px; padding:3px 6px; font-size:0.75rem; font-weight:800; cursor:pointer; margin-right:3px; transition:0.15s;"
+                                onmouseover="this.style.background='#fecaca'" onmouseout="this.style.background='#fee2e2'"
+                                title="🗑️ حذف من السجل">
+                                ✕
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        function useAnyDeskHistoryCode(code, autoConnect = false) {
+            const input = document.getElementById('bayanAnyDeskInput');
+            if (input) {
+                input.value = code;
+                input.focus();
+            }
+            if (autoConnect) {
+                openAnyDeskDirectly(code);
+            } else if (typeof showToast === 'function') {
+                showToast(`📋 تم اختيار الكود (${code}) في خانة الاتصال`, 'info');
+            }
+        }
+
+        function deleteAnyDeskHistoryItem(id) {
+            let history = getAnyDeskHistory();
+            history = history.filter(item => item && item.id !== id);
+            const str = JSON.stringify(history);
+            if (typeof setStore === 'function') setStore('bayan_anydesk_history', str);
+            try { localStorage.setItem('bayan_anydesk_history', str); } catch (_) {}
+            renderAnyDeskHistory();
+        }
+
+        function clearAnyDeskHistory() {
+            if (typeof showToast === 'function') showToast('🗑️ تم تفريغ سجل اتصالات AnyDesk بنجاح', 'info');
+            if (typeof setStore === 'function') setStore('bayan_anydesk_history', '[]');
+            try { localStorage.setItem('bayan_anydesk_history', '[]'); } catch (_) {}
+            renderAnyDeskHistory();
+        }
+
+        window.getAnyDeskHistory = getAnyDeskHistory;
+        window.saveAnyDeskHistory = saveAnyDeskHistory;
+        window.renderAnyDeskHistory = renderAnyDeskHistory;
+        window.useAnyDeskHistoryCode = useAnyDeskHistoryCode;
+        window.deleteAnyDeskHistoryItem = deleteAnyDeskHistoryItem;
+        window.clearAnyDeskHistory = clearAnyDeskHistory;
+
         async function openAnyDeskDirectly(specificCode) {
             const input = document.getElementById('bayanAnyDeskInput');
             const rawCode = (specificCode !== undefined && specificCode !== null) ? specificCode : (input ? input.value : '');
             const cleanCode = String(rawCode || '').replace(/[^a-zA-Z0-9@._-]/g, '').trim();
+
+            if (cleanCode) {
+                saveAnyDeskHistory(cleanCode);
+            }
 
             if (typeof showToast === 'function') {
                 showToast(cleanCode ? `🖥️ جاري فتح AnyDesk والاتصال بالكود: ${cleanCode}...` : '🖥️ جاري فتح تطبيق AnyDesk على جهازك...', 'info');

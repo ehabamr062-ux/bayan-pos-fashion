@@ -1565,11 +1565,6 @@ async function savePurchase(force = false, accountChecked = false) {
             }
         }
 
-        const selectedMethod = (typeof getSelectedPaymentMethod === 'function') ? getSelectedPaymentMethod('purchase-section') : 'نقدي';
-        const isExplicitCreditMethod = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل'));
-        const purchasePaidInput = document.getElementById('purchasePaid');
-        const paidAmount = isExplicitCreditMethod ? (parseFloat(purchasePaidInput ? purchasePaidInput.value : 0) || 0) : finalTotalInit;
-
         const subTotalInit = purchaseCart.reduce((a, b) => a + (b.price * b.qty), 0);
         const discValInit = parseFloat(document.getElementById('purchaseDiscount')?.value) || 0;
         const discTypeInit = document.getElementById('purchaseDiscountType')?.value || 'val';
@@ -1578,6 +1573,11 @@ async function savePurchase(force = false, accountChecked = false) {
         const taxTypeInit = document.getElementById('purchaseTaxType')?.value || 'val';
         const taxAmountInit = (taxTypeInit === 'perc') ? (subTotalInit * taxValInit / 100) : taxValInit;
         const finalTotalInit = subTotalInit - discAmountInit + taxAmountInit;
+
+        const selectedMethod = (typeof getSelectedPaymentMethod === 'function') ? getSelectedPaymentMethod('purchase-section') : 'نقدي';
+        const isExplicitCreditMethod = typeof window.isTransactionCredit === 'function' ? window.isTransactionCredit(selectedMethod, 0, 0, 0) : (selectedMethod.includes('آجل') || selectedMethod.includes('اجل'));
+        const purchasePaidInput = document.getElementById('purchasePaid');
+        const paidAmount = isExplicitCreditMethod ? (parseFloat(purchasePaidInput ? purchasePaidInput.value : 0) || 0) : finalTotalInit;
 
         const isCredit = (typeof window.isTransactionCredit === 'function')
             ? window.isTransactionCredit(selectedMethod, finalTotalInit, paidAmount, finalTotalInit - paidAmount)

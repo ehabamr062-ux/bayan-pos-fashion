@@ -1462,18 +1462,19 @@ function renderPriceAdjustmentTable(filteredData = null) {
                 <td class="col-adj-1" style="text-align:center; font-weight:bold; color:#64748b; padding:8px 4px; border-right: ${p.hasVariants ? '3px solid #6366f1' : '1px solid #e2e8f0'};">
                     ${renderIndex + 1}
                 </td>
-                <td class="col-adj-image" style="text-align:center; padding: 6px 8px; width: 145px; min-width: 140px;">
+                <td class="col-adj-image" style="text-align:center; padding: 8px 10px; width: 220px; min-width: 210px;">
                     ${p.image ? `
                         <div style="display:inline-flex; align-items:center; justify-content:center;">
                             <img src="${p.image}" alt="${(p.name || '').replace(/"/g, '&quot;')}" 
-                                 style="width: 88px; height: 88px; object-fit: cover; border-radius: 10px; border: 2px solid #cbd5e1; box-shadow: 0 3px 8px rgba(0,0,0,0.14); cursor: pointer; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; vertical-align: middle;" 
-                                 onmouseover="this.style.transform='scale(1.15)'; this.style.borderColor='#6366f1'; this.style.boxShadow='0 6px 16px rgba(99,102,241,0.35)';" 
-                                 onmouseout="this.style.transform='scale(1)'; this.style.borderColor='#cbd5e1'; this.style.boxShadow='0 3px 8px rgba(0,0,0,0.14)';"
+                                 loading="lazy" decoding="async"
+                                 style="width: 180px; height: 180px; object-fit: cover; border-radius: 16px; border: 3px solid #cbd5e1; box-shadow: 0 5px 18px rgba(0,0,0,0.2); cursor: pointer; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; vertical-align: middle;" 
+                                 onmouseover="this.style.transform='scale(1.08)'; this.style.borderColor='#6366f1'; this.style.boxShadow='0 8px 26px rgba(99,102,241,0.38)';" 
+                                 onmouseout="this.style.transform='scale(1)'; this.style.borderColor='#cbd5e1'; this.style.boxShadow='0 5px 18px rgba(0,0,0,0.2)';"
                                  onclick="event.stopPropagation(); if(typeof window.openProductImagePreview==='function') window.openProductImagePreview(${p.id}, event);"
                                  title="🔍 اضغط لتكبير ومعاينة صورة الموديل">
                         </div>
                     ` : `
-                        <span style="display: inline-flex; align-items: center; justify-content: center; width: 82px; height: 82px; border-radius: 10px; background: #f8fafc; border: 2px dashed #cbd5e1; color: #94a3b8; font-size: 2.3rem; user-select: none;" title="لا توجد صورة لهذا الموديل">
+                        <span style="display: inline-flex; align-items: center; justify-content: center; width: 175px; height: 175px; border-radius: 16px; background: #f8fafc; border: 2.5px dashed #cbd5e1; color: #94a3b8; font-size: 4.5rem; user-select: none;" title="لا توجد صورة لهذا الموديل">
                             👗
                         </span>
                     `}
@@ -2705,6 +2706,7 @@ const priceAdjColumnsList = [
 window.priceAdjColumnsList = priceAdjColumnsList;
 
 function openPriceAdjColumnModal() {
+    if (typeof checkColumnCustomizationPermission === 'function' && !checkColumnCustomizationPermission()) return;
     // إغلاق أي نافذة سابقة لمنع التكرار
     const oldModal = document.querySelector('.price-adj-col-modal-overlay');
     if (oldModal) oldModal.remove();
@@ -2877,6 +2879,7 @@ function applyAdjColumnsVisibility() {
 }
 
 function openAdjColumnSettingsModal() {
+    if (typeof checkColumnCustomizationPermission === 'function' && !checkColumnCustomizationPermission()) return;
     const modal = document.getElementById('adjColumnSettingsModal');
     const container = document.getElementById('adjColumnsCheckboxList');
     if (!modal || !container) return;

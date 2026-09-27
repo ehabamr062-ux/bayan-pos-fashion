@@ -2,7 +2,7 @@
  * ============================================================
  *  مركز طباعة الباركود المخصص لقطاع الملابس والأحذية والأصناف العامة
  *  Bayan POS - Barcode & Fashion Label Printing Engine
- *  Version: 3.2.2
+ *  Version: 3.2.3
  * ============================================================
  */
 
@@ -1284,16 +1284,16 @@
             const priceFormatted = (parseFloat(item.price) || 0).toFixed(2);
 
             previewHtml += `
-                <div class="bp-live-sticker" style="width: ${previewW}px; height: ${previewH}px; min-height: ${previewH}px; padding: 4px 6px;">
+                <div class="bp-live-sticker" style="width: ${previewW}px; height: ${previewH}px; min-height: ${previewH}px; padding: 3px 6px;">
                     ${(bpCurrentSettings.showShopName && currentShopName) ? `<div class="bp-stk-shop" style="font-weight:900; font-size: 11px;">${currentShopName}</div>` : ''}
-                    <div style="width: 100%; border-bottom: 1px solid #000000; margin: 1px 0;"></div>
-                    ${bpCurrentSettings.showItemName ? `<div class="bp-stk-item" style="font-weight:900; font-size: 13px; margin: 1px 0 2px 0;" title="${item.name}">${item.name}</div>` : ''}
+                    <div style="width: 100%; border-bottom: 1.2px solid #000000; margin: 1px 0 2px 0;"></div>
+                    ${bpCurrentSettings.showItemName ? `<div class="bp-stk-item" style="font-weight:900; font-size: 16px; margin: 0 0 2px 0; line-height: 1.1;" title="${item.name}">${item.name}</div>` : ''}
                     <div style="flex: 1; display: flex; align-items: center; justify-content: center; width: 100%;">
                         <svg id="bp-preview-svg-${sIdx}" class="bp-stk-barcode-svg"></svg>
                     </div>
-                    <div class="bp-stk-bottom-row" style="font-weight:900;">
-                        ${bpCurrentSettings.showVariant && variantText ? `<div class="bp-stk-variant" style="font-weight:900; font-size: 11.5px;"><bdi>${variantText}</bdi></div>` : '<div></div>'}
-                        ${bpCurrentSettings.showPrice ? `<div class="bp-stk-price" style="font-weight:900; font-size: 14px;">${priceFormatted}</div>` : ''}
+                    <div class="bp-stk-bottom-row" style="font-weight:900; align-items: baseline;">
+                        ${bpCurrentSettings.showVariant && variantText ? `<div class="bp-stk-variant" style="font-weight:900; font-size: 14.5px;"><bdi>${variantText}</bdi></div>` : '<div></div>'}
+                        ${bpCurrentSettings.showPrice ? `<div class="bp-stk-price" style="font-weight:900; font-size: 17.5px;">${priceFormatted}</div>` : ''}
                     </div>
                 </div>
             `;

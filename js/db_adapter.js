@@ -714,7 +714,7 @@
         async exportFullDatabaseJSON() {
             await this._ensureReady();
             const exportData = {
-                version: window.appVersion || '3.2.2',
+                version: window.appVersion || '3.2.3',
                 engine: 'SQLite',
                 exportedAt: new Date().toISOString(),
                 tables: {}

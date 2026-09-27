@@ -290,6 +290,7 @@
         }
 
         function showInventoryColumnCustomizer() {
+            if (typeof checkColumnCustomizationPermission === 'function' && !checkColumnCustomizationPermission()) return;
             const cols = [
                 { id: 0, name: "مربع التحديد (✔️)" },
                 { id: 1, name: "م (الترقيم)" },
@@ -513,6 +514,7 @@
         }
 
         function showAccountsColumnCustomizer() {
+            if (typeof checkColumnCustomizationPermission === 'function' && !checkColumnCustomizationPermission()) return;
             const allCols = [
                 { id: 10, name: "تحديد الحساب", icon: "🔘", desc: "دائرة اختيار وتحديد الحساب" },
                 { id: 0, name: "م (المسلسل)", icon: "🔢", desc: "الترقيم التلقائي للأسطر" },

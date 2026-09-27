@@ -1476,6 +1476,7 @@
      * فتح وإغلاق قائمة تخصيص الأعمدة
      */
     window.toggleInquiryColCustomizer = function (e) {
+        if (typeof checkColumnCustomizationPermission === 'function' && !checkColumnCustomizationPermission()) return;
         if (e) e.stopPropagation();
         isColCustomizerOpen = !isColCustomizerOpen;
         const dropdown = document.getElementById('inquiryColDropdown');

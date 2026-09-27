@@ -41,6 +41,28 @@ function initAppStore() {
                     }
                 });
 
+                // مزامنة واستيراد ذكي للإعدادات والتراخيص من localStorage إن كانت غير مسجلة في SQLite بعد
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        const legacyKeys = [
+                            'bayan_hwid', 'hwid', 'bayan_current_plan', 'bayan_has_subscribed_paid', 'bayan_expiry_date',
+                            'bayan_activation_date', 'bayan_install_date', 'bayan_subscription_history',
+                            'license_info', 'bayan_used_license_codes', 'bayan_trial_consumed',
+                            'bayan_trial_final_count', 'bayan_active', 'bayan_master_license',
+                            'bayan_remote_extra_trial_limit', 'bayan_drawer_closures'
+                        ];
+                        legacyKeys.forEach(k => {
+                            if (!window.AppStore[k]) {
+                                const lVal = localStorage.getItem(k);
+                                if (lVal !== null && lVal !== undefined && lVal !== '') {
+                                    window.AppStore[k] = lVal;
+                                    window.bayanDB.settings.put({ id: k, value: String(lVal) }).catch(() => {});
+                                }
+                            }
+                        });
+                    }
+                } catch (migErr) {}
+
                 isAppStoreInitialized = true;
                 console.log("✅ تم تجهيز الـ Store عبر محرك SQLite بنجاح:", Object.keys(window.AppStore).length, "عنصر محمل.");
             } catch (error) {
@@ -54,22 +76,43 @@ function initAppStore() {
     return _initAppStorePromise;
 }
 
-// دالة قراءة متزامنة فائقة السرعة من الذاكرة (المحمّلة والمطابقة 100% مع SQLite)
+// دالة قراءة متزامنة فائقة السرعة من الذاكرة مع حماية وتوافق تلقائي من localStorage
 function getStore(key) {
     if (window.AppStore && window.AppStore.hasOwnProperty(key) && window.AppStore[key] !== null && window.AppStore[key] !== undefined) {
         return window.AppStore[key];
     }
+    // 🛡️ التوافق العكسي: إذا لم يكن في الذاكرة/SQLite، يتم جلبه فوراً من localStorage ومزامنته
+    try {
+        if (typeof localStorage !== 'undefined') {
+            const localVal = localStorage.getItem(key);
+            if (localVal !== null && localVal !== undefined && localVal !== '') {
+                if (!window.AppStore) window.AppStore = {};
+                window.AppStore[key] = localVal;
+                const dbInstance = window.bayanDB || window.db;
+                if (dbInstance && dbInstance.settings) {
+                    dbInstance.settings.put({ id: key, value: String(localVal) }).catch(() => {});
+                }
+                return localVal;
+            }
+        }
+    } catch (e) {}
     return null;
 }
 
-// دالة كتابة (تحفظ في الذاكرة فوراً وتُسجّل في قاعدة بيانات SQLite مباشرة)
+// دالة كتابة (تحفظ في الذاكرة فوراً وتُسجّل في قاعدة بيانات SQLite مباشرة مع نسخة احتياطية في localStorage)
 function setStore(key, value) {
     if (!window.AppStore) window.AppStore = {};
     window.AppStore[key] = value;
     
+    const storedVal = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : String(value);
+    try {
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(key, storedVal);
+        }
+    } catch (e) {}
+
     const dbInstance = window.bayanDB || window.db;
     if (dbInstance && dbInstance.settings) {
-        const storedVal = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : String(value);
         dbInstance.settings.put({ id: key, value: storedVal }).catch(err => {
             console.error(`❌ خطأ في حفظ الإعداد [${key}] داخل SQLite:`, err);
         });

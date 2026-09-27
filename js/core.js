@@ -47,11 +47,11 @@ function openExternalUrl(url) {
 // 🔢 المزامنة التلقائية لرقم الإصدار الموحد (Single Source of Truth Unification)
 // المصدر الرسمي الوحيد هو package.json عبر app.getVersion()
 // =========================================================================
-window.appVersion = '3.2.2';
-window.APP_VERSION = '3.2.2';
+window.appVersion = '3.2.3';
+window.APP_VERSION = '3.2.3';
 
 async function fetchAppVersion() {
-    let version = '3.2.2';
+    let version = '3.2.3';
     try {
         if (typeof window !== 'undefined' && window.require) {
             const electron = window.require('electron');
@@ -65,7 +65,7 @@ async function fetchAppVersion() {
 }
 
 function syncAppVersionUI(version) {
-    if (!version) version = window.appVersion || '3.2.2';
+    if (!version) version = window.appVersion || '3.2.3';
     window.appVersion = version;
     window.APP_VERSION = version;
 

@@ -236,7 +236,7 @@
     // حالة نظام التحديث
     // =========================================================================
     const state = {
-        currentVersion: window.appVersion || '3.2.2',
+        currentVersion: window.appVersion || '3.2.3',
         latestVersion: null,
         releaseNotes: '',
         downloadUrl: '',
@@ -265,7 +265,7 @@
     }
 
     function getCurrentAppVersion() {
-        return window.appVersion || '3.2.2';
+        return window.appVersion || '3.2.3';
     }
 
     function fmtNotes(notes) {
@@ -811,7 +811,14 @@
     window.cloudAnnouncementsHistory = [];
 
     // تحميل سجل الإشعارات السحابية السابقة
-    const storedAnn = getStore('bayan_cloud_announcements_history');
+    let storedAnn = null;
+    try {
+        storedAnn = (typeof getStore === 'function')
+            ? getStore('bayan_cloud_announcements_history')
+            : localStorage.getItem('bayan_cloud_announcements_history');
+    } catch (_) {
+        try { storedAnn = localStorage.getItem('bayan_cloud_announcements_history'); } catch (__) {}
+    }
     if (storedAnn) {
         try {
             window.cloudAnnouncementsHistory = JSON.parse(storedAnn) || [];
@@ -870,7 +877,11 @@
             });
 
             const historyStr = JSON.stringify(window.cloudAnnouncementsHistory);
-            setStore('bayan_cloud_announcements_history', historyStr);
+            if (typeof setStore === 'function') {
+                setStore('bayan_cloud_announcements_history', historyStr);
+            } else {
+                try { localStorage.setItem('bayan_cloud_announcements_history', historyStr); } catch (_) {}
+            }
 
             if (typeof updateNotifications === 'function') {
                 updateNotifications();
@@ -926,7 +937,7 @@
     // 🔒 إدارة وتجميد سياسة التحديثات التلقائية عبر SQLite و Electron Disk
     // =========================================================================
     function updateAutoUpdatesPolicyDOM(isEnabled) {
-        const curVer = window.appVersion || '3.2.2';
+        const curVer = window.appVersion || '3.2.3';
         const badge = document.getElementById('updatePolicyBadge');
         const text = document.getElementById('toggleAutoUpdatesText');
         const toggle = document.getElementById('toggleAutoUpdatesSwitch');
@@ -996,7 +1007,7 @@
 
     window.toggleAutoUpdatesPolicy = async function(isEnabled) {
         const disabled = !isEnabled;
-        const curVer = window.appVersion || '3.2.2';
+        const curVer = window.appVersion || '3.2.3';
         window.__isAutoUpdatesFrozen = disabled;
 
         // 💾 1. التخزين اللحظي في AppStore و SQLite

@@ -357,6 +357,21 @@ window.restoreDataFromContent = async function (jsonContent, fileName = '', isEm
                     if (data.tableColumnsSettings.transferCols) setStore('transferColSettings', JSON.stringify(data.tableColumnsSettings.transferCols));
                     if (data.tableColumnsSettings.priceAdjCols) setStore('priceAdjHiddenCols', JSON.stringify(data.tableColumnsSettings.priceAdjCols));
                     if (data.tableColumnsSettings.priceAdjColsAlt) setStore('bayan_adj_hidden_columns', JSON.stringify(data.tableColumnsSettings.priceAdjColsAlt));
+                    if (data.tableColumnsSettings.dailyReportCustomRows) {
+                        try {
+                            const str = typeof data.tableColumnsSettings.dailyReportCustomRows === 'object' ? JSON.stringify(data.tableColumnsSettings.dailyReportCustomRows) : data.tableColumnsSettings.dailyReportCustomRows;
+                            setStore('bayan_daily_report_custom_rows', str);
+                            localStorage.setItem('bayan_daily_report_custom_rows', str);
+                        } catch (e) {}
+                    }
+                }
+
+                if (data.dailyReportCustomRows) {
+                    try {
+                        const str = typeof data.dailyReportCustomRows === 'object' ? JSON.stringify(data.dailyReportCustomRows) : data.dailyReportCustomRows;
+                        setStore('bayan_daily_report_custom_rows', str);
+                        localStorage.setItem('bayan_daily_report_custom_rows', str);
+                    } catch (e) {}
                 }
 
                 if (data.viewPreferences) {
@@ -380,6 +395,50 @@ window.restoreDataFromContent = async function (jsonContent, fileName = '', isEm
                         localStorage.setItem('bayan_drawer_closures', JSON.stringify(data.drawerClosures));
                         setStore('bayan_drawer_closures', JSON.stringify(data.drawerClosures));
                     } catch (e) {}
+                }
+
+                // 🔒 استعادة وتوثيق كود الجهاز (HWID) في قاعدة البيانات والذاكرة
+                const restoredHwid = data.hwid || data.deviceMachineId || (data.subscription && data.subscription.hwid) || (data.settings && data.settings.hwid);
+                if (restoredHwid) {
+                    try {
+                        const currentNativeHwid = (typeof window.getUniqueHWID === 'function') ? await window.getUniqueHWID() : null;
+                        const finalHwidToUse = currentNativeHwid || restoredHwid;
+                        setStore('bayan_hwid', finalHwidToUse);
+                        try { localStorage.setItem('bayan_hwid', finalHwidToUse); } catch (e) {}
+                        if (db && db.settings) {
+                            await db.settings.put({ id: 'hwid', value: finalHwidToUse });
+                        }
+                    } catch (e) {
+                        console.warn("HWID restore sync warning:", e);
+                    }
+                }
+
+                // 💎 استعادة خطة الاشتراك والترخيص وحمايتها من العودة للنسخة التجريبية
+                if (data.subscription && typeof data.subscription === 'object') {
+                    const sub = data.subscription;
+                    const applySubProp = (key, val) => {
+                        if (val !== undefined && val !== null && val !== '') {
+                            const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                            try { localStorage.setItem(key, strVal); } catch (_) {}
+                            setStore(key, typeof val === 'object' ? strVal : val);
+                        }
+                    };
+
+                    if (sub.hwid && !getStore('bayan_hwid')) applySubProp('bayan_hwid', sub.hwid);
+                    if (sub.currentPlan) applySubProp('bayan_current_plan', sub.currentPlan);
+                    if (sub.expiryDate) applySubProp('bayan_expiry_date', sub.expiryDate);
+                    if (sub.activationDate) applySubProp('bayan_activation_date', sub.activationDate);
+                    if (sub.installDate) applySubProp('bayan_install_date', sub.installDate);
+                    if (sub.hasSubscribedPaid) applySubProp('bayan_has_subscribed_paid', sub.hasSubscribedPaid);
+                    if (sub.trialConsumed) applySubProp('bayan_trial_consumed', sub.trialConsumed);
+                    if (sub.trialFinalCount) applySubProp('bayan_trial_final_count', sub.trialFinalCount);
+                    if (sub.trialMaxInvoices) applySubProp('bayan_trial_max_invoices', sub.trialMaxInvoices);
+                    if (sub.remoteExtraTrialLimit) applySubProp('bayan_remote_extra_trial_limit', sub.remoteExtraTrialLimit);
+                    if (sub.active) applySubProp('bayan_active', sub.active);
+                    if (sub.masterLicense) applySubProp('bayan_master_license', sub.masterLicense);
+                    if (sub.licenseInfo) applySubProp('license_info', sub.licenseInfo);
+                    if (sub.subscriptionHistory) applySubProp('bayan_subscription_history', sub.subscriptionHistory);
+                    if (sub.usedLicenseCodes) applySubProp('bayan_used_license_codes', sub.usedLicenseCodes);
                 }
 
                 if (titleEl) {
@@ -918,9 +977,13 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         }
     };
 
+    const activeHwid = (typeof window.getUniqueHWID === 'function' ? await window.getUniqueHWID() : '') || getStore('bayan_hwid') || localStorage.getItem('bayan_hwid') || '';
+
     const data = {
-        version: window.appVersion || "3.2.2",
+        version: window.appVersion || "3.2.3",
         backupDate: new Date().toISOString(),
+        hwid: activeHwid,
+        deviceMachineId: activeHwid,
         products: productsData,
         transactions: transactionsData,
         settings: _safeParse(getStore('pos_settings'), {}),
@@ -967,8 +1030,10 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
             inquiryVariantsCols: _safeParse(getStore('pos_inquiry_variants_cols'), {}),
             transferCols: _safeParse(getStore('transferColSettings'), {}),
             priceAdjCols: _safeParse(getStore('priceAdjHiddenCols'), []),
-            priceAdjColsAlt: _safeParse(getStore('bayan_adj_hidden_columns'), [])
+            priceAdjColsAlt: _safeParse(getStore('bayan_adj_hidden_columns'), []),
+            dailyReportCustomRows: _safeParse(getStore('bayan_daily_report_custom_rows') || localStorage.getItem('bayan_daily_report_custom_rows'), null)
         },
+        dailyReportCustomRows: _safeParse(getStore('bayan_daily_report_custom_rows') || localStorage.getItem('bayan_daily_report_custom_rows'), null),
         viewPreferences: {
             variantViewMode: getStore('bayan_variant_view_mode') || '',
             variantViewModePinned: getStore('bayan_variant_view_mode_pinned') || '',
@@ -981,7 +1046,24 @@ window.executeAutoBackupToFile = async function(silent = false, isManual = false
         taxReasons: (typeof taxReasons !== 'undefined') ? taxReasons : _safeParse(getStore('pos_tax_reasons'), []),
         purchaseDiscountReasons: (typeof purchaseDiscountReasons !== 'undefined') ? purchaseDiscountReasons : _safeParse(getStore('pos_p_discount_reasons'), []),
         purchaseTaxReasons: (typeof purchaseTaxReasons !== 'undefined') ? purchaseTaxReasons : _safeParse(getStore('pos_p_tax_reasons'), []),
-        drawerClosures: _safeParse(localStorage.getItem('bayan_drawer_closures') || getStore('bayan_drawer_closures'), [])
+        drawerClosures: _safeParse(localStorage.getItem('bayan_drawer_closures') || getStore('bayan_drawer_closures'), []),
+        subscription: {
+            hwid: activeHwid,
+            currentPlan: getStore('bayan_current_plan') || localStorage.getItem('bayan_current_plan') || '',
+            expiryDate: getStore('bayan_expiry_date') || localStorage.getItem('bayan_expiry_date') || '',
+            activationDate: getStore('bayan_activation_date') || localStorage.getItem('bayan_activation_date') || '',
+            installDate: getStore('bayan_install_date') || localStorage.getItem('bayan_install_date') || '',
+            hasSubscribedPaid: getStore('bayan_has_subscribed_paid') || localStorage.getItem('bayan_has_subscribed_paid') || '',
+            trialConsumed: getStore('bayan_trial_consumed') || localStorage.getItem('bayan_trial_consumed') || '',
+            trialFinalCount: getStore('bayan_trial_final_count') || localStorage.getItem('bayan_trial_final_count') || '',
+            trialMaxInvoices: getStore('bayan_trial_max_invoices') || localStorage.getItem('bayan_trial_max_invoices') || '',
+            remoteExtraTrialLimit: getStore('bayan_remote_extra_trial_limit') || localStorage.getItem('bayan_remote_extra_trial_limit') || '',
+            active: getStore('bayan_active') || localStorage.getItem('bayan_active') || '',
+            masterLicense: getStore('bayan_master_license') || localStorage.getItem('bayan_master_license') || '',
+            licenseInfo: _safeParse(getStore('license_info') || localStorage.getItem('license_info'), null),
+            subscriptionHistory: _safeParse(getStore('bayan_subscription_history') || localStorage.getItem('bayan_subscription_history'), []),
+            usedLicenseCodes: _safeParse(getStore('bayan_used_license_codes') || localStorage.getItem('bayan_used_license_codes'), [])
+        }
     };
     
     setStore('pos_last_backup_time', Date.now());

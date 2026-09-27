@@ -1,6 +1,6 @@
 {
   "name": "bayan-pos-fashion",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "description": "Bayan POS Fashion System",
   "main": "main.js",
   "scripts": {
@@ -59,6 +59,7 @@
       "**/*",
       "!tools/**",
       "!README.md",
+      "!*.bat",
       "!**/*.map"
     ],
     "asar": true

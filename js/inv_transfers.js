@@ -1757,6 +1757,8 @@ var transferItemsBatch = window.transferItemsBatch;
 
         window.toggleTransferColMenu = function(event) {
 
+            if (typeof checkColumnCustomizationPermission === 'function' && !checkColumnCustomizationPermission()) return;
+
             if (event) event.stopPropagation();
 
             const menu = document.getElementById('transferColMenu');

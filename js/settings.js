@@ -494,6 +494,36 @@ function applyPermissions() {
         }
     });
 
+    // 3.4 🔒 تجميد وحجب أزرار ونوافذ تخصيص الأعمدة والصفوف عن الكاشير والموظف (حصرية للمدير)
+    const isColCustAllowed = (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin');
+    const colCustomizerSelectors = [
+        'button[onclick*="openDailyReportCustomizerModal"]',
+        'button[onclick*="showInventoryColumnCustomizer"]',
+        'button[onclick*="invoicesColSelectorPopup"]',
+        'button[onclick*="historyColSelectorPopup"]',
+        '#btnAdjCustomizeCols',
+        '.acc-btn-settings',
+        'button[onclick*="showAnalysisColumnCustomizer"]',
+        'button[onclick*="openPriceAdjColumnModal"]'
+    ];
+    colCustomizerSelectors.forEach(sel => {
+        const els = document.querySelectorAll(sel);
+        els.forEach(el => {
+            if (el) {
+                if (isColCustAllowed) {
+                    el.style.display = '';
+                    el.disabled = false;
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                } else {
+                    el.style.display = 'none';
+                    el.disabled = true;
+                    el.style.pointerEvents = 'none';
+                }
+            }
+        });
+    });
+
     // 4. 🔒 تحديث ضوابط الخصم والتسعير في شاشة المبيعات فور تسجيل الدخول
     const isPriceLocked = (typeof currentUser !== 'undefined' && currentUser && currentUser.lockPriceEdit);
     const canEditPrice = !isPriceLocked && ((typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') 
@@ -1070,7 +1100,65 @@ function onUserWarehouseScopeChange(scope) {
 }
 window.onUserWarehouseScopeChange = onUserWarehouseScopeChange;
 
-function addUser() {
+// 🔒 حفظ وتثبيت جدول المستخدمين مباشرة وفورياً في SQLite وكاش التخزين المحلي لمنع أي فقدان أو حفظ مؤقت
+async function saveUsersDirectlyToDb() {
+    if (!Array.isArray(users)) return;
+    window.users = users;
+    try {
+        if (typeof db !== 'undefined' && db && db.users) {
+            const secureUsers = users.map(u => ({
+                ...u,
+                pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                    ? window.BayanSecurity.encryptPin(u.pin)
+                    : u.pin
+            }));
+            await db.users.clear();
+            await db.users.bulkPut(secureUsers);
+            console.log("🔒 [SQLite Users] تم حفظ وتثبيت بيانات وصلاحيات كافة المستخدمين في SQLite بنجاح.");
+        }
+    } catch (e) {
+        console.error("❌ فشل الحفظ المباشر للمستخدمين في SQLite:", e);
+    }
+
+    try {
+        if (typeof setStore === 'function') {
+            const secureUsersCache = users.map(u => ({
+                ...u,
+                pin: (window.BayanSecurity && typeof window.BayanSecurity.encryptPin === 'function')
+                    ? window.BayanSecurity.encryptPin(u.pin)
+                    : u.pin
+            }));
+            setStore('bayan_pos_users_secure_cache', JSON.stringify(secureUsersCache));
+        }
+    } catch (ce) {}
+}
+window.saveUsersDirectlyToDb = saveUsersDirectlyToDb;
+
+// 🔒 فحص صلاحية تخصيص الأعمدة والصفوف (حصرية لمدير النظام فقط ومجمدة للموظف/الكاشير)
+function canCustomizeColumns() {
+    if (!currentUser) return false;
+    return currentUser.role === 'admin';
+}
+window.canCustomizeColumns = canCustomizeColumns;
+
+function checkColumnCustomizationPermission(silent = false) {
+    if (canCustomizeColumns()) return true;
+    if (!silent) {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert({
+                type: 'warning',
+                titleText: '🔒 خاصية مقفلة',
+                msg: 'عذراً، خاصية تخصيص وإخفاء الأعمدة والصفوف مقفلة ومخصصة لمدير النظام فقط.'
+            });
+        } else if (typeof showToast === 'function') {
+            showToast("🔒 خاصية تخصيص الأعمدة مقفلة ومخصصة للمدير فقط!", "warning");
+        }
+    }
+    return false;
+}
+window.checkColumnCustomizationPermission = checkColumnCustomizationPermission;
+
+async function addUser() {
     if (typeof checkPermission === 'function' && !checkPermission('general_settings')) {
         return showToast("🚫 ليس لديك صلاحية إدارة وصلاحيات المستخدمين!", "error");
     }
@@ -1111,26 +1199,37 @@ function addUser() {
     const canWarehouseReport = document.getElementById('perm_sec_warehouse_report') ? document.getElementById('perm_sec_warehouse_report').checked : false;
     const canTreasury = document.getElementById('perm_sec_treasury') ? document.getElementById('perm_sec_treasury').checked : false;
 
+    // 🔒 ضبط الأرباح بدقة متناهية والتوافق بين صندوق الكاشير وتبويب التقارير
     let isHideProfits = false;
     if (role === 'admin') {
         const adminEl = document.getElementById('adminHideProfits');
         if (adminEl) isHideProfits = adminEl.checked;
     } else {
-        const permEl = document.getElementById('perm_ui_hide_profits');
-        if (permEl) isHideProfits = permEl.checked;
+        const permUiEl = document.getElementById('perm_ui_hide_profits');
+        const permGenEl = document.getElementById('perm_gen_profits');
+        if (permUiEl && permUiEl.checked) {
+            isHideProfits = true;
+        } else if (permGenEl && !permGenEl.checked) {
+            isHideProfits = true;
+        } else {
+            isHideProfits = false;
+        }
     }
 
+    // 🔒 ضبط رصيد الدرج بدقة متناهية والتوافق بين صندوق الكاشير وتبويب التقارير
     let isHideDrawerBalance = false;
     if (role === 'admin') {
         const adminEl = document.getElementById('adminHideDrawerBalance');
         if (adminEl) isHideDrawerBalance = adminEl.checked;
     } else {
-        const permEl = document.getElementById('perm_ui_hide_drawer_balance');
+        const permUiEl = document.getElementById('perm_ui_hide_drawer_balance');
         const permGenEl = document.getElementById('perm_gen_drawer_balance');
-        if (permEl) {
-            isHideDrawerBalance = permEl.checked;
-        } else if (permGenEl) {
-            isHideDrawerBalance = !permGenEl.checked;
+        if (permUiEl && permUiEl.checked) {
+            isHideDrawerBalance = true;
+        } else if (permGenEl && !permGenEl.checked) {
+            isHideDrawerBalance = true;
+        } else {
+            isHideDrawerBalance = false;
         }
     }
 
@@ -1182,7 +1281,8 @@ function addUser() {
             hideNew: (role === 'admin' && document.getElementById('adminHideNew')) ? document.getElementById('adminHideNew').checked : (document.getElementById('perm_ui_hide_new') ? document.getElementById('perm_ui_hide_new').checked : false),
             settings: document.getElementById('perm_gen_settings') ? document.getElementById('perm_gen_settings').checked : false,
             shortcuts: document.getElementById('perm_gen_shortcuts') ? document.getElementById('perm_gen_shortcuts').checked : false,
-            users: document.getElementById('perm_gen_users') ? document.getElementById('perm_gen_users').checked : false
+            users: document.getElementById('perm_gen_users') ? document.getElementById('perm_gen_users').checked : false,
+            columnCustomization: false // 🔒 مجمدة ومقفلة للموظف وحصرية للمدير
         }
     };
 
@@ -1232,11 +1332,12 @@ function addUser() {
         const idx = users.findIndex(u => u.id === window.editingUserId);
         if (idx !== -1) users[idx] = newUser;
         window.editingUserId = null;
-        showToast("✅ تم تحديث بيانات الموظف بنجاح", "success");
     } else {
         users.push(newUser);
-        showToast("✅ تم إضافة الموظف الجديد بنجاح", "success");
     }
+
+    // 🔒 حفظ مباشر وتثبيت قطعي في SQLite فوراً بدون تأخير
+    await saveUsersDirectlyToDb();
 
     // مزامنة فورية للجلسة الحالية إذا قام المستخدم بتعديل بيانات حسابه المفتوح
     if (currentUser && (currentUser.id === newUser.id || currentUser.name === newUser.name)) {
@@ -1248,12 +1349,14 @@ function addUser() {
     }
 
     window.users = users;
-    saveData();
+    saveData('users');
     renderUsersTable();
     hideUserFormCard();
     if (typeof applyPermissions === 'function') applyPermissions();
     if (typeof updateLoginUsersList === 'function') updateLoginUsersList();
     
+    showToast(isUpdating ? "✅ تم تحديث وتثبيت بيانات وصلاحيات الموظف في قاعدة البيانات بنجاح" : "✅ تم إضافة الموظف الجديد وتثبيته في قاعدة البيانات بنجاح", "success");
+
     if (typeof logAuditAction === 'function') logAuditAction(isUpdating ? 'تحديث موظف' : 'إضافة موظف جديد', `الاسم: ${newUser.name}, الدور: ${newUser.role}, المخزن: ${warehouseScope === 'specific' ? assignedWarehouse : (warehouseScope === 'main' ? 'الرئيسي فقط' : 'كافة المخازن')}`);
     if (typeof syncUsersToCloud === 'function') syncUsersToCloud();
 }
@@ -1385,7 +1488,6 @@ function editUser(idx) {
     }
     if (p.general) {
         document.getElementById('perm_gen_reports').checked = !!p.general.reports;
-        document.getElementById('perm_gen_profits').checked = !!p.general.profits;
         document.getElementById('perm_gen_settings').checked = !!p.general.settings;
         if (document.getElementById('perm_gen_shortcuts')) {
             document.getElementById('perm_gen_shortcuts').checked = (p.general.shortcuts !== undefined) ? !!p.general.shortcuts : !!p.general.settings;
@@ -1398,13 +1500,12 @@ function editUser(idx) {
         : ((p.general && p.general.profits !== undefined) ? !p.general.profits : false);
 
     const adminHideProfitsEl = document.getElementById('adminHideProfits');
-    if (adminHideProfitsEl) {
-        adminHideProfitsEl.checked = isProfitsHidden;
-    }
+    if (adminHideProfitsEl) adminHideProfitsEl.checked = isProfitsHidden;
     const permHideProfitsEl = document.getElementById('perm_ui_hide_profits');
-    if (permHideProfitsEl) {
-        permHideProfitsEl.checked = isProfitsHidden;
-    }
+    if (permHideProfitsEl) permHideProfitsEl.checked = isProfitsHidden;
+    const permGenProfitsEl = document.getElementById('perm_gen_profits');
+    if (permGenProfitsEl) permGenProfitsEl.checked = !isProfitsHidden;
+
     const adminHideShareEl = document.getElementById('adminHideShare');
     if (adminHideShareEl) {
         adminHideShareEl.checked = (p.general && p.general.hideShare !== undefined) ? !!p.general.hideShare : false;
@@ -1433,6 +1534,13 @@ function editUser(idx) {
     if (permHideDrawerBalanceEl) permHideDrawerBalanceEl.checked = isDrawerBalanceHidden;
     const permGenDrawerBalanceEl = document.getElementById('perm_gen_drawer_balance');
     if (permGenDrawerBalanceEl) permGenDrawerBalanceEl.checked = !isDrawerBalanceHidden;
+
+    // 🔒 مربع تخصيص الأعمدة مجمد ومقفول للموظف دائماً
+    const colCustEl = document.getElementById('perm_docs_column_customization');
+    if (colCustEl) {
+        colCustEl.checked = false;
+        colCustEl.disabled = true;
+    }
 
     const lockDailyUserEl = document.getElementById('perm_gen_lock_daily_user');
     if (lockDailyUserEl) {
@@ -1491,6 +1599,11 @@ function resetUserForm() {
     if (document.getElementById('adminLockPriceEdit')) document.getElementById('adminLockPriceEdit').checked = false;
     if (document.getElementById('adminHideProfits')) document.getElementById('adminHideProfits').checked = false;
     if (document.getElementById('perm_ui_hide_profits')) document.getElementById('perm_ui_hide_profits').checked = false;
+    if (document.getElementById('perm_gen_profits')) document.getElementById('perm_gen_profits').checked = true;
+    if (document.getElementById('perm_docs_column_customization')) {
+        document.getElementById('perm_docs_column_customization').checked = false;
+        document.getElementById('perm_docs_column_customization').disabled = true;
+    }
     if (document.getElementById('adminHideShare')) document.getElementById('adminHideShare').checked = false;
     if (document.getElementById('adminHideNew')) document.getElementById('adminHideNew').checked = false;
     if (document.getElementById('perm_ui_hide_share')) document.getElementById('perm_ui_hide_share').checked = false;
@@ -1913,6 +2026,7 @@ function deleteUser(idx) {
         }
 
         saveData();
+        saveUsersDirectlyToDb();
         renderUsersTable();
 
         // تحديث فوري لقائمة المستخدمين في شاشة تسجيل الدخول بدون تسجيل خروج
@@ -1971,6 +2085,9 @@ function resolvePermissionKey(action) {
     if (act === 'accounts_statement' || act === 'statement') act = 'accounts_statement';
     if (act === 'accounts_treasury' || act === 'sec_treasury' || act === 'treasury' || act === 'treasury-audit' || act === 'treasury_audit') act = 'accounts_treasury';
     if (act === 'general_shortcuts' || act === 'shortcuts') act = 'general_shortcuts';
+    if (act === 'column_customization' || act === 'column-customization' || act === 'customize_columns' || act === 'cols_custom' || act === 'columns_customization') {
+        return { module: 'general', perm: 'columnCustomization' };
+    }
     if (act === 'ui_hide_share' || act === 'hide_share') return { module: 'general', perm: 'hideShare' };
     if (act === 'ui_hide_new' || act === 'hide_new') return { module: 'general', perm: 'hideNew' };
     if (act.startsWith('acc_')) act = 'accounts_' + act.substring(4);
@@ -2014,6 +2131,29 @@ function checkPermission(action) {
         if (realUser.role === 'admin') {
             const isProfitsBlocked = realUser.permissions?.general && (realUser.permissions.general.hideProfits === true || realUser.permissions.general.profits === false);
             if (action === 'general_profits' && isProfitsBlocked) {
+                showCustomAlert({
+                    type: 'error',
+                    titleText: '🚫 وصول مرفوض',
+                    msg: 'عذراً، تم تعطيل رؤية الأرباح لهذا الحساب.'
+                });
+                return false;
+            }
+            return true;
+        }
+
+        // 🔒 خاصية تخصيص الأعمدة محصورة لمدير النظام فقط
+        if (action === 'column_customization' || action === 'column-customization' || action === 'customize_columns' || action === 'cols_custom' || action === 'columns_customization') {
+            showCustomAlert({
+                type: 'warning',
+                titleText: '🔒 خاصية مقفلة',
+                msg: 'عذراً، خاصية تخصيص وإخفاء الأعمدة والصفوف مقفلة ومخصصة لمدير النظام فقط.'
+            });
+            return false;
+        }
+
+        if (action === 'general_profits' || action === 'profits') {
+            const isProfitsBlocked = realUser.permissions?.general && (realUser.permissions.general.hideProfits === true || realUser.permissions.general.profits === false);
+            if (isProfitsBlocked) {
                 showCustomAlert({
                     type: 'error',
                     titleText: '🚫 وصول مرفوض',
@@ -2198,6 +2338,20 @@ function hasPermission(action) {
             }
             return true;
         }
+
+        // 🔒 خاصية تخصيص الأعمدة محصورة لمدير النظام فقط
+        if (action === 'column_customization' || action === 'column-customization' || action === 'customize_columns' || action === 'cols_custom' || action === 'columns_customization') {
+            return false;
+        }
+
+        if (action === 'general_profits' || action === 'profits') {
+            if (realUser.permissions?.general) {
+                if (realUser.permissions.general.hideProfits === true || realUser.permissions.general.profits === false) return false;
+                return true;
+            }
+            return false;
+        }
+
         if (!realUser.permissions) return false;
         const { module, perm } = resolvePermissionKey(action);
         const userPerms = realUser.permissions[module];

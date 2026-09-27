@@ -2276,9 +2276,7 @@ body.dark-mode .moon-icon {
         }
         /* 🙈 إخفاء وتعتيم المبالغ في تقرير الحركة اليومية للحفاظ على السرية والخصوصية الكاملة */
         body.daily-amounts-hidden #daily-report-section #dailyTotalVal,
-        body.daily-amounts-hidden #daily-report-section #dailyDiscountsVal,
         body.daily-amounts-hidden #daily-report-section #dailyAdditionsVal,
-        body.daily-amounts-hidden #daily-report-section #dailyVodafoneCashVal,
         body.daily-amounts-hidden #daily-report-section .daily-method-val,
         body.daily-amounts-hidden #daily-report-section .report-summary-box .value,
         body.daily-amounts-hidden #daily-report-section .summary-val,
@@ -2302,9 +2300,7 @@ body.dark-mode .moon-icon {
         body.daily-amounts-hidden #daily-report-section #treasurySummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #profitSummaryBody tr:hover td:nth-child(2),
         body.daily-amounts-hidden #daily-report-section #dailyTotalSalesReceipts:hover #dailyTotalVal,
-        body.daily-amounts-hidden #daily-report-section #dailyTotalDiscountsBadge:hover #dailyDiscountsVal,
         body.daily-amounts-hidden #daily-report-section #dailyTotalAdditionsBadge:hover #dailyAdditionsVal,
-        body.daily-amounts-hidden #daily-report-section #dailyVodafoneCashBadge:hover #dailyVodafoneCashVal,
         body.daily-amounts-hidden #daily-report-section .daily-method-badge:hover .daily-method-val {
             filter: blur(8px) !important;
             user-select: none !important;

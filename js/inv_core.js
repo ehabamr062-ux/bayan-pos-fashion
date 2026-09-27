@@ -399,19 +399,19 @@ function renderInventoryTable(isLoadMore = false) {
                     <td class="col-inv-10 num-cell" style="color:var(--main-blue); font-weight:900;">${retail.toFixed(2)}</td>
                     <td class="col-inv-11 num-cell" style="color:#333;">${s.lastPur.toFixed(2)}</td>
                     <td class="col-inv-9 num-cell" style="font-size:1.1rem; font-weight:900; color:${currentStock <= 0 ? 'red' : 'var(--main-green)'}">${displayStock}</td>
-                    <td class="col-inv-image" style="text-align:center; padding: 6px 8px;">
+                    <td class="col-inv-image" style="text-align:center; padding: 8px 10px; width: 220px; min-width: 210px;">
                         ${p.image ? `
                             <div style="display:inline-flex; align-items:center; justify-content:center;">
                                 <img src="${p.image}" alt="${(p.name || '').replace(/"/g, '&quot;')}" 
                                      loading="lazy" decoding="async"
-                                     style="width: 75px; height: 75px; object-fit: cover; border-radius: 10px; border: 1.5px solid #cbd5e1; box-shadow: 0 3px 8px rgba(0,0,0,0.14); cursor: pointer; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; vertical-align: middle;" 
-                                     onmouseover="this.style.transform='scale(1.12)'; this.style.borderColor='#7c3aed'; this.style.boxShadow='0 6px 15px rgba(124,58,237,0.25)';" 
-                                     onmouseout="this.style.transform='scale(1)'; this.style.borderColor='#cbd5e1'; this.style.boxShadow='0 3px 8px rgba(0,0,0,0.14)';"
+                                     style="width: 180px; height: 180px; object-fit: cover; border-radius: 16px; border: 3px solid #cbd5e1; box-shadow: 0 5px 18px rgba(0,0,0,0.2); cursor: pointer; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; vertical-align: middle;" 
+                                     onmouseover="this.style.transform='scale(1.08)'; this.style.borderColor='#7c3aed'; this.style.boxShadow='0 8px 26px rgba(124,58,237,0.38)';" 
+                                     onmouseout="this.style.transform='scale(1)'; this.style.borderColor='#cbd5e1'; this.style.boxShadow='0 5px 18px rgba(0,0,0,0.2)';"
                                      onclick="event.stopPropagation(); window.openProductImagePreview(${p.id}, event)"
                                      title="🔍 اضغط لتكبير ومعاينة صورة الموديل">
                             </div>
                         ` : `
-                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 70px; height: 70px; border-radius: 10px; background: #f8fafc; border: 1.5px dashed #cbd5e1; color: #94a3b8; font-size: 2rem; user-select: none;" title="لا توجد صورة لهذا الموديل">
+                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 175px; height: 175px; border-radius: 16px; background: #f8fafc; border: 2.5px dashed #cbd5e1; color: #94a3b8; font-size: 4.5rem; user-select: none;" title="لا توجد صورة لهذا الموديل">
                                 👔
                             </span>
                         `}

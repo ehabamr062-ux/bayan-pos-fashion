@@ -1,7 +1,7 @@
 /* ============================================================
  *  مركز طباعة الباركود المخصص لقطاع الملابس والأحذية والأصناف العامة
  *  Bayan POS - Barcode & Fashion Label Printing Center
- *  Version: 2.2.0
+ *  Version: 3.2.3
  * ============================================================ */
 
 /* الحاوية الأساسية للقسم: ملاء الشاشة التلقائي الكامل والتمدد الذكي */
@@ -786,7 +786,7 @@
 }
 
 .bp-stk-shop {
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 900;
     color: #000000;
     line-height: 1.1;
@@ -797,10 +797,10 @@
 }
 
 .bp-stk-item {
-    font-size: 8.5px;
+    font-size: 13.5px;
     font-weight: 900;
     color: #000000;
-    line-height: 1.15;
+    line-height: 1.12;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -810,23 +810,22 @@
 .bp-stk-barcode-svg {
     display: block;
     margin: 1px auto;
-    max-width: 100%;
+    max-width: 98%;
 }
 
 .bp-stk-bottom-row {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
     width: 100%;
     padding: 0 4px;
     font-weight: 900;
-    font-size: 8px;
     color: #000000;
     box-sizing: border-box;
 }
 
 .bp-stk-variant {
-    font-size: 8px;
+    font-size: 11.5px;
     font-weight: 900;
     white-space: nowrap;
     overflow: hidden;
@@ -843,15 +842,16 @@
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-    vertical-align: bottom;
+    vertical-align: baseline;
 }
 
 .bp-stk-price {
-    font-size: 9px;
+    font-size: 14.5px;
     font-weight: 950;
     white-space: nowrap;
     flex-shrink: 0;
     direction: ltr;
+    letter-spacing: 0.3px;
 }
 
 /* نافذة اختيار مقاسات وألوان الصنف المنبثقة (Modal) */
